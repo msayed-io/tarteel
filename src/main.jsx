@@ -70,25 +70,41 @@ function App() {
   useEffect(() => { localStorage.setItem('tarteel.favorites', JSON.stringify([...favorites])); }, [favorites]);
   useEffect(() => { localStorage.setItem('tarteel.volume', String(volume)); }, [volume]);
 
-  const ensureAudioGraph = () => {
+  const ensureAudioGraph = async () => {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) return;
-    if (!audioContext.current) {
-      const context = new AudioContextClass();
-      const source = context.createMediaElementSource(audio.current);
-      const gain = context.createGain();
-      const limiter = context.createDynamicsCompressor();
-      limiter.threshold.value = -1;
-      limiter.knee.value = 0;
-      limiter.ratio.value = 20;
-      limiter.attack.value = 0.003;
-      limiter.release.value = 0.25;
-      source.connect(gain).connect(limiter).connect(context.destination);
-      audioContext.current = context;
-      gainNode.current = gain;
+    audio.current.muted = false;
+    audio.current.volume = 1;
+    if (!AudioContextClass) return false;
+    try {
+      if (!audioContext.current) {
+        const context = new AudioContextClass();
+        await context.resume();
+        if (context.state !== 'running') throw new Error(`AudioContext state: ${context.state}`);
+        const source = context.createMediaElementSource(audio.current);
+        const gain = context.createGain();
+        const limiter = context.createDynamicsCompressor();
+        limiter.threshold.value = -1;
+        limiter.knee.value = 0;
+        limiter.ratio.value = 20;
+        limiter.attack.value = 0.003;
+        limiter.release.value = 0.25;
+        source.connect(gain).connect(limiter).connect(context.destination);
+        audioContext.current = context;
+        gainNode.current = gain;
+      } else if (audioContext.current.state === 'suspended') {
+        await audioContext.current.resume();
+      }
+      gainNode.current.gain.value = volume / 100;
+      return audioContext.current.state === 'running';
+    } catch (cause) {
+      console.error('Tarteel Web Audio unavailable; using direct media output', { message: String(cause) });
+      if (audioContext.current) await audioContext.current.close().catch(() => {});
+      audioContext.current = null;
+      gainNode.current = null;
+      audio.current.muted = false;
+      audio.current.volume = 1;
+      return false;
     }
-    gainNode.current.gain.value = volume / 100;
-    if (audioContext.current.state === 'suspended') audioContext.current.resume();
   };
 
   useEffect(() => {
@@ -174,7 +190,7 @@ function App() {
     try {
       setError('');
       const a = audio.current;
-      ensureAudioGraph();
+      await ensureAudioGraph();
       a.pause();
       a.src = convertFileSrc(track.path);
       a.volume = 1;
@@ -204,7 +220,7 @@ function App() {
   const toggle = async () => {
     if (current === null) { if (tracks.length) await load(0, true); return; }
     try {
-      ensureAudioGraph();
+      await ensureAudioGraph();
       if (audio.current.paused) await audio.current.play(); else audio.current.pause();
     } catch (cause) {
       console.error('Tarteel audio toggle failed', { message: String(cause) });
