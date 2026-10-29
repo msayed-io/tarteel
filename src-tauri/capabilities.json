@@ -1,0 +1,1 @@
+{"$schema":"../gen/schemas/desktop-schema.json","identifier":"default","description":"صلاحيات تَرتيل المحلية المحدودة","windows":["main"],"permissions":["core:default","dialog:default","fs:default"]}

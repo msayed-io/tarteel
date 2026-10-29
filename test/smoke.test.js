@@ -1,0 +1,2 @@
+import { describe,it,expect } from 'vitest';
+describe('Tarteel production surface',()=>{it('contains no bundled sample recitations',async()=>{const html=await (await import('node:fs/promises')).readFile('src/main.jsx','utf8');expect(html).not.toContain('عبدالله القرافي');expect(html).not.toContain('سورة الروم');});it('keeps Arabic UI direction',async()=>{const html=await (await import('node:fs/promises')).readFile('index.html','utf8');expect(html).toContain('lang="ar" dir="rtl"');});});
