@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import './styles.css';
 
@@ -50,12 +50,10 @@ function App() {
   const [playing, setPlaying] = useState(false);
   const [pos, setPos] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(() => Number(localStorage.getItem('tarteel.volume') || 70));
+  const [volume, setVolume] = useState(() => Math.min(100, Math.max(0, Number(localStorage.getItem('tarteel.volume') || 70))));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const audio = useRef(null);
-  const audioContext = useRef(null);
-  const gainNode = useRef(null);
   const nextRef = useRef(() => {});
   const tracksRef = useRef(tracks);
   const visibleRef = useRef([]);
@@ -69,43 +67,6 @@ function App() {
   useEffect(() => { localStorage.setItem('tarteel.library', JSON.stringify(tracks)); }, [tracks]);
   useEffect(() => { localStorage.setItem('tarteel.favorites', JSON.stringify([...favorites])); }, [favorites]);
   useEffect(() => { localStorage.setItem('tarteel.volume', String(volume)); }, [volume]);
-
-  const ensureAudioGraph = async () => {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    audio.current.muted = false;
-    audio.current.volume = 1;
-    if (!AudioContextClass) return false;
-    try {
-      if (!audioContext.current) {
-        const context = new AudioContextClass();
-        await context.resume();
-        if (context.state !== 'running') throw new Error(`AudioContext state: ${context.state}`);
-        const source = context.createMediaElementSource(audio.current);
-        const gain = context.createGain();
-        const limiter = context.createDynamicsCompressor();
-        limiter.threshold.value = -1;
-        limiter.knee.value = 0;
-        limiter.ratio.value = 20;
-        limiter.attack.value = 0.003;
-        limiter.release.value = 0.25;
-        source.connect(gain).connect(limiter).connect(context.destination);
-        audioContext.current = context;
-        gainNode.current = gain;
-      } else if (audioContext.current.state === 'suspended') {
-        await audioContext.current.resume();
-      }
-      gainNode.current.gain.value = volume / 100;
-      return audioContext.current.state === 'running';
-    } catch (cause) {
-      console.error('Tarteel Web Audio unavailable; using direct media output', { message: String(cause) });
-      if (audioContext.current) await audioContext.current.close().catch(() => {});
-      audioContext.current = null;
-      gainNode.current = null;
-      audio.current.muted = false;
-      audio.current.volume = 1;
-      return false;
-    }
-  };
 
   useEffect(() => {
     const a = audio.current;
@@ -127,7 +88,8 @@ function App() {
     a.addEventListener('pause', onPause);
     a.addEventListener('ended', onEnded);
     a.addEventListener('error', onError);
-    a.volume = 1;
+    a.muted = false;
+    a.volume = volume / 100;
     return () => {
       a.pause();
       a.removeEventListener('timeupdate', onTime);
@@ -142,7 +104,7 @@ function App() {
 
   useEffect(() => {
     const savedFolder = localStorage.getItem('tarteel.folder');
-    if (savedFolder) invoke('allow_audio_directory', { path: savedFolder }).catch(cause => {
+    if (savedFolder) invoke('set_audio_root', { path: savedFolder }).catch(cause => {
       console.error('Tarteel saved audio scope failed', { message: String(cause) });
       setError('تعذّر إعادة فتح مجلد الصوت المحفوظ. اختر المجلد مرة أخرى.');
     });
@@ -170,7 +132,7 @@ function App() {
     if (!picked) return;
     try {
       setBusy(true);
-      await invoke('allow_audio_directory', { path: picked });
+      await invoke('set_audio_root', { path: picked });
       const found = await invoke('scan_directory', { path: picked });
       setTracks(found);
       localStorage.setItem('tarteel.folder', picked);
@@ -190,10 +152,9 @@ function App() {
     try {
       setError('');
       const a = audio.current;
-      await ensureAudioGraph();
       a.pause();
-      a.src = convertFileSrc(track.path);
-      a.volume = 1;
+      a.src = await invoke('audio_url', { path: track.path });
+      a.volume = volume / 100;
       a.load();
       setCurrent(index); setPos(0); setDuration(0);
       if (autoplay) {
@@ -220,7 +181,6 @@ function App() {
   const toggle = async () => {
     if (current === null) { if (tracks.length) await load(0, true); return; }
     try {
-      await ensureAudioGraph();
       if (audio.current.paused) await audio.current.play(); else audio.current.pause();
     } catch (cause) {
       console.error('Tarteel audio toggle failed', { message: String(cause) });
@@ -250,7 +210,7 @@ function App() {
         return <div className={`row${on ? ' on' : ''}`} role="listitem" key={track.path}><button className="hit" onClick={() => load(index, true)} aria-current={on ? 'true' : undefined}><span className="cover">{track.cover ? <img src={track.cover} alt=""/> : on && playing ? <span className="eq"><i/><i/><i/></span> : track.file_name.slice(0, 1)}</span><span className="meta"><b title={track.file_name}>{track.file_name}</b><span>{track.artist || 'ملف صوتي محلي'}</span></span><span className="dur">{track.duration ? fmt(track.duration) : '—'}</span></button><button className="fav" aria-pressed={favorites.has(index)} aria-label={`المفضلة: ${track.file_name}`} onClick={() => setFavorites(old => { const next = new Set(old); next.has(index) ? next.delete(index) : next.add(index); return next; })}><Icon name="heart" filled={favorites.has(index)}/></button></div>;
       })}</div> : <p className="empty">{query.trim() ? 'لا توجد نتائج' : 'لم تُضف أي تلاوة إلى المفضلة بعد'}</p>}
     </main>
-    <footer className="player glass big"><div className="pr"><div className="now">{active ? <div className="cover">{active.cover ? <img src={active.cover} alt=""/> : active.file_name.slice(0, 1)}</div> : <div className="cover">ت</div>}<div className="meta"><b title={active?.file_name || ''}>{active?.file_name || ''}</b><span>{active?.artist || ''}</span></div></div><div className="ctl"><button className="tbtn" onClick={() => step(-1)} aria-label="السابق"><Transport type="prev"/></button><button className="tbtn play" onClick={toggle} aria-label={playing ? 'إيقاف مؤقت' : 'تشغيل'}>{playing ? <Transport type="pause"/> : <Transport type="play"/>}</button><button className="tbtn" onClick={() => step(1)} aria-label="التالي"><Transport type="next"/></button></div><div className="vol"><input type="range" min="0" max="200" value={volume} onChange={event => { const value = Number(event.target.value); setVolume(value); if (gainNode.current) gainNode.current.gain.value = value / 100; }} style={{ '--p': `${Math.min(volume / 2, 100)}%` }} aria-label="مستوى الصوت"/><Icon name="volume"/></div></div><div className="seek"><span>{fmt(pos)}</span><input type="range" min="0" max={duration || 0} step="any" value={Math.min(pos, duration || 0)} onChange={seek} style={{ '--p': `${duration ? pos / duration * 100 : 0}%` }} aria-label="التقدّم"/><span>{fmt(duration)}</span></div></footer>
+    <footer className="player glass big"><div className="pr"><div className="now">{active ? <div className="cover">{active.cover ? <img src={active.cover} alt=""/> : active.file_name.slice(0, 1)}</div> : <div className="cover">ت</div>}<div className="meta"><b title={active?.file_name || ''}>{active?.file_name || ''}</b><span>{active?.artist || ''}</span></div></div><div className="ctl"><button className="tbtn" onClick={() => step(-1)} aria-label="السابق"><Transport type="prev"/></button><button className="tbtn play" onClick={toggle} aria-label={playing ? 'إيقاف مؤقت' : 'تشغيل'}>{playing ? <Transport type="pause"/> : <Transport type="play"/>}</button><button className="tbtn" onClick={() => step(1)} aria-label="التالي"><Transport type="next"/></button></div><div className="vol"><input type="range" min="0" max="100" value={volume} onChange={event => { const value = Number(event.target.value); setVolume(value); audio.current.volume = value / 100; }} style={{ '--p': `${volume}%` }} aria-label="مستوى الصوت"/><Icon name="volume"/></div></div><div className="seek"><span>{fmt(pos)}</span><input type="range" min="0" max={duration || 0} step="any" value={Math.min(pos, duration || 0)} onChange={seek} style={{ '--p': `${duration ? pos / duration * 100 : 0}%` }} aria-label="التقدّم"/><span>{fmt(duration)}</span></div></footer>
   </>;
 }
 
