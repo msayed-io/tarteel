@@ -3,12 +3,11 @@ use std::path::{Path,PathBuf};
 use walkdir::WalkDir;
 use lofty::prelude::*;
 use lofty::probe::Probe;
-use base64::Engine;
 
 #[derive(Serialize,Clone)]
 pub struct Track { pub path:String, pub file_name:String, pub title:String, pub artist:String, pub duration:Option<u64>, pub cover:Option<String> }
 
-fn supported(p:&Path)->bool { matches!(p.extension().and_then(|x|x.to_str()).map(|x|x.to_ascii_lowercase()).as_deref(),Some("mp3"|"m4a"|"mp4"|"aac"|"flac"|"ogg"|"oga"|"wav"|"webm")) }
+fn supported(p:&Path)->bool { matches!(p.extension().and_then(|x|x.to_str()).map(|x|x.to_ascii_lowercase()).as_deref(),Some("mp3"|"m4a"|"mp4"|"flac"|"ogg"|"oga"|"wav"|"webm")) }
 
 #[tauri::command]
 fn scan_directory(path:String)->Result<Vec<Track>,String>{
@@ -29,7 +28,12 @@ fn scan_directory(path:String)->Result<Vec<Track>,String>{
 
 #[tauri::command]
 fn read_audio(path:String)->Result<Vec<u8>,String>{
- std::fs::read(path).map_err(|e|format!("تعذّرت قراءة الملف: {e}"))
+ let source=PathBuf::from(&path);
+ if !supported(&source){return Err("صيغة الصوت غير مدعومة".into())}
+ let bytes=std::fs::read(&source).map_err(|e|format!("تعذّرت قراءة الملف: {e}"))?;
+ if bytes.is_empty(){return Err("الملف الصوتي فارغ".into())}
+ eprintln!("Tarteel audio read: extension={:?}, bytes={}",source.extension().and_then(|x|x.to_str()),bytes.len());
+ Ok(bytes)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
