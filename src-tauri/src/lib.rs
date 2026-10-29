@@ -3,6 +3,7 @@ use std::path::{Path,PathBuf};
 use walkdir::WalkDir;
 use lofty::prelude::*;
 use lofty::probe::Probe;
+use tauri::Manager;
 
 #[derive(Serialize,Clone)]
 pub struct Track { pub path:String, pub file_name:String, pub title:String, pub artist:String, pub duration:Option<u64>, pub cover:Option<String> }
@@ -27,14 +28,11 @@ fn scan_directory(path:String)->Result<Vec<Track>,String>{
 }
 
 #[tauri::command]
-fn read_audio(path:String)->Result<Vec<u8>,String>{
- let source=PathBuf::from(&path);
- if !supported(&source){return Err("صيغة الصوت غير مدعومة".into())}
- let bytes=std::fs::read(&source).map_err(|e|format!("تعذّرت قراءة الملف: {e}"))?;
- if bytes.is_empty(){return Err("الملف الصوتي فارغ".into())}
- eprintln!("Tarteel audio read: extension={:?}, bytes={}",source.extension().and_then(|x|x.to_str()),bytes.len());
- Ok(bytes)
+fn allow_audio_directory(app:tauri::AppHandle,path:String)->Result<(),String>{
+ let root=PathBuf::from(&path);
+ if !root.is_dir(){return Err("مجلد الصوت غير موجود أو غير قابل للقراءة".into())}
+ app.asset_protocol_scope().allow_directory(&root,true).map_err(|e|format!("تعذّر السماح بمجلد الصوت: {e}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run(){tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![scan_directory,read_audio]).run(tauri::generate_context!()).expect("error while running Tauri application");}
+pub fn run(){tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![scan_directory,allow_audio_directory]).run(tauri::generate_context!()).expect("error while running Tauri application");}
