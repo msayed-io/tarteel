@@ -1,6 +1,6 @@
 [package]
 name = "tarteel"
-version = "0.1.6"
+version = "0.1.7"
 description = "تَرتيل - مشغل التلاوات المحلي"
 authors = ["Tarteel"]
 edition = "2021"

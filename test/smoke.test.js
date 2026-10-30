@@ -13,30 +13,35 @@ describe('Tarteel production surface', () => {
     expect(html).toContain('lang="ar" dir="rtl"');
   });
 
-  it('shrinks only the expanded island to 80% without changing Compact', async () => {
+  it('shrinks only Full to 80% and preserves the original compact geometry', async () => {
     const html = await readFile('island.html', 'utf8');
     const target = html.match(/TARGET=\{idle:\[(\d+),(\d+),(\d+)\],compact:\[(\d+),(\d+),(\d+)\],full:\[(\d+),(\d+),(\d+)\]\}/);
     expect(target).not.toBeNull();
     const [, , , , compactWidth, compactHeight, , fullWidth, fullHeight, fullRadius] = target;
     expect([Number(compactWidth), Number(compactHeight)]).toEqual([144, 34]);
-    expect([Number(fullWidth), Number(fullHeight), Number(fullRadius)]).toEqual([
-      Math.round(480 * 0.8),
-      Math.round(262 * 0.8),
-      Math.round(46 * 0.8)
-    ]);
-    expect(html).toContain('[data-state=compact] .compact{transform:scale(1)}[data-state=full] .full{transform:scale(.8)}');
+    expect([Number(fullWidth), Number(fullHeight), Number(fullRadius)]).toEqual([384, 210, 37]);
+    expect(html).toContain('[data-state=full] .full{transform:scale(.8)}');
   });
 
-  it('uses a truly transparent, shadowless island window owned by Main', async () => {
+  it('keeps a fixed transparent island host so its expansion cannot be clipped', async () => {
+    const html = await readFile('island.html', 'utf8');
     const rust = await readFile('src-tauri/src/lib.rs', 'utf8');
+    expect(html).not.toContain('setSize(');
+    expect(html).not.toContain('setPosition(');
+    expect(rust).toContain('.inner_size(480.0, 262.0)');
+    expect(rust).toContain('.transparent(true)');
     expect(rust).toContain('Color(0, 0, 0, 0)');
     expect(rust).toContain('.shadow(false)');
-    expect(rust).toContain('.parent(&main_window)?');
-    expect(rust).toContain('area.width as i64 - window_size.width as i64');
+    expect(rust).not.toContain('.parent(');
+    expect(rust).toContain('window_size.width as i64');
+  });
 
-    const capability = JSON.parse(await readFile('src-tauri/capabilities/island.json', 'utf8'));
-    expect(capability.windows).toEqual(['island']);
-    expect(capability.permissions).toContain('core:window:allow-set-size');
-    expect(capability.permissions).toContain('core:window:allow-set-position');
+  it('keeps Island visible on minimize but destroys it when Main is closed', async () => {
+    const rust = await readFile('src-tauri/src/lib.rs', 'utf8');
+    expect(rust).toContain('window.label() == "main"');
+    expect(rust).toContain('tauri::WindowEvent::CloseRequested { .. }');
+    expect(rust).toContain('island.destroy()');
+    expect(rust).not.toContain('WindowEvent::Focused(false)');
+    expect(rust).not.toContain('WindowEvent::Resized');
   });
 });

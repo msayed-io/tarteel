@@ -147,11 +147,9 @@ fn scan_directory(path: String) -> Result<Vec<Track>, String> {
 pub fn run() {
   let server = start_audio_server().expect("error while starting local audio server");
   tauri::Builder::default().manage(server).plugin(tauri_plugin_dialog::init()).setup(|app| {
-    let main_window = app.get_webview_window("main").ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "main window not found"))?;
     let island = WebviewWindowBuilder::new(app, "island", WebviewUrl::App("island.html".into()))
-      .parent(&main_window)?
       .title("تَرتيل")
-      .inner_size(64.0, 34.0)
+      .inner_size(480.0, 262.0)
       .decorations(false)
       .transparent(true)
       .background_color(Color(0, 0, 0, 0))
@@ -164,8 +162,8 @@ pub fn run() {
       .visible(true)
       .build()?;
     if let Ok(Some(monitor)) = island.primary_monitor() {
-      let origin = monitor.position();
       let area = monitor.size();
+      let origin = monitor.position();
       let window_size = island.inner_size()?;
       let scale = island.scale_factor()?;
       let x = origin.x + ((area.width as i64 - window_size.width as i64) / 2) as i32;
@@ -173,5 +171,11 @@ pub fn run() {
       island.set_position(PhysicalPosition::new(x, y))?;
     }
     Ok(())
+  }).on_window_event(|window, event| {
+    if window.label() == "main" && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+      if let Some(island) = window.app_handle().get_webview_window("island") {
+        let _ = island.destroy();
+      }
+    }
   }).invoke_handler(tauri::generate_handler![scan_directory, set_audio_root, audio_url]).run(tauri::generate_context!()).expect("error while running Tauri application");
 }
