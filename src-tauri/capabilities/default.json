@@ -3,8 +3,7 @@
   "identifier": "default",
   "description": "صلاحيات تَرتيل المحلية المحدودة",
   "windows": [
-    "main",
-    "island"
+    "main"
   ],
   "permissions": [
     "core:default",
