@@ -9,7 +9,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use lofty::prelude::*;
 use lofty::probe::Probe;
-use tauri::{Manager, State};
+use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 use walkdir::WalkDir;
 
 #[derive(Serialize, Clone)]
@@ -145,5 +145,24 @@ fn scan_directory(path: String) -> Result<Vec<Track>, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let server = start_audio_server().expect("error while starting local audio server");
-  tauri::Builder::default().manage(server).plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![scan_directory, set_audio_root, audio_url]).run(tauri::generate_context!()).expect("error while running Tauri application");
+  tauri::Builder::default().manage(server).plugin(tauri_plugin_dialog::init()).setup(|app| {
+    let island = WebviewWindowBuilder::new(app, "island", WebviewUrl::App("island.html".into()))
+      .title("تَرتيل")
+      .inner_size(480.0, 262.0)
+      .decorations(false)
+      .transparent(true)
+      .always_on_top(true)
+      .focused(false)
+      .skip_taskbar(true)
+      .resizable(false)
+      .visible(true)
+      .build()?;
+    if let Ok(Some(monitor)) = island.primary_monitor() {
+      let area = monitor.size();
+      let origin = monitor.position();
+      let x = origin.x + ((area.width as i32 - 480) / 2);
+      island.set_position(tauri::PhysicalPosition::new(x, origin.y + 10))?;
+    }
+    Ok(())
+  }).invoke_handler(tauri::generate_handler![scan_directory, set_audio_root, audio_url]).run(tauri::generate_context!()).expect("error while running Tauri application");
 }

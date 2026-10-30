@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { invoke } from '@tauri-apps/api/core';
+import { emit, listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import './styles.css';
 
@@ -57,6 +58,8 @@ function App() {
   const nextRef = useRef(() => {});
   const tracksRef = useRef(tracks);
   const visibleRef = useRef([]);
+  const controlsRef = useRef({});
+  const statePublisherRef = useRef(() => Promise.resolve());
   tracksRef.current = tracks;
 
   if (!audio.current) {
@@ -190,11 +193,42 @@ function App() {
 
   const seek = event => {
     const value = Number(event.target.value);
+    seekTo(value);
+  };
+  const seekTo = value => {
     if (!Number.isFinite(value) || !Number.isFinite(audio.current.duration)) return;
     audio.current.currentTime = Math.max(0, Math.min(value, audio.current.duration));
     setPos(audio.current.currentTime);
   };
   const active = current === null ? null : tracks[current];
+  controlsRef.current = { toggle, step, seekTo };
+
+  const publishPlayerState = () => emit('player-state', {
+    state: active ? 'compact' : 'idle', playing, fileName: active?.file_name || '', artist: active?.artist || '',
+    cover: active?.cover || null, duration: Number.isFinite(duration) ? duration : 0, position: Number.isFinite(pos) ? pos : 0
+  }).catch(cause => console.error('Tarteel island state event failed', { message: String(cause) }));
+  statePublisherRef.current = publishPlayerState;
+
+  useEffect(() => {
+    publishPlayerState();
+    return undefined;
+  }, [active, playing, duration, pos]);
+
+  useEffect(() => {
+    let unlistenControl;
+    let unlistenReady;
+    Promise.all([
+      listen('island-control', event => {
+        const payload = event.payload || {};
+        if (payload.action === 'toggle') controlsRef.current.toggle();
+        if (payload.action === 'previous') controlsRef.current.step(-1);
+        if (payload.action === 'next') controlsRef.current.step(1);
+        if (payload.action === 'seek') controlsRef.current.seekTo(Number(payload.position));
+      }),
+      listen('island-ready', () => statePublisherRef.current())
+    ]).then(([control, ready]) => { unlistenControl = control; unlistenReady = ready; });
+    return () => { unlistenControl?.(); unlistenReady?.(); };
+  }, []);
 
   return <>
     <header className="bar">
