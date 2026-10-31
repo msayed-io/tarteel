@@ -357,33 +357,6 @@ fn apply_island_bounds_native(island: &tauri::WebviewWindow, left: i32, top: i32
   island.set_size(tauri::Size::Logical(tauri::LogicalSize::new(width as f64 / scale, height as f64 / scale))).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
-  let widths = [64.0, 144.0, 384.0, 440.0, 444.0, 480.0];
-  let heights = [34.0, 92.0, 188.0, 210.0, 262.0, 424.0];
-  let tools_height = width == 480.0 && (220.0..=430.0).contains(&height) && height.fract() == 0.0;
-  if !widths.contains(&width) || (!heights.contains(&height) && !tools_height) { return Err("رفضت أبعادًا غير معتمدة لنافذة الجزيرة".into()); }
-  let island = app.get_webview_window("island").ok_or_else(|| "نافذة الجزيرة غير متاحة".to_string())?;
-  let monitor = island.current_monitor().map_err(|e| format!("تعذر تحديد شاشة الجزيرة: {e}"))?
-    .or(island.primary_monitor().map_err(|e| format!("تعذر تحديد الشاشة الرئيسية: {e}"))?)
-    .ok_or_else(|| "لم يُرجع Windows شاشة صالحة لتمركز الجزيرة".to_string())?;
-  let area = monitor.size();
-  let origin = monitor.position();
-  let scale = island.scale_factor().map_err(|e| format!("تعذر قراءة مقياس الشاشة: {e}"))?;
-  // Anchor the top-left corner at an integer physical site derived from the FINAL size.
-  // Measuring the window right after a resize request returns the still in-flight value,
-  // which centred the island one frame off and produced the visible jolt on every resize.
-  let target_width = (width * scale).round() as u32;
-  let target_height = (height * scale).round() as u32;
-  let (left, top) = centered_island_origin((area.width, area.height), (origin.x, origin.y), (target_width, target_height), scale);
-  let target = island.clone();
-  island.run_on_main_thread(move || {
-    if let Err(e) = apply_island_bounds(&target, left, top, target_width, target_height) {
-      eprintln!("Tarteel island bounds could not be applied: {e}");
-    }
-  }).map_err(|e| format!("تعذر جدولة تغيير أبعاد الجزيرة على خيط الواجهة: {e}"))?;
-  Ok(())
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

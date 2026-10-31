@@ -75,25 +75,26 @@ pub struct AlarmTick {
 /// - فات أكثر من السماح (جهاز كان مغلقًا/نائمًا): يُسجَّل كمُطلق **بلا صوت**،
 ///   فلا يزعج المستخدم ولا يعود للظهور بعد إعادة التشغيل.
 pub fn tick(state: &mut AlarmState, now_ms: i64) -> AlarmTick {
-    let mut fired: HashSet<&str> = state.fired_ids.iter().map(String::as_str).collect();
+    /* تُجمع النتائج أولًا ثم تُحدَّث القائمة، لأن الاستعارة المتزامنة للقراءة
+       والكتابة على نفس الحقل ممنوعة في Rust. */
+    let fired: HashSet<String> = state.fired_ids.iter().cloned().collect();
     let mut due = Vec::new();
     let mut skipped = Vec::new();
-    let mut changed = false;
+    let mut newly_fired: Vec<String> = Vec::new();
 
     for event in &state.events {
-        if event.at > now_ms || fired.contains(event.id.as_str()) {
+        if event.at > now_ms || fired.contains(&event.id) || newly_fired.contains(&event.id) {
             continue;
         }
-        let lateness = now_ms.saturating_sub(event.at);
-        if lateness <= LATE_ALARM_GRACE_MS {
+        if now_ms.saturating_sub(event.at) <= LATE_ALARM_GRACE_MS {
             due.push(event.clone());
         } else {
             skipped.push(event.clone());
         }
-        state.fired_ids.push(event.id.clone());
-        fired.insert(event.id.as_str());
-        changed = true;
+        newly_fired.push(event.id.clone());
     }
+    let mut changed = !newly_fired.is_empty();
+    state.fired_ids.extend(newly_fired);
 
     /* تقليم القائمة من الأقدم مع الحفاظ على السقف. */
     if state.fired_ids.len() > MAX_FIRED_IDS {
