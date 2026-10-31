@@ -27,8 +27,9 @@ const count = n => n === 0 ? 'لا توجد تلاوات' : n === 1 ? 'تلاو�
 /** اسم المكان العربي: المدينة، المحافظة، الدولة — بلا أي منطقة زمنية إنجليزية. */
 const placeLabel = location => {
   if (!location) return '';
-  /* الهرم الجغرافي الكامل إن وُجد: عزبة أبو عطوة، مركز الإسماعيلية، الإسماعيلية */
-  if (location.label) return String(location.label).trim();
+  /* عقد PrayerLocation المرجعي: cityNameAr ثم cityName ثم label */
+  const detailed = String(location.cityNameAr || location.cityName || location.label || '').trim();
+  if (detailed) return detailed;
   const parts = [location.city, location.region, location.country]
     .map(part => String(part || '').trim())
     .filter((part, index, all) => part && all.indexOf(part) === index);

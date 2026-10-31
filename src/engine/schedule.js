@@ -16,8 +16,11 @@
  *      المنطقة الزمنية، أو مضيّ 24 ساعة على آخر بناء.
  */
 
-import { buildTimeline, computeDay, ARABIC_NAMES, nextPrayer, currentPrayer } from './astro.js';
+import { ARABIC_NAMES, nextPrayer, currentPrayer } from './astro.js';
 import { haversineKm } from './location.js';
+/* المحرك الفلكي المنقول من Dar-Al-Hikayat: مكتبة adhan الرسمية، عبر سلسلة
+   UTC متصلة. يحل محل الحساب اليدوي السابق بالكامل. */
+import { getDayPrayers } from '../lib/prayer-times.ts';
 
 /** عدد الأيام المحسوبة مسبقًا. 3 أيام تكفي للمسار المتصل حول منتصف الليل. */
 export const TIMELINE_DAYS = 3;
@@ -41,66 +44,122 @@ export function buildSchedule(location, { now = Date.now(), adjust, methodId, sh
   if (!location || !Number.isFinite(Number(location.latitude)) || !Number.isFinite(Number(location.longitude))) {
     throw new Error('لا يمكن بناء جدول دون موقع مؤكد.');
   }
-  if (!location.timeZone) throw new Error('لا يمكن بناء جدول دون منطقة زمنية IANA.');
+  const timeZone = location.timeZone || location.timezoneId;
+  if (!timeZone) throw new Error('لا يمكن بناء جدول دون منطقة زمنية IANA.');
 
-  const common = {
-    latitude: Number(location.latitude),
-    longitude: Number(location.longitude),
-    timeZone: location.timeZone,
-    countryCode: location.countryCode || '',
-    adjust,
-    methodId,
-    shadowFactor,
-  };
+  /* معرّف الطريقة بصيغة المرجع (egyptian | umm_al_qura | mwl | isna | karachi). */
+  const method = resolveMethodId(methodId, location.countryCode, timeZone);
+  const latitude = Number(location.latitude);
+  const longitude = Number(location.longitude);
 
-  const events = buildTimeline({ ...common, from: now, daysAhead: TIMELINE_DAYS });
-
-  /* الأيام نفسها تبقى متاحة للعرض في النافذة الرئيسية دون إعادة حساب. */
+  /*
+   * سلسلة فلكية متصلة: نبدأ من يوم أمس ونحسب عدة أيام، ثم نصلها زمنيًا.
+   * بهذا لا يوجد أي احتمال للالتباس بين التوقيت الصيفي والشتوي: كل موعد
+   * يُحسب داخل منطقته الزمنية ثم يُحوّل إلى لحظة UTC مطلقة.
+   */
+  const events = [];
   const days = [];
-  const seen = new Set();
-  for (const event of events) {
-    if (seen.has(event.date)) continue;
-    seen.add(event.date);
-    const day = computeDay({ ...common, year: +event.date.slice(0, 4), month: +event.date.slice(5, 7), day: +event.date.slice(8, 10) });
+  for (let offset = -1; offset < TIMELINE_DAYS; offset += 1) {
+    const dayDate = new Date(now + offset * 86400000);
+    const day = getDayPrayers(latitude, longitude, dayDate, method, timeZone);
     days.push(day);
+    for (const prayer of day.prayers) {
+      const at = Math.round(prayer.time.getTime());
+      if (!Number.isFinite(at)) continue;
+      events.push({
+        id: `${day.date}|${prayer.prayerId}`,
+        key: prayer.prayerId,
+        name: arabicName(prayer.prayerId),
+        date: day.date,
+        at,
+        localTime: formatPrayerTime(prayer.time, timeZone),
+        timeZone,
+      });
+    }
   }
+  events.sort((a, b) => a.at - b.at);
 
-  const sample = computeDay({
-    ...common,
-    year: +events[0].date.slice(0, 4),
-    month: +events[0].date.slice(5, 7),
-    day: +events[0].date.slice(8, 10),
-  });
+  /* الإزاحة اليدوية الاختيارية تُطبّق على المواعيد القادمة فقط. */
+  const adjusted = applyAdjust(events, adjust);
+  /* أحداث الآيلاند: ستة صفوف كما هو تصميمها. */
+  const islandEvents = adjusted.filter(event => ISLAND_KEYS.has(event.key));
 
   return {
-    /* الموقع محفوظ مع الجدول لأنه شرط فحص التحديث: بدونه يعيد البناء دائمًا. */
     location: {
-      latitude: common.latitude,
-      longitude: common.longitude,
-      timeZone: common.timeZone,
-      countryCode: common.countryCode,
+      latitude,
+      longitude,
+      timeZone,
+      countryCode: location.countryCode || '',
       resolvedAt: location.resolvedAt || now,
     },
-    events: events.map(event => ({
-      id: event.id,
-      key: event.key,
-      name: ARABIC_NAMES[event.key] || event.key,
-      date: event.date,
-      at: event.at,
-      localTime: event.localTime,
-      timeZone: event.timeZone,
-    })),
+    events: islandEvents,
     days,
-    method: sample.method,
-    methodName: sample.methodName,
+    method,
+    methodName: METHOD_NAMES[method] || method,
     requestedMethod: methodId || 'auto',
-    shadowFactor: sample.shadowFactor,
-    timeZone: location.timeZone,
-    /* توافق صريح مع عقد الآيلاند الذي يقرأ schedule.timezone بحرف صغير.
-       الاثنان يُكتبان حتى لا ينكسر أي طرف عند اعتماد أحدهما. */
-    timezone: location.timeZone,
+    shadowFactor: Number.isFinite(Number(shadowFactor)) ? Number(shadowFactor) : 1,
+    timeZone,
+    /* توافق صريح مع عقد الآيلاند الذي يقرأ schedule.timezone بحرف صغير. */
+    timezone: timeZone,
     builtAt: now,
   };
+}
+
+/* المرجع يضيف «الضحى» كوقت سابع. آيلاند تَرتيل مُصمَّم لستة صفوف بارتفاع
+   ثابت (188px)، فإضافة صف سابع تكسر التصميم. الضحى ليس صلاة مفروضة، ويبقى
+   محسوبًا في days الكاملة. */
+const ISLAND_KEYS = new Set(['fajr', 'sunrise', 'dhuhr', 'asr', 'maghrib', 'isha']);
+
+/** الاسم العربي لكل مفتاح، بما في ذلك ما لا تعرفه astro مثل الضحى. */
+const EXTRA_NAMES = { duha: 'الضحى' };
+const arabicName = key => ARABIC_NAMES[key] || EXTRA_NAMES[key] || key;
+
+/** أسماء الطرق كما في المرجع. */
+export const METHOD_NAMES = {
+  egyptian: 'الهيئة المصرية العامة للمساحة (١٩٫٥/١٧٫٥)',
+  umm_al_qura: 'أم القرى',
+  mwl: 'رابطة العالم الإسلامي',
+  isna: 'الجمعية الإسلامية لأمريكا الشمالية',
+  karachi: 'جامعة العلوم الإسلامية بكراتشي',
+};
+
+/** يترجم اختيار المستخدم أو الدولة إلى معرّف طريقة من معرّفات المرجع. */
+export function resolveMethodId(methodId, countryCode, timeZone) {
+  if (methodId && methodId !== 'auto' && METHOD_NAMES[methodId]) return methodId;
+  const cc = String(countryCode || '').toUpperCase();
+  if (cc === 'EG' || cc === 'SD' || cc === 'SY' || cc === 'JO' || cc === 'LB' || cc === 'PS' || cc === 'YE' || cc === 'LY') return 'egyptian';
+  if (cc === 'SA' || cc === 'AE' || cc === 'KW' || cc === 'QA' || cc === 'BH' || cc === 'OM' || cc === 'YE') return 'umm_al_qura';
+  if (cc === 'PK' || cc === 'IN' || cc === 'BD' || cc === 'AF' || cc === 'TR' || cc === 'LK' || cc === 'NP') return 'karachi';
+  if (cc === 'US' || cc === 'CA') return 'isna';
+  if (cc) return 'mwl';
+  /* بلا رمز دولة: نستنتج من المنطقة الزمنية. */
+  if (timeZone === 'Africa/Cairo') return 'egyptian';
+  if (/^Asia\/(Riyadh|Dubai|Kuwait|Qatar|Bahrain|Muscat|Aden)/.test(timeZone || '')) return 'umm_al_qura';
+  if (/^Asia\/(Karachi|Kolkata|Dhaka|Kabul)/.test(timeZone || '')) return 'karachi';
+  if (/^America\//.test(timeZone || '')) return 'isna';
+  return 'mwl';
+}
+
+/** إزاحة يدوية اختيارية بالدقائق (−10..+10)، على الصلوات فقط دون الشروق. */
+function applyAdjust(events, adjust) {
+  if (!adjust || typeof adjust !== 'object') return events;
+  return events.map(event => {
+    const delta = Number(adjust[event.key]);
+    if (!Number.isFinite(delta) || delta === 0) return event;
+    const clamped = Math.max(-10, Math.min(10, Math.round(delta)));
+    return { ...event, at: event.at + clamped * 60000 };
+  });
+}
+
+/** وقت عربي بصيغة المرجع نفسه. */
+function formatPrayerTime(date, timeZone) {
+  try {
+    return new Intl.DateTimeFormat('ar-EG', {
+      timeZone, hour: 'numeric', minute: '2-digit', hourCycle: 'h12',
+    }).format(date);
+  } catch {
+    return '';
+  }
 }
 
 /**

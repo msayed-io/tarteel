@@ -231,6 +231,11 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
 /** اسم المكان بالعربية: المدينة، المحافظة، الدولة. */
 function placeName(location) {
   if (!location) return '';
+  /* عقد المرجع: الاسم التفصيلي الكامل أولًا. */
+  const detailed = String(location.cityNameAr || location.cityName || '').trim();
+  if (detailed) {
+    return location.countryNameAr ? `${detailed}، ${location.countryNameAr}` : detailed;
+  }
   const parts = [location.city, location.region, location.country]
     .map(part => String(part || '').trim())
     .filter((part, index, all) => part && all.indexOf(part) === index);

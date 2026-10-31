@@ -129,54 +129,74 @@ describe('المنطقة الزمنية IANA — لا فوارق ثابتة', ()
   });
 });
 
-describe('وصف المكان — تحسين عرض لا شرط نجاح', () => {
-  it('يعيد المدينة والدولة ورمزها', async () => {
-    const fetchImpl = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ city: 'الزقازيق', principalSubdivision: 'الشرقية', countryName: 'مصر', countryCode: 'EG' }),
-    }));
-    const place = await describePlace(30.5877, 31.502, fetchImpl);
-    expect(place).toMatchObject({ city: 'الزقازيق', country: 'مصر', countryCode: 'EG' });
+describe('وصف المكان — عبر المحرك المنقول من Dar-Al-Hikayat', () => {
+  /* المنظومة المرجعية تستخدم fetch العالمي (أربعة مزودين بالتوازي)،
+     فنُثبّت fetch أثناء كل اختبار ثم نعيده. */
+  const withFetch = async (impl, run) => {
+    const original = globalThis.fetch;
+    globalThis.fetch = impl;
+    try { return await run(); } finally { globalThis.fetch = original; }
+  };
+
+  const nominatimResponse = body => async () => ({ ok: true, json: async () => body });
+
+  it('Nominatim يعطي الهرم الدقيق: الحي/الشارع ثم المركز ثم المحافظة', async () => {
+    const place = await withFetch(
+      nominatimResponse({ address: { road: 'ميدان المطافي', city: 'الإسماعيلية', state: 'الإسماعيلية', country: 'مصر' } }),
+      () => describePlace(30.5965, 32.2715),
+    );
+    expect(place.label).toBe('ميدان المطافي، الإسماعيلية');
+    expect(place.country).toBe('مصر');
   });
 
-  it('عند فشل كل الشبكات يعود بالمطابق الأوفلاين بالعربية', async () => {
-    /* الطبقة الثالثة: لا نعرض null ولا اسمًا إنجليزيًا — بل أقرب مدينة عربية. */
-    const place = await describePlace(30.5877, 31.502, async () => { throw new Error('offline'); });
+  it('عند فشل كل الشبكات يعود بقاعدة المرجع الأوفلاين بالعربية', async () => {
+    const place = await withFetch(async () => { throw new Error('offline'); },
+      () => describePlace(30.5877, 31.502));
     expect(place).not.toBeNull();
     expect(place.provider).toBe('offline');
-    expect(place.city).toBe('الزقازيق');
-    expect(place.country).toBe('مصر');
-    expect(place.countryCode).toBe('EG');
+    expect(place.label).toMatch(/[\u0600-\u06FF]/);
+    expect(place.label).toContain('الزقازيق');
   });
 
-  it('يتجاهل الأسماء اللاتينية ويعود للعربي', async () => {
-    const place = await describePlace(30.5965, 32.2715, async () => ({
-      ok: true, json: async () => ({ city: 'Ismailia', countryName: 'Egypt', countryCode: 'EG', principalSubdivision: 'Ismailia' }),
-    }));
-    expect(place.city).toBe('الإسماعيلية');
+  it('لا يمرر أي اسم لاتيني إلى الواجهة العربية', async () => {
+    const place = await withFetch(
+      nominatimResponse({ address: { city: 'Ismailia', state: 'Ismailia', country: 'Egypt' } }),
+      () => describePlace(30.5965, 32.2715),
+    );
+    expect(place.label).not.toMatch(/[A-Za-z]/);
     expect(place.provider).toBe('offline');
   });
 
-  it('يقبل النتيجة العربية من أي خدمة من الثلاث', async () => {
-    const place = await describePlace(30.5965, 32.2715, async () => ({
-      ok: true, json: async () => ({ city: 'الإسماعيلية', principalSubdivision: 'الإسماعيلية', countryName: 'مصر', countryCode: 'EG' }),
-    }));
-    expect(place.city).toBe('الإسماعيلية');
-    expect(place.countryCode).toBe('EG');
-    expect(place.provider).not.toBe('offline');
+  it('goes through the reference hierarchy builders without rewriting them', async () => {
+    const place = await withFetch(
+      nominatimResponse({ address: { village: 'عزبة أبو عطوة', county: 'مركز الإسماعيلية', state: 'الإسماعيلية', country: 'مصر' } }),
+      () => describePlace(30.6, 32.28),
+    );
+    expect(place.label).toBe('عزبة أبو عطوة، مركز الإسماعيلية، الإسماعيلية');
   });
 });
 
 describe('الواجهة الموحّدة resolveLocation', () => {
   it('تجمع الإحداثيات والمنطقة الزمنية والدولة في نتيجة واحدة', async () => {
     await withGeo({ getCurrentPosition: ok => ok({ coords: { latitude: 30.5877, longitude: 31.502, accuracy: 45 }, timestamp: Date.now() }) }, async () => {
-      const result = await resolveLocation({
-        fetchImpl: async () => ({ ok: true, json: async () => ({ city: 'الزقازيق', countryName: 'مصر', countryCode: 'EG' }) }),
+      const original = globalThis.fetch;
+      globalThis.fetch = async url => ({
+        ok: true,
+        json: async () => (String(url).includes('nominatim')
+          ? { address: { city: 'الزقازيق', state: 'الشرقية', country: 'مصر' } }
+          : {}),
       });
-      expect(result).toMatchObject({
-        source: 'device', latitude: 30.5877, longitude: 31.502,
-        timeZone: 'Africa/Cairo', countryCode: 'EG', city: 'الزقازيق', precise: true,
-      });
+      try {
+        const result = await resolveLocation();
+        expect(result).toMatchObject({
+          source: 'device', latitude: 30.5877, longitude: 31.502,
+          timeZone: 'Africa/Cairo', precise: true,
+        });
+        /* عقد PrayerLocation المرجعي */
+        expect(result.timezoneId).toBe('Africa/Cairo');
+        expect(result.cityNameAr).toContain('الزقازيق');
+        expect(result.cityName).toBeTruthy();
+      } finally { globalThis.fetch = original; }
     });
   });
 

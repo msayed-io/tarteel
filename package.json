@@ -15,6 +15,7 @@
     "@tauri-apps/plugin-geolocation": "2.5.0",
     "@tauri-apps/plugin-notification": "2.8.0",
     "@vitejs/plugin-react": "^4.4.1",
+    "adhan": "^4.4.6",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "typescript": "^5.9.2",

@@ -17,11 +17,13 @@ describe('بناء الجدول من موقع مؤكد', () => {
     expect(schedule.method).toBe('egyptian');
     expect(schedule.methodName).toContain('المصرية');
     expect(schedule.shadowFactor).toBe(1);
+    expect(schedule.methodName).toBeTruthy();
     expect(schedule.timeZone).toBe('Africa/Cairo');
   });
 
   it('ينتج أحداث صلوات باسم عربي ومعرّف فريد ولحظة مطلقة', () => {
-    expect(schedule.events.length).toBeGreaterThanOrEqual(5 * (TIMELINE_DAYS + 2));
+    /* المرجع يحسب 4 أيام (−1..+2) × 6 صلوات للآيلاند */
+    expect(schedule.events.length).toBe(6 * (TIMELINE_DAYS + 1));
     for (const event of schedule.events) {
       expect(event.name).toMatch(/^(الفجر|الشروق|الظهر|العصر|المغرب|العشاء)$/);
       expect(event.id).toBe(`${event.date}|${event.key}`);
