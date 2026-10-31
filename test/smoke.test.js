@@ -72,6 +72,34 @@ describe('Tarteel production surface', () => {
     expect(settings).toContain('ضبط دقيق');
   });
 
+  it('passes PrayerSettings exactly the props it destructures', async () => {
+    /* عطل حقيقي: المكوّن قُرئ منه { config } بينما الأب كان يمرّر value،
+       فصار config غير معرّف ورمى استثناء أثناء الرسم أفرغ الشجرة كلها
+       => شاشة سوداء بالكامل في الإصدار 0.2.0. الفحص يمنع تكراره. */
+    const main = await read('src/main.jsx');
+    const settings = await read('src/PrayerSettings.jsx');
+    const signature = settings.match(/export default function PrayerSettings\(\{([^}]*)\}\)/)[1];
+    const expected = signature.split(',').map(part => part.trim().split(':')[0].trim()).filter(Boolean);
+    const usage = main.match(/<PrayerSettings([\s\S]*?)\/>/)[1];
+    const passed = [...usage.matchAll(/(\w+)=\{/g)].map(m => m[1]);
+    for (const prop of expected) {
+      expect(passed, `PrayerSettings expects prop "${prop}" but it is not passed`).toContain(prop);
+    }
+    /* وكل ما يُمرَّر يجب أن يكون مقروءًا فعليًا، وإلا كان خطأ صامتًا. */
+    for (const prop of passed) {
+      expect(expected, `main passes "${prop}" which PrayerSettings never reads`).toContain(prop);
+    }
+  });
+
+  it('wraps the app in an error boundary so a crash cannot be a black screen', async () => {
+    const main = await read('src/main.jsx');
+    expect(main).toContain('class ErrorBoundary extends React.Component');
+    expect(main).toContain('getDerivedStateFromError');
+    expect(main).toContain('<ErrorBoundary><App/></ErrorBoundary>');
+    /* لا يجوز إخفاء الخطأ: يجب أن تُعرض رسالته الحقيقية. */
+    expect(main).toContain('error?.stack || error?.message');
+  });
+
   it('every invoke in the interface has a matching Rust command', async () => {
     /* عطل حقيقي حدث: الواجهة كانت تنادي set_prayer_schedule بعد حذفه،
        فيفشل الجدول صامتًا وقت التشغيل. هذا الفحص يمنعه. */

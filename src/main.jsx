@@ -588,6 +588,19 @@ function App() {
     localStorage.setItem('tarteel.adhan.alert', JSON.stringify(record));
   };
 
+  /** تجربة التنبيه: يُطلق حدثًا حقيقيًا عبر Rust ليعمل بنفس المسار الفعلي. */
+  const previewAlarm = async () => {
+    try {
+      await invoke('fire_alarm_now', { key: null });
+    } catch (cause) {
+      /* لا يوجد موعد قادم في الجدول: نعرض بطاقة اختبار مباشرة بدل الفشل الصامت. */
+      const sample = { id: 'preview', key: 'fajr', name: 'الفجر', at: Date.now(), createdAt: Date.now(), wasPlaying: false, pausedByAdhan: false };
+      adhanAlertRef.current = sample;
+      setAdhanAlert(sample);
+      console.warn('Tarteel alarm preview fell back to a local card', cause);
+    }
+  };
+
   const controls = {
     toggle, step, seekTo, seekBy, setSpeed, setSleep,
     resumeAfterAdhan, dismissAdhan: clearAdhanAlert,
@@ -695,8 +708,62 @@ function App() {
       })}</div> : <p className="empty">{query.trim() ? 'لا توجد نتائج' : 'لم تُضف أي تلاوة إلى المفضلة بعد'}</p>}
     </main>
     <footer className="player glass big"><div className="pr"><div className="now">{active ? <div className="cover">{active.cover ? <img src={active.cover} alt=""/> : active.file_name.slice(0, 1)}</div> : <div className="cover">ت</div>}<div className="meta"><b title={active?.file_name || ''}>{active?.title || active?.file_name || ''}</b><span>{active?.artist || ''}</span></div></div><div className="ctl"><button className="tbtn" onClick={() => step(-1)} aria-label="السابق"><Transport type="prev"/></button><button className="tbtn play" onClick={toggle} aria-label={playing ? 'إيقاف مؤقت' : 'تشغيل'}>{playing ? <Transport type="pause"/> : <Transport type="play"/>}</button><button className="tbtn" onClick={() => step(1)} aria-label="التالي"><Transport type="next"/></button></div><div className="vol"><input type="range" min="0" max="100" value={volume} onChange={changeVolume} style={{ '--p': `${volume}%` }} aria-label="مستوى الصوت"/><Icon name="volume"/></div></div><div className="seek"><span>{fmt(pos)}</span><input type="range" min="0" max={duration || 0} step="any" value={Math.min(pos, duration || 0)} onChange={seek} style={{ '--p': `${duration ? pos / duration * 100 : 0}%` }} aria-label="التقدّم"/><span>{fmt(duration)}</span></div></footer>
-    <PrayerSettings open={prayerSettingsOpen} value={prayerConfig} onClose={() => setPrayerSettingsOpen(false)} onSave={savePrayerSettings}/>
+    {prayerSettingsOpen && <PrayerSettings config={prayerConfig} schedule={prayerSchedule} onClose={() => setPrayerSettingsOpen(false)} onSave={savePrayerSettings} onPreviewAlarm={previewAlarm}/>}
   </>;
 }
 
-createRoot(document.getElementById('root')).render(<App/>);
+/**
+ * حاجز أخطاء أعلى الشجرة.
+ *
+ * لماذا وُجد: خطأ واحد في أي مكوّن أثناء الرسم يُفرّغ شجرة React بالكامل،
+ * فيظهر التطبيق كشاشة سوداء بلا أي تفسير للمستخدم أو للمطوّر — وهو ما حدث
+ * فعلًا عندما استقبل PrayerSettings خاصية غير معرّفة.
+ *
+ * هذا الحاجز لا يصلح الخطأ؛ وظيفته أن يجعل الفشل مرئيًا وقابلًا للتشخيص
+ * بدل أن يختفي. أي خطأ غير متوقع يظهر برساله الحقيقية.
+ */
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null, info: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error('Tarteel crashed while rendering', error, info);
+    this.setState({ info });
+  }
+
+  render() {
+    const { error, info } = this.state;
+    if (!error) return this.props.children;
+    return (
+      <div dir="rtl" style={{
+        padding: '32px', fontFamily: 'Segoe UI, system-ui, sans-serif',
+        color: '#fff', background: '#0b0b0d', minHeight: '100vh', lineHeight: 1.8,
+      }}>
+        <h1 style={{ fontSize: 20, marginBottom: 12 }}>تعذّر عرض واجهة تَرتيل</h1>
+        <p style={{ color: '#b9b9c0', marginBottom: 16 }}>
+          حدث خطأ غير متوقع أثناء الرسم. الرسالة أدناه هي السبب الفعلي، وليست سببًا افتراضيًا.
+        </p>
+        <pre style={{
+          padding: 16, borderRadius: 12, background: '#17171b',
+          color: '#ff9d9d', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 13,
+        }}>{String(error?.stack || error?.message || error)}</pre>
+        {info?.componentStack && (
+          <pre style={{
+            marginTop: 12, padding: 16, borderRadius: 12, background: '#17171b',
+            color: '#b9b9c0', whiteSpace: 'pre-wrap', fontSize: 12,
+          }}>{info.componentStack}</pre>
+        )}
+      </div>
+    );
+  }
+}
+
+createRoot(document.getElementById('root')).render(
+  <ErrorBoundary><App/></ErrorBoundary>
+);
