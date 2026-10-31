@@ -44,18 +44,47 @@ describe('Tarteel production surface', () => {
     expect(html).toContain('إيقاف التلاوة عند الأذان');
   });
 
-  it('feeds the interface only with verified location-based prayer times and supports manual locations', async () => {
-    const prayer = await read('src/prayer.js');
+  it('computes prayer times locally from a verified device location with no manual path', async () => {
+    const astro = await read('src/engine/astro.js');
+    const location = await read('src/engine/location.js');
     const settings = await read('src/PrayerSettings.jsx');
-    expect(prayer).toContain('api.aladhan.com/v1');
-    expect(prayer).toContain('geocoding-api.open-meteo.com/v1/search');
-    expect(prayer).toContain("permission?.location !== 'granted'");
-    expect(prayer).toContain('لم تُنشأ إحداثيات بديلة');
-    expect(prayer).toContain('methodId');
-    expect(prayer).toContain('school');
-    expect(prayer).toContain('timezone');
-    expect(settings).toContain('اختيار يدوي');
-    expect(settings).toContain('AlAdhan');
+
+    /* لا مصدر خارجي للمواقيت: الحساب فلكي محلي. */
+    expect(astro).not.toContain('aladhan');
+    expect(astro).not.toContain('fetch(');
+    expect(astro).toContain('solarPosition');
+
+    /* الموقع من ويندوز بدقة عالية، والمنطقة IANA لا فارق ثابت. */
+    expect(location).toContain('enableHighAccuracy: true');
+    expect(location).toContain('tz-lookup');
+    expect(location).toContain("requestPermissions(['location'])");
+
+    /* الموقع اليدوي وبحث المدن واختيار طريقة الحساب أُزيلت بناءً على طلب صريح. */
+    expect(settings).not.toContain('اختيار يدوي');
+    expect(settings).not.toContain('ps-city');
+    expect(settings).not.toContain('طريقة حساب المواقيت');
+    expect(settings).not.toContain('حساب صلاة العصر');
+    expect(settings).toContain('استخدام موقع الجهاز وطلب الإذن');
+
+    /* الصوت والتنبيه المسبق والضبط الدقيق هي ما يخصّ المستخدم فعلًا. */
+    expect(settings).toContain('صوت الأذان');
+    expect(settings).toContain('تنبيه مسبق');
+    expect(settings).toContain('ضبط دقيق');
+  });
+
+  it('every invoke in the interface has a matching Rust command', async () => {
+    /* عطل حقيقي حدث: الواجهة كانت تنادي set_prayer_schedule بعد حذفه،
+       فيفشل الجدول صامتًا وقت التشغيل. هذا الفحص يمنعه. */
+    const main = await read('src/main.jsx');
+    const settings = await read('src/PrayerSettings.jsx');
+    const rust = await read('src-tauri/src/lib.rs');
+    const handler = rust.match(/generate_handler!\[([\s\S]*?)\]/)[1];
+    const registered = new Set(handler.match(/[a-z_]+/g));
+    const invoked = new Set([...(main + settings).matchAll(/invoke\('([a-z_]+)'/g)].map(m => m[1]));
+    expect(invoked.size).toBeGreaterThan(0);
+    for (const command of invoked) {
+      expect(registered.has(command), `invoke('${command}') has no Rust command`).toBe(true);
+    }
   });
 
   it('wires the controls to the existing player, native schedule, notification, and sleep logic', async () => {

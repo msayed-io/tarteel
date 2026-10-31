@@ -1,99 +1,196 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { checkPermissions, getCurrentPosition, requestPermissions } from '@tauri-apps/plugin-geolocation';
 import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
-import { fetchCalculationMethods, getDeviceLocation, searchCities } from './prayer.js';
+import { resolveLocation, describeLocationError, LocationError } from './engine/location.js';
+import { METHODS, MANUAL_ADJUST_LIMIT, ARABIC_NAMES } from './engine/astro.js';
 import './PrayerSettings.css';
 
-export default function PrayerSettings({ open, value, onClose, onSave }) {
-  const [location, setLocation] = useState(value?.location || null);
-  const [methodId, setMethodId] = useState(value?.methodId ?? '');
-  const [school, setSchool] = useState(value?.school ?? '');
-  const [methods, setMethods] = useState([]);
-  const [methodError, setMethodError] = useState('');
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
+/**
+ * إعدادات الصلاة والتنبيهات — مبسّطة بقرار المنتج:
+ *
+ *   • الموقع: زر واحد يطلب إذن ويندوز ويجلب الموقع الحقيقي. لا بحث مدن،
+ *     ولا إدخال إحداثيات باليد — لأن أي خطأ في الموقع يعني مواقيت خاطئة.
+ *   • طريقة الحساب: لا يسأل المستخدم عنها. تُشتق من دولته تلقائيًا وتُعرض
+ *     للعلم فقط.
+ *   • العصر: يُشتق من الدولة تلقائيًا ويُعرض للعلم فقط.
+ *   • يبقى للمستخدم ما يخصّه فعلًا: صوت الأذان والتنبيه المسبق والضبط الدقيق.
+ */
+export default function PrayerSettings({ config, schedule, onSave, onClose, onPreviewAlarm }) {
+  const [location, setLocation] = useState(config.location || null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
   const [status, setStatus] = useState('');
+  const [error, setError] = useState('');
+  const [notificationsAllowed, setNotificationsAllowed] = useState(Boolean(config.notificationsAllowed));
+  const [preAlarmMinutes, setPreAlarmMinutes] = useState(config.preAlarmMinutes ?? 0);
+  const [adhanSound, setAdhanSound] = useState(Boolean(config.adhanSound ?? true));
+  const [adhanVolume, setAdhanVolume] = useState(config.adhanVolume ?? 80);
+  const [adjust, setAdjust] = useState(config.adjust || {});
 
-  useEffect(() => {
-    if (!open) return;
-    setLocation(value?.location || null);
-    setMethodId(value?.methodId ?? '');
-    setSchool(value?.school ?? '');
-    setError(''); setStatus(''); setMethodError('');
-    fetchCalculationMethods().then(setMethods).catch(cause => {
-      console.error('Tarteel prayer calculation methods failed', cause);
-      setMethodError(String(cause?.message || cause));
-    });
-  }, [open, value?.location, value?.methodId, value?.school]);
+  /* إذا تغيّر الموقع خارج النافذة، نظهر القيمة الحديثة. */
+  useEffect(() => { if (config.location) setLocation(config.location); }, [config.location]);
 
-  if (!open) return null;
-
-  const useDeviceLocation = async () => {
-    setBusy(true); setError(''); setStatus('سيطلب تَرتيل إذن الموقع من النظام ثم يقرأ موقع الجهاز.');
+  const requestDeviceLocation = async () => {
+    setBusy(true); setError(''); setStatus('جارٍ طلب إذن الموقع من ويندوز…');
     try {
-      const next = await getDeviceLocation({ checkPermissions, requestPermissions, getCurrentPosition });
-      setLocation(next); setResults([]);
-      setStatus(`تم تحديد موقع الجهاز بدقة تقريبية ${next.accuracy ? `${Math.round(next.accuracy)} متر` : 'غير متاحة'}. لن يُحفظ إلا بعد الضغط على حفظ.`);
+      const resolved = await resolveLocation({ checkPermissions, requestPermissions, getCurrentPosition });
+      setLocation(resolved);
+      setStatus(resolved.precise
+        ? `تم تحديد موقعك بدقة ${Math.round(resolved.accuracy)} متر — ${resolved.city || resolved.timeZone}.`
+        : `تم تحديد موقعك تقريبًا (دقة ${Math.round(resolved.accuracy || 0)} متر). لتحسين الدقة فعّل Wi-Fi.`);
     } catch (cause) {
-      setError(String(cause?.message || cause)); setStatus('');
-    } finally { setBusy(false); }
+      setError(describeLocationError(cause));
+      setStatus('');
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const findCities = async event => {
-    event?.preventDefault(); setBusy(true); setError(''); setResults([]); setStatus('جارٍ البحث في دليل المدن…');
+  const requestNotifications = async () => {
+    setError('');
     try {
-      const found = await searchCities(query);
-      setResults(found);
-      setStatus(found.length ? `اختر مدينة من النتائج. الإحداثيات والمنطقة الزمنية مأخوذة من دليل المدن وليست تخمينًا.` : 'لم يعثر المصدر على مدينة مطابقة. جرّب كتابة المدينة والدولة.');
+      let granted = await isPermissionGranted();
+      if (!granted) granted = (await requestPermission()) === 'granted';
+      setNotificationsAllowed(granted);
+      setStatus(granted ? 'إشعارات ويندوز ممنوحة.' : 'لم يُمنح إذن الإشعارات. ستظهر البطاقة داخل التطبيق فقط.');
     } catch (cause) {
-      console.error('Tarteel manual city search failed', cause);
-      setError(String(cause?.message || cause)); setStatus('');
-    } finally { setBusy(false); }
+      setError(`تعذّر طلب إذن الإشعارات: ${String(cause)}`);
+    }
   };
 
   const save = async event => {
     event.preventDefault();
-    if (!location || methodId === '' || school === '') {
-      setError('اختر الموقع وطريقة الحساب وطريقة العصر قبل الحفظ.'); return;
-    }
-    setBusy(true); setError(''); setStatus('جارٍ طلب إذن الإشعارات ثم التحقق من المواقيت…');
-    let notificationsAllowed = false;
+    if (!location) { setError('اطلب موقع الجهاز أولًا — لا يمكن حساب مواقيت دون موقع مؤكد.'); return; }
+    setBusy(true); setError('');
     try {
-      notificationsAllowed = await isPermissionGranted();
-      if (!notificationsAllowed) notificationsAllowed = (await requestPermission()) === 'granted';
+      await onSave({
+        location,
+        notificationsAllowed,
+        preAlarmMinutes: Number(preAlarmMinutes) || 0,
+        adhanSound,
+        adhanVolume: Number(adhanVolume),
+        adjust,
+      });
+      setStatus('حُفظت الإعدادات وأُعيد بناء جدول المواقيت.');
     } catch (cause) {
-      console.error('Tarteel notification permission request failed', cause);
-      setStatus(`لم يكتمل طلب إذن إشعارات Windows: ${String(cause)}. سيظل الجدول داخل التطبيق؛ تحقق من إعدادات الإشعارات.`);
+      setError(String(cause?.message || cause));
+      setStatus('');
+    } finally {
+      setBusy(false);
     }
-    try {
-      await onSave({ location, methodId: Number(methodId), school: Number(school), notificationsAllowed });
-      setStatus(notificationsAllowed ? 'حُفظ الموقع والمواقيت وإذن الإشعارات.' : 'حُفظ الموقع والمواقيت، لكن إشعارات Windows غير ممنوحة.');
-    } catch (cause) {
-      setError(String(cause?.message || cause)); setStatus('');
-    } finally { setBusy(false); }
   };
 
-  return <div className="prayer-settings-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <section className="prayer-settings glass" role="dialog" aria-modal="true" aria-labelledby="prayer-settings-title" dir="rtl">
-      <header className="prayer-settings-head"><div><h2 id="prayer-settings-title">إعدادات الصلاة والتنبيهات</h2><p>اختر موقعًا معلومًا وطريقة الحساب قبل عرض أي مواقيت.</p></div><button type="button" className="ps-close" aria-label="إغلاق الإعدادات" onClick={onClose}>×</button></header>
-      <div className="ps-section">
-        <h3>الموقع</h3>
-        <div className="ps-current" aria-live="polite">{location ? <><b>{location.source === 'manual' ? `اختيار يدوي: ${location.city}${location.country ? `، ${location.country}` : ''}` : 'موقع الجهاز'}</b><span>{Number(location.latitude).toFixed(4)}, {Number(location.longitude).toFixed(4)}{location.timezone ? ` · ${location.timezone}` : ''}</span></> : 'لم يُحدّد موقع بعد.'}</div>
-        <button type="button" className="ps-action" onClick={useDeviceLocation} disabled={busy}>استخدام موقع الجهاز وطلب الإذن</button>
-        <form className="ps-city-search" onSubmit={findCities}><label htmlFor="ps-city">أو ابحث عن مدينة لاختيارها يدويًا</label><div><input id="ps-city" value={query} onChange={event => setQuery(event.target.value)} placeholder="المدينة، الدولة" autoComplete="off"/><button type="submit" disabled={busy || [...query.trim()].length < 2}>بحث</button></div></form>
-        {results.length > 0 && <div className="ps-results" role="listbox" aria-label="نتائج المدن">{results.map((item, index) => <button type="button" key={`${item.geonamesId ?? item.city}-${item.timezone}-${index}`} role="option" aria-selected={location?.geonamesId === item.geonamesId && location?.source === 'manual'} onClick={() => { setLocation(item); setStatus(`سيُستخدم اختيار يدوي: ${item.city}${item.country ? `، ${item.country}` : ''} (${item.timezone}).`); setResults([]); }}><b>{item.city}{item.admin1 ? `، ${item.admin1}` : ''}</b><span>{item.country} · {item.timezone}</span></button>)}</div>}
-      </div>
-      <div className="ps-grid">
-        <label>طريقة حساب المواقيت<select value={methodId} onChange={event => setMethodId(event.target.value)} disabled={busy || !methods.length}><option value="">اختر طريقة الحساب</option>{methods.map(method => <option value={method.id} key={`${method.key}-${method.id}`}>{method.name}</option>)}</select></label>
-        <label>حساب صلاة العصر<select value={school} onChange={event => setSchool(event.target.value)} disabled={busy}><option value="">اختر المذهب</option><option value="0">قياسي (شافعي/مالكي/حنبلي)</option><option value="1">حنفي</option></select></label>
-      </div>
-      <p className="ps-source">مصدر المواقيت: AlAdhan؛ تُرسل إليه إحداثيات الموقع المختار لجلبها. ويُستخدم Open-Meteo فقط للبحث اليدوي عن المدن. يبقى الاختيار اليدوي معلّمًا بوضوح، وتُراعى منطقته الزمنية والتوقيت الصيفي؛ لا تُعرض مواقيت افتراضية عند فشل المصدر.</p>
-      {methodError && <p className="ps-error" role="alert">تعذر تحميل طرق الحساب من المصدر: {methodError}</p>}
-      {error && <p className="ps-error" role="alert">{error}</p>}
-      {status && <p className="ps-status" role="status">{status}</p>}
-      <footer className="ps-actions"><button type="button" className="ps-cancel" onClick={onClose} disabled={busy}>إلغاء</button><button type="button" className="ps-save" onClick={save} disabled={busy || !location || methodId === '' || school === ''}>{busy ? 'جارٍ التحقق…' : 'حفظ واختبار المواقيت'}</button></footer>
-    </section>
-  </div>;
+  const method = schedule?.methodName || (location ? 'تُحدَّد تلقائيًا بعد حساب المواقيت' : '—');
+  const asrLabel = schedule?.shadowFactor === 2 ? 'الحنفي (ظل ×٢)' : 'الجمهور (ظل ×١)';
+
+  return (
+    <div className="prayer-settings-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <section className="prayer-settings glass" role="dialog" aria-modal="true" aria-labelledby="ps-title" dir="rtl">
+        <header className="prayer-settings-head">
+          <div>
+            <h2 id="ps-title">إعدادات الصلاة والتنبيهات</h2>
+            <p>يُحدَّد موقعك تلقائيًا من ويندوز، وتُشتق طريقة الحساب من دولتك.</p>
+          </div>
+          <button type="button" className="ps-close" aria-label="إغلاق الإعدادات" onClick={onClose}>×</button>
+        </header>
+
+        {/* ---------- الموقع ---------- */}
+        <div className="ps-section">
+          <h3>الموقع</h3>
+          <div className="ps-current" aria-live="polite">
+            {location ? (
+              <>
+                <b>{location.city ? `${location.city}${location.country ? `، ${location.country}` : ''}` : 'موقع الجهاز'}</b>
+                <span>
+                  {Number(location.latitude).toFixed(4)}, {Number(location.longitude).toFixed(4)}
+                  {location.timeZone ? ` · ${location.timeZone}` : ''}
+                  {Number.isFinite(location.accuracy) ? ` · دقة ${Math.round(location.accuracy)} م` : ''}
+                </span>
+              </>
+            ) : 'لم يُحدَّد الموقع بعد.'}
+          </div>
+          <button type="button" className="ps-action" onClick={requestDeviceLocation} disabled={busy}>
+            {location ? 'تحديث موقعي الآن' : 'استخدام موقع الجهاز وطلب الإذن'}
+          </button>
+        </div>
+
+        {/* ---------- طريقة الحساب: تلقائية ---------- */}
+        <div className="ps-section">
+          <h3>طريقة الحساب</h3>
+          <p className="ps-auto">
+            <b>{method}</b>
+            <span>تُختار تلقائيًا حسب دولتك: {methodsForCountry(location?.countryCode)}</span>
+            <span>حساب العصر: <b>{asrLabel}</b></span>
+          </p>
+        </div>
+
+        {/* ---------- التنبيهات ---------- */}
+        <div className="ps-section">
+          <h3>التنبيهات</h3>
+          <div className="ps-row">
+            <label htmlFor="ps-notify">إشعارات ويندوز</label>
+            <button id="ps-notify" type="button" className="ps-toggle" aria-pressed={notificationsAllowed} onClick={requestNotifications}>
+              {notificationsAllowed ? 'ممنوحة ✓' : 'طلب الإذن'}
+            </button>
+          </div>
+          <div className="ps-row">
+            <label htmlFor="ps-sound">صوت الأذان عند الموعد</label>
+            <input id="ps-sound" type="checkbox" checked={adhanSound} onChange={e => setAdhanSound(e.target.checked)} />
+          </div>
+          <div className="ps-row">
+            <label htmlFor="ps-volume">مستوى صوت الأذان: {adhanVolume}%</label>
+            <input id="ps-volume" type="range" min="0" max="100" step="5" value={adhanVolume} onChange={e => setAdhanVolume(Number(e.target.value))} disabled={!adhanSound} />
+          </div>
+          <div className="ps-row">
+            <label htmlFor="ps-pre">تنبيه مسبق</label>
+            <select id="ps-pre" value={preAlarmMinutes} onChange={e => setPreAlarmMinutes(Number(e.target.value))}>
+              <option value={0}>بدون</option>
+              <option value={5}>قبل 5 دقائق</option>
+              <option value={10}>قبل 10 دقائق</option>
+              <option value={15}>قبل 15 دقيقة</option>
+              <option value={30}>قبل 30 دقيقة</option>
+            </select>
+          </div>
+          {onPreviewAlarm && (
+            <button type="button" className="ps-preview" onClick={onPreviewAlarm}>تجربة التنبيه الآن</button>
+          )}
+        </div>
+
+        {/* ---------- الضبط الدقيق ---------- */}
+        <div className="ps-section">
+          <h3>ضبط دقيق للمواقيت (دقائق)</h3>
+          <p className="ps-hint">اتركه صفرًا إلا إن كانت مسجد حيّك تعتمد إزاحة معروفة.</p>
+          <div className="ps-adjust">
+            {Object.entries(ARABIC_NAMES).filter(([key]) => key !== 'sunrise').map(([key, name]) => (
+              <label key={key}>
+                <span>{name}</span>
+                <input
+                  type="number" min={-MANUAL_ADJUST_LIMIT} max={MANUAL_ADJUST_LIMIT} step={1}
+                  value={adjust[key] ?? 0}
+                  onChange={e => setAdjust({ ...adjust, [key]: Math.max(-MANUAL_ADJUST_LIMIT, Math.min(MANUAL_ADJUST_LIMIT, Number(e.target.value) || 0)) })}
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {error && <p className="ps-error" role="alert">{error}</p>}
+        {status && <p className="ps-status" role="status">{status}</p>}
+
+        <footer className="ps-actions">
+          <button type="button" className="ps-cancel" onClick={onClose} disabled={busy}>إلغاء</button>
+          <button type="button" className="ps-save" onClick={save} disabled={busy || !location}>
+            {busy ? 'جارٍ الحفظ…' : 'حفظ وإعادة بناء المواقيت'}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+/** أسماء الطرق المعتمدة في الدول ذات الأولوية، للعرض فقط. */
+function methodsForCountry(countryCode) {
+  const code = String(countryCode || '').toUpperCase();
+  const found = Object.values(METHODS).filter(method => method.countryCodes.includes(code));
+  if (found.length) return found.map(method => method.name).join('، ');
+  return 'رابطة العالم الإسلامي (الافتراضي العالمي)';
 }

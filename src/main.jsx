@@ -3,9 +3,10 @@ import { createRoot } from 'react-dom/client';
 import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { checkPermissions, clearWatch, watchPosition } from '@tauri-apps/plugin-geolocation';
+import { checkPermissions, clearWatch, getCurrentPosition, requestPermissions, watchPosition } from '@tauri-apps/plugin-geolocation';
 import PrayerSettings from './PrayerSettings.jsx';
-import { findNextPrayer, getTodayPrayerEvents, haversineKm, loadPrayerSchedule, prayerTransition, sleepTransition } from './prayer.js';
+import { resolveLocation, locationNeedsRefresh, describeLocationError } from './engine/location.js';
+import { buildSchedule, scheduleNeedsRebuild, alarmEvents, upcoming, current as currentPrayerOf, countdownLabel } from './engine/schedule.js';
 import './styles.css';
 
 const DIG = '٠١٢٣٤٥٦٧٨٩';
@@ -25,12 +26,26 @@ const norm = value => String(value)
   .trim().toLowerCase();
 const count = n => n === 0 ? 'لا توجد تلاوات' : n === 1 ? 'تلاوة واحدة' : n === 2 ? 'تلاوتان' : n <= 10 ? `${ar(n)} تلاوات` : `${ar(n)} تلاوة`;
 const readJson = (key, fallback) => { try { const value = localStorage.getItem(key); return value ? JSON.parse(value) : fallback; } catch { return fallback; } };
-const DEFAULT_PRAYER_CONFIG = { location: null, methodId: null, school: null, showNext: false, pauseAtAdhan: true, notificationsAllowed: false };
+const DEFAULT_PRAYER_CONFIG = {
+  location: null, showNext: false, pauseAtAdhan: true,
+  notificationsAllowed: false, adhanSound: true, adhanVolume: 80,
+  preAlarmMinutes: 0, adjust: {},
+};
 const DEFAULT_AUDIO_PREFS = { speed: 1, sleepMode: 'off', sleepMinutes: 0, sleepDeadline: null };
+/* بصمة الجدول: الموقع والضبط الدقيق فقط. طريقة الحساب لم تعد اختيارًا
+   للمستخدم — تُشتق من الدولة داخل المحرك، فلا معنى لتضمينها هنا. */
 const prayerSignature = config => {
-  if (!config?.location) return '';
-  const loc = config.location;
-  return `${loc.source}|${Number(loc.latitude).toFixed(5)}|${Number(loc.longitude).toFixed(5)}|${loc.timezone || ''}|${config.methodId}|${config.school}`;
+  const loc = config?.location;
+  if (!loc) return '';
+  const adjust = config?.adjust || {};
+  const adjustKey = Object.entries(adjust).sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}${Number(value) || 0}`).join('');
+  return [
+    Number(loc.latitude).toFixed(5),
+    Number(loc.longitude).toFixed(5),
+    loc.timeZone || '',
+    adjustKey,
+  ].join('|');
 };
 const prayerDayKey = (epoch, timeZone) => {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(epoch));
@@ -81,7 +96,7 @@ function App() {
   const [error, setError] = useState('');
   const [prayerConfig, setPrayerConfig] = useState(initialConfig);
   const [prayerSchedule, setPrayerSchedule] = useState(() => readStoredSchedule(initialConfig));
-  const [prayerSettingsOpen, setPrayerSettingsOpen] = useState(() => !initialConfig.location || initialConfig.methodId === null || initialConfig.school === null);
+  const [prayerSettingsOpen, setPrayerSettingsOpen] = useState(() => !initialConfig.location);
   const [adhanAlert, setAdhanAlert] = useState(() => readPendingAdhan());
   const [audioPrefs, setAudioPrefs] = useState(() => ({ ...DEFAULT_AUDIO_PREFS, ...(readJson('tarteel.audio.settings', {}) || {}) }));
   const audio = useRef(null);
@@ -187,8 +202,16 @@ function App() {
     statePublisherRef.current();
   };
 
+  /**
+   * يدفع الجدول إلى الطبقة الأصلية: جدولة Rust + مهام ويندوز.
+   * المهام المجدولة هي ما يُبقي الأذان يعمل والتطبيق مغلق.
+   */
   const publishScheduleToNative = async schedule => {
-    await invoke('set_prayer_schedule', { events: (schedule?.events || []).map(({ id, name, at }) => ({ id, name, at })) });
+    const events = (schedule?.events || []).map(({ id, key, name, at }) => ({ id, key, name, at }));
+    await invoke('set_alarm_schedule', { events });
+    /* فشل مهام ويندوز لا يُسقط الجدولة المقيمة: تُغطّى الحالتان معًا. */
+    invoke('sync_windows_tasks', { aheadMs: 7 * 24 * 3600 * 1000 })
+      .catch(cause => console.error('Tarteel could not sync Windows tasks', cause));
   };
 
   const storePrayerSchedule = async (config, schedule) => {
@@ -201,34 +224,23 @@ function App() {
     return wrapped;
   };
 
-  const loadAndPublishSchedule = async (config, { allowStale = false } = {}) => {
-    const requestId = ++scheduleRequestRef.current;
-    const signature = prayerSignature(config);
-    try {
-      const fresh = await loadPrayerSchedule({ location: config.location, methodId: config.methodId, school: config.school });
-      if (requestId !== scheduleRequestRef.current) return prayerScheduleRef.current;
-      const saved = await storePrayerSchedule(config, fresh);
-      setError('');
-      return saved;
-    } catch (cause) {
-      console.error('Tarteel prayer schedule refresh failed', cause);
-      if (requestId !== scheduleRequestRef.current) throw cause;
-      const stored = readStoredSchedule(config);
-      if (allowStale && stored) {
-        const stale = { ...stored, stale: true, refreshError: String(cause?.message || cause) };
-        const saved = await storePrayerSchedule(config, stale);
-        setError(`تعذر تحديث المواقيت من المصدر. يُعرض جدول محفوظ من ${new Date(stored.fetchedAt).toLocaleString('ar')} لنفس الموقع وطريقة الحساب فقط؛ ${String(cause?.message || cause)}`);
-        return saved;
-      }
+  /**
+   * يبني الجدول من الموقع الحالي وبنشره.
+   * لا شبكة ولا مصدر خارجي: المحرك الفلكي يحسب محليًا، فالجداول لا تفشل
+   * أبدًا بسبب انقطاع الإنترنت.
+   */
+  const loadAndPublishSchedule = async config => {
+    if (!config?.location) {
       prayerScheduleRef.current = null;
       setPrayerSchedule(null);
       localStorage.removeItem('tarteel.prayer.schedule');
-      await publishScheduleToNative(null).catch(nativeError => {
-        console.error('Tarteel could not clear an obsolete prayer schedule', nativeError);
-      });
-      setError('لم تُعرض مواقيت؛ لا توجد بيانات حديثة أو محفوظة لنفس إعداد الموقع. ' + String(cause?.message || cause));
-      throw cause;
+      await publishScheduleToNative(null);
+      return null;
     }
+    const requestId = ++scheduleRequestRef.current;
+    const built = buildSchedule(config.location, { adjust: config.adjust });
+    if (requestId !== scheduleRequestRef.current) return prayerScheduleRef.current;
+    return storePrayerSchedule(config, built);
   };
 
   const stopLocationWatch = () => {
@@ -238,55 +250,63 @@ function App() {
     }
   };
 
+  /**
+   * مراقبة موقع الجهاز. لا نعيد الحساب إلا عند تغيّر حقيقي:
+   * حركة تتجاوز 500 متر، أو تغيّر المنطقة الزمنية، أو مرور 30 دقيقة.
+   * هذا يمنع إعادة بناء الجدول كل دقيقة بسبب اهتزاز قراءة Wi-Fi.
+   */
   const startLocationWatch = async config => {
     stopLocationWatch();
     if (config.location?.source !== 'device') return;
     try {
       const permission = await checkPermissions();
       if (permission?.location !== 'granted') return;
-      const watchId = await watchPosition({ enableHighAccuracy: false, maximumAge: 60_000, timeout: 30_000 }, async (position, watchError) => {
+      const watchId = await watchPosition({ enableHighAccuracy: true, maximumAge: 30_000, timeout: 30_000 }, async (position, watchError) => {
         if (watchError) {
           console.error('Tarteel device location watch error', watchError);
           return;
         }
         const latest = prayerConfigRef.current;
-        if (latest.location?.source !== 'device' || !Number.isFinite(position?.coords?.latitude) || !Number.isFinite(position?.coords?.longitude)) return;
-        const point = { latitude: Number(position.coords.latitude), longitude: Number(position.coords.longitude) };
-        if (haversineKm(latest.location, point) < 5) return;
-        const changed = { ...latest, location: { ...latest.location, ...point, accuracy: Number(position.coords.accuracy) || null } };
+        if (latest.location?.source !== 'device') return;
+        const latitude = Number(position?.coords?.latitude);
+        const longitude = Number(position?.coords?.longitude);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+        let next;
+        try {
+          next = await resolveLocation({ checkPermissions, requestPermissions, getCurrentPosition });
+        } catch (cause) {
+          console.error('Tarteel location refresh failed', cause);
+          return;
+        }
+        if (!locationNeedsRefresh(latest.location, next)) return;
+        const changed = { ...latest, location: next };
         prayerConfigRef.current = changed;
         setPrayerConfig(changed);
         localStorage.setItem('tarteel.prayer.settings', JSON.stringify(changed));
-        setError('تغيّر موقع الجهاز؛ جارٍ تحديث المواقيت والمنطقة الزمنية.');
-        try { await loadAndPublishSchedule(changed); }
-        catch (cause) { console.error('Tarteel location-change prayer refresh failed', cause); }
+        try {
+          await loadAndPublishSchedule(changed);
+          setError('تغيّر موقعك؛ حُدّثت المواقيت تلقائيًا.');
+        } catch (cause) {
+          console.error('Tarteel location-change schedule rebuild failed', cause);
+        }
       });
       locationWatchRef.current = watchId;
     } catch (cause) {
-      console.error('Tarteel could not start location change tracking', cause);
-      setError(`تعذر متابعة تغيّر موقع الجهاز: ${String(cause)}`);
+      console.error('Tarteel could not start location tracking', cause);
     }
   };
 
   const savePrayerSettings = async selected => {
     const next = { ...prayerConfigRef.current, ...selected };
-    const oldSignature = prayerSignature(prayerConfigRef.current);
-    const newSignature = prayerSignature(next);
     prayerConfigRef.current = next;
     setPrayerConfig(next);
     localStorage.setItem('tarteel.prayer.settings', JSON.stringify(next));
-    if (oldSignature && oldSignature !== newSignature) {
-      scheduleRequestRef.current++;
-      prayerScheduleRef.current = null;
-      setPrayerSchedule(null);
-      localStorage.removeItem('tarteel.prayer.schedule');
-      await publishScheduleToNative(null);
-    }
-    const result = await loadAndPublishSchedule(next, { allowStale: oldSignature === newSignature });
-    if (next.location.source === 'device') await startLocationWatch(next);
-    else stopLocationWatch();
+    const result = await loadAndPublishSchedule(next);
+    await startLocationWatch(next);
     setPrayerSettingsOpen(false);
-    if (!next.notificationsAllowed) setError('المواقيت محدثة، لكن إذن إشعارات Windows غير ممنوح؛ لن يظهر تنبيه النظام حتى يُسمح به.');
+    if (!next.notificationsAllowed) {
+      setError('المواقيت محدّثة، لكن إشعارات ويندوز غير ممنوحة؛ ستظهر البطاقة داخل التطبيق فقط.');
+    }
     return result;
   };
 
@@ -297,8 +317,9 @@ function App() {
     const onPlay = () => { setPlaying(true); playingRef.current = true; };
     const onPause = () => { setPlaying(false); playingRef.current = false; };
     const onEnded = () => {
-      const transition = sleepTransition({ mode: audioPrefsRef.current.sleepMode, deadline: audioPrefsRef.current.sleepDeadline, trackEnded: true });
-      if (transition.stop) {
+      const prefs = audioPrefsRef.current;
+      const sleepEnded = prefs.sleepMode === 'end';
+      if (sleepEnded) {
         a.pause();
         persistAudioPrefs({ sleepMode: 'off', sleepMinutes: 0, sleepDeadline: null });
         setNativeSleepDeadline(null);
@@ -393,17 +414,19 @@ function App() {
   useEffect(() => {
     const config = prayerConfigRef.current;
     const cached = readStoredSchedule(config);
-    if (!config.location || config.methodId === null || config.school === null) {
-      invoke('set_prayer_schedule', { events: [] }).catch(cause => console.error('Tarteel could not clear prayer schedule on startup', cause));
+    if (!config.location) {
+      invoke('set_alarm_schedule', { events: [] })
+        .catch(cause => console.error('Tarteel could not clear alarms on startup', cause));
       return;
     }
     if (cached) {
       prayerScheduleRef.current = cached;
       setPrayerSchedule(cached);
-      publishScheduleToNative(cached).catch(cause => setError(`تعذر استعادة جدولة مواقيت الصلاة: ${String(cause)}`));
+      publishScheduleToNative(cached).catch(cause => console.error('Tarteel could not republish alarms', cause));
     }
-    loadAndPublishSchedule(config, { allowStale: true }).catch(cause => console.error('Tarteel startup schedule unavailable', cause));
-    if (config.location.source === 'device') startLocationWatch(config);
+    /* المحرك محلي: إعادة البناء رخيصة ولا تحتاج شبكة، فنجدّد كل إقلاع. */
+    loadAndPublishSchedule(config).catch(cause => console.error('Tarteel startup schedule failed', cause));
+    startLocationWatch(config);
     const savedSleep = audioPrefsRef.current;
     if (savedSleep.sleepMode === 'minutes' && Number.isFinite(savedSleep.sleepDeadline)) {
       if (Date.now() >= savedSleep.sleepDeadline) {
@@ -421,7 +444,7 @@ function App() {
       if (!schedule?.timezone) return;
       try {
         const currentDay = prayerDayKey(Date.now(), schedule.timezone);
-        if (day && currentDay !== day) loadAndPublishSchedule(prayerConfigRef.current, { allowStale: true }).catch(cause => console.error('Tarteel midnight prayer refresh failed', cause));
+        if (day && currentDay !== day) loadAndPublishSchedule(prayerConfigRef.current).catch(cause => console.error('Tarteel midnight prayer refresh failed', cause));
         day = currentDay;
       } catch (cause) { console.error('Tarteel prayer timezone date check failed', cause); }
     };
@@ -541,12 +564,13 @@ function App() {
   const handleAdhan = payload => {
     if (!payload?.id || payload.id === lastAdhanIdRef.current) return;
     lastAdhanIdRef.current = payload.id;
-    const transition = prayerTransition({ wasPlaying: !audio.current.paused, pauseAtAdhan: prayerConfigRef.current.pauseAtAdhan });
+    const wasPlaying = !audio.current.paused;
+    const shouldPause = wasPlaying && Boolean(prayerConfigRef.current.pauseAtAdhan);
     const record = {
-      id: payload.id, name: payload.name, at: payload.at, createdAt: Date.now(),
-      wasPlaying: !audio.current.paused, pausedByAdhan: transition.shouldPause
+      id: payload.id, key: payload.key || '', name: payload.name, at: payload.at,
+      createdAt: Date.now(), wasPlaying, pausedByAdhan: shouldPause,
     };
-    if (transition.shouldPause) {
+    if (shouldPause) {
       const activeTrack = currentRef.current === null ? null : tracksRef.current[currentRef.current];
       const pending = { id: payload.id, trackPath: activeTrack?.path || '', position: Number(audio.current.currentTime) || 0, canResume: Boolean(activeTrack) };
       pendingResumeRef.current = pending;
@@ -591,8 +615,8 @@ function App() {
       locationSource: prayerScheduleRef.current.locationSource,
       locationLabel: prayerScheduleRef.current.locationLabel,
       timezone: prayerScheduleRef.current.timezone,
-      methodId: prayerScheduleRef.current.methodId,
-      school: prayerScheduleRef.current.school,
+      methodName: prayerScheduleRef.current.methodName,
+      shadowFactor: prayerScheduleRef.current.shadowFactor,
       fetchedAt: prayerScheduleRef.current.fetchedAt,
       stale: Boolean(prayerScheduleRef.current.stale),
       refreshError: prayerScheduleRef.current.refreshError || '',
