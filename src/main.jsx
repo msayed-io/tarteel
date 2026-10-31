@@ -4,7 +4,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import PrayerSettings from './PrayerSettings.jsx';
-import DailyPrayerTable from './DailyPrayerTable.jsx';
 import { resolveLocation, readDevicePosition, locationNeedsRefresh, describeLocationError } from './engine/location.js';
 import { buildSchedule, scheduleNeedsRebuild, alarmEvents, upcoming, current as currentPrayerOf, countdownLabel, toNativeEvents } from './engine/schedule.js';
 import './styles.css';
@@ -28,11 +27,16 @@ const count = n => n === 0 ? 'لا توجد تلاوات' : n === 1 ? 'تلاو�
 /** اسم المكان العربي: المدينة، المحافظة، الدولة — بلا أي منطقة زمنية إنجليزية. */
 const placeLabel = location => {
   if (!location) return '';
+  /* الهرم الجغرافي الكامل إن وُجد: عزبة أبو عطوة، مركز الإسماعيلية، الإسماعيلية */
+  if (location.label) return String(location.label).trim();
   const parts = [location.city, location.region, location.country]
     .map(part => String(part || '').trim())
     .filter((part, index, all) => part && all.indexOf(part) === index);
   return parts.join('، ');
 };
+
+/** الاسم العربي الكامل للمكان كما سيظهر في الآيلاند. */
+const prayerLocationLabel = config => placeLabel(config?.location) || 'موقعي';
 
 const readJson = (key, fallback) => { try { const value = localStorage.getItem(key); return value ? JSON.parse(value) : fallback; } catch { return fallback; } };
 const DEFAULT_PRAYER_CONFIG = {
@@ -629,7 +633,9 @@ function App() {
     schedule: prayerScheduleRef.current ? {
       source: prayerScheduleRef.current.source,
       locationSource: prayerScheduleRef.current.locationSource,
-      locationLabel: prayerScheduleRef.current.locationLabel,
+      /* الاسم العربي الكامل المبني من الهرم الجغرافي هو ما تعرضه الآيلاند،
+         لا الإحداثيات ولا معرف المنطقة الزمنية. */
+      locationLabel: prayerLocationLabel(prayerConfigRef.current),
       timezone: prayerScheduleRef.current.timezone,
       methodName: prayerScheduleRef.current.methodName,
       shadowFactor: prayerScheduleRef.current.shadowFactor,
@@ -703,11 +709,6 @@ function App() {
       <div className="tools"><label className="search glass"><Icon name="search"/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="ابحث عن سورة أو قارئ" aria-label="بحث"/></label><button className="circle glass btn" aria-label="اختيار مجلد الصوت" onClick={selectFolder}><Icon name="folder"/></button><button className="circle glass btn" aria-label="إعدادات الصلاة والموقع" onClick={() => setPrayerSettingsOpen(true)}><Icon name="sliders"/></button></div>
     </header>
     <main>
-      <DailyPrayerTable
-        schedule={prayerSchedule}
-        placeName={placeLabel(prayerConfig.location)}
-        onOpenSettings={() => setPrayerSettingsOpen(true)}
-      />
       <h1>{filter === 'all' ? 'المكتبة' : 'المفضلة'}</h1><p className="sub">{count(visible.length)}</p>
       {error && <p className="error" role="alert">{error}</p>}
       {!tracks.length ? <div className="empty">{busy ? 'جارٍ فحص مجلد الصوت…' : 'اختر مجلد الصوت لبدء مكتبتك'}</div> : visible.length ? <div className="list" role="list">{visible.map(track => {

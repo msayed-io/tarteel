@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { nearestArabCity, haversineKm, ARAB_CITIES } from '../src/engine/places.js';
+import { nearestArabCity, haversineKm, ARAB_CITIES, buildLocationHierarchy } from '../src/engine/places.js';
 import { arabicClock, buildRows } from '../src/DailyPrayerTable.jsx';
 
 describe('المطابق الأوفلاين — الطبقة التي لا تفشل', () => {
@@ -91,5 +91,32 @@ describe('جدول المواقيت — التوقيت العربي والشار
     expect(time).toMatch(/[\u0660-\u0669]/); // أرقام عربية هندية
     expect(time).not.toMatch(/[0-9]/);       // لا أرقام لاتينية
     expect(time).toMatch(/[صم]/);
+  });
+});
+
+
+describe('الهرم الجغرافي الثلاثي', () => {
+  it('يعيد العزبة والمركز والمحافظة كما في المثال المطلوب', () => {
+    const h = buildLocationHierarchy({ village: 'عزبة أبو عطوة', city: 'مركز الإسماعيلية', state: 'الإسماعيلية' });
+    expect(h.label).toBe('عزبة أبو عطوة، مركز الإسماعيلية، الإسماعيلية');
+  });
+
+  it('يعرض الحي ثم المدينة ثم المحافظة', () => {
+    const h = buildLocationHierarchy({ neighbourhood: 'حي أول المنصورة', city: 'المنصورة', state: 'الدقهلية' });
+    expect(h.label).toBe('حي أول المنصورة، المنصورة، الدقهلية');
+  });
+
+  it('لا يكرر الاسم إن كان الحي هو المدينة', () => {
+    const h = buildLocationHierarchy({ suburb: 'الزقازيق', city: 'الزقازيق', state: 'الشرقية' });
+    expect(h.label).toBe('الزقازيق، الشرقية');
+  });
+
+  it('يستخرج الشارع كأدق اسم محلي متاح', () => {
+    const h = buildLocationHierarchy({ road: 'شارع الجمهورية', city: 'الزقازيق', state: 'الشرقية' });
+    expect(h.label).toBe('شارع الجمهورية، الزقازيق، الشرقية');
+  });
+
+  it('لا يعيد فراغًا إذا وُجدت المدينة فقط', () => {
+    expect(buildLocationHierarchy({ city: 'القاهرة' }).label).toBe('القاهرة');
   });
 });

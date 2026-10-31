@@ -181,3 +181,109 @@ export function nearestArabCity(latitude, longitude) {
     cc: best.city.cc,
   };
 }
+
+
+/* ------------------------------------------------------------------ *
+ * الهرم الجغرافي الثلاثي (Micro-Location Hierarchy)
+ * ------------------------------------------------------------------ *
+ * لماذا لا يكفي اسم المركز؟
+ * لأن المستخدم في «عزبة أبو عطوة» يريد أن يرى قريته لا اسم المركز الذي
+ * يتبعها. لكن اسم المركز لا يُحذف أيضًا: هو ما يعرف به الناس عنوانهم.
+ *
+ * الترتيب المطلوب: [القرية/الحي/العزبة] ، [المركز/المدينة] ، [المحافظة]
+ * والحذف عند التكرار: إن كان الحي هو نفسه المدينة لا يُكرر.
+ */
+
+/** أعلى دقة: مكان محلي دقيق (حي، قرية، عزبة، شارع). */
+const LOCAL_PLACE_KEYS = [
+  'neighbourhood', 'suburb', 'quarter', 'village', 'hamlet',
+  'residential', 'road', 'amenity', 'place_of_worship',
+  'isolated_dwelling', 'locality_place', 'croft',
+];
+
+/** المدينة أو المركز. */
+const CITY_KEYS = [
+  'city', 'town', 'locality', 'city_district', 'district',
+  'municipality', 'county',
+];
+
+/** المحافظة أو الولاية. */
+const GOVERNORATE_KEYS = ['state', 'governorate', 'province', 'region'];
+
+const firstOf = (address, keys) => {
+  for (const key of keys) {
+    const value = String(address?.[key] || '').trim();
+    if (value) return { value, key };
+  }
+  return null;
+};
+
+/**
+ * يبني الهرم الجغرافي الثلاثي من عنوان Nominatim/OSM.
+ *
+ * @param {object} address كائن address من استجابة Nominatim
+ * @returns {{label:string, localPlace:string, city:string, governorate:string}}
+ */
+export function buildLocationHierarchy(address) {
+  const local = firstOf(address, LOCAL_PLACE_KEYS);
+  const city = firstOf(address, CITY_KEYS);
+  const gov = firstOf(address, GOVERNORATE_KEYS);
+
+  const localPlace = local?.value || '';
+  const cityOrCenter = city?.value || '';
+  const governorate = gov?.value || '';
+
+  const parts = [];
+  if (localPlace) parts.push(localPlace);
+  if (cityOrCenter && cityOrCenter !== localPlace) parts.push(cityOrCenter);
+  if (governorate && governorate !== cityOrCenter && governorate !== localPlace) parts.push(governorate);
+
+  return {
+    label: parts.join('، '),
+    localPlace,
+    city: cityOrCenter,
+    governorate,
+  };
+}
+
+/**
+ * يبني الهرم من أي شكل استجابة (ArcGIS / BigDataCloud / Nominatim / أوفلاين).
+ * نوحّد المدخلات أولًا إلى قاموس address، ثم نطبّق نفس الخوارزمية — منطق
+ * واحد لجميع المصادر حتى لا يختلف الناتج باختلاف الخدمة.
+ */
+export function hierarchyFromProvider(provider, data) {
+  let address = null;
+
+  if (provider === 'nominatim') {
+    address = data?.address || null;
+  } else if (provider === 'arcgis') {
+    const a = data?.address || {};
+    address = {
+      neighbourhood: a.Neighbourhood,
+      suburb: a.District,
+      city: a.City,
+      town: a.Municipality,
+      county: a.Subregion,
+      state: a.Region || a.Subregion,
+    };
+  } else if (provider === 'bigdatacloud') {
+    address = {
+      neighbourhood: data?.locality,
+      suburb: data?.localityInfo?.administrative?.slice?.(-1)?.[0]?.name,
+      city: data?.city || data?.locality,
+      county: data?.principalSubdivision,
+      state: data?.principalSubdivision,
+    };
+  } else if (provider === 'offline') {
+    return {
+      label: [data?.city, data?.country].filter(Boolean).join('، '),
+      localPlace: '',
+      city: data?.city || '',
+      governorate: '',
+    };
+  }
+
+  if (!address) return null;
+  const hierarchy = buildLocationHierarchy(address);
+  return hierarchy.label ? hierarchy : null;
+}

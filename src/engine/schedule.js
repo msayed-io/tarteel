@@ -96,6 +96,9 @@ export function buildSchedule(location, { now = Date.now(), adjust, methodId, sh
     requestedMethod: methodId || 'auto',
     shadowFactor: sample.shadowFactor,
     timeZone: location.timeZone,
+    /* توافق صريح مع عقد الآيلاند الذي يقرأ schedule.timezone بحرف صغير.
+       الاثنان يُكتبان حتى لا ينكسر أي طرف عند اعتماد أحدهما. */
+    timezone: location.timeZone,
     builtAt: now,
   };
 }

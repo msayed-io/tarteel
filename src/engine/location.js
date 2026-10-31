@@ -21,7 +21,7 @@
 
 import tzLookup from 'tz-lookup';
 import { methodForTimeZone } from './astro.js';
-import { nearestArabCity } from './places.js';
+import { nearestArabCity, hierarchyFromProvider } from './places.js';
 
 /** عتبة الدقة المقبولة (بالمتر). أعلى من ذلك يُعدّ موقعًا تقريبيًا. */
 export const ACCURACY_TARGET_M = 1500;
@@ -253,10 +253,20 @@ async function askProvider(provider, fetchImpl) {
     const data = await response.json();
     const parsed = provider.parse(data);
     if (!parsed) return null;
+    /* الهرم الجغرافي من نفس الاستجابة: لا طلب شبكة إضافي. */
+    let hierarchy = null;
+    try { hierarchy = hierarchyFromProvider(provider.name, data); } catch { hierarchy = null; }
     /* نص عربي فقط: نرفض أي اسم لاتيني لأنه لا يخدم واجهة عربية. */
     const city = latinFree(parsed.city);
     if (!city && !latinFree(parsed.country)) return null;
-    return { ...parsed, city, region: latinFree(parsed.region), country: latinFree(parsed.country), provider: provider.name };
+    return {
+      ...parsed,
+      city,
+      region: latinFree(parsed.region),
+      country: latinFree(parsed.country),
+      provider: provider.name,
+      hierarchy,
+    };
   } catch {
     return null;
   }
@@ -284,12 +294,20 @@ export async function describePlace(latitude, longitude, fetchImpl = fetch) {
     .filter(entry => entry.status === 'fulfilled' && entry.value)
     .map(entry => entry.value);
 
-  /* نُفضّل نتيجة تحمل اسم مدينة عربيًا ورمز دولة. */
-  const best = results.find(r => r.city && r.countryCode) || results.find(r => r.city) || results.find(r => r.countryCode);
+  /* الأفضلية للنتيجة التي تحمل اسمًا محليًا دقيقًا (عزبة/قرية/حي) عربيًا،
+     لأنها الأدق وصفًا للمكان؛ ثم الأفضلية لوجود رمز الدولة. */
+  const score = r => (r.hierarchy?.localPlace ? 2 : 0) + (r.countryCode ? 1 : 0);
+  const best = results.slice().sort((a, b) => score(b) - score(a))[0];
   if (best) {
     return {
-      city: best.city, region: best.region, country: best.country,
-      countryCode: best.countryCode, provider: best.provider,
+      city: best.city,
+      region: best.region,
+      country: best.country,
+      countryCode: best.countryCode,
+      provider: best.provider,
+      /* الهرم الكامل هو ما يُعرض للمستخدم. */
+      hierarchy: best.hierarchy,
+      label: best.hierarchy?.label || [best.city, best.country].filter(Boolean).join('، '),
     };
   }
 
@@ -299,6 +317,8 @@ export async function describePlace(latitude, longitude, fetchImpl = fetch) {
     return {
       city: offline.city, region: offline.region, country: offline.country,
       countryCode: offline.countryCode, provider: 'offline', distanceKm: offline.distanceKm,
+      hierarchy: hierarchyFromProvider('offline', offline),
+      label: [offline.city, offline.country].filter(Boolean).join('، '),
     };
   }
   return null;
@@ -339,6 +359,11 @@ export async function resolveLocation({ fetchImpl = fetch } = {}) {
     region: place?.region || '',
     country: place?.country || '',
     countryCode,
+    /* الهرم الجغرافي الكامل: [القرية/الحي] ، [المركز] ، [المحافظة] */
+    label: place?.label || '',
+    localPlace: place?.hierarchy?.localPlace || '',
+    governorate: place?.hierarchy?.governorate || '',
+    placeProvider: place?.provider || '',
     resolvedAt: Date.now(),
   };
 }
