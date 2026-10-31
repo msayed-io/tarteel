@@ -278,11 +278,13 @@ mod tests {
 
     #[test]
     fn sorts_events_and_returns_the_next_one() {
+        /* لحظات حقيقية داخل المدى المعقول الذي يفرضه apply_events. */
+        const BASE: i64 = 1_800_000_000_000;
         let mut state = AlarmState::default();
-        apply_events(&mut state, vec![event("b", 200), event("a", 100)]).unwrap();
+        apply_events(&mut state, vec![event("b", BASE + 200), event("a", BASE + 100)]).unwrap();
         assert_eq!(state.events[0].id, "a");
-        assert_eq!(next_event_after(&state, 150).unwrap().id, "b");
-        assert!(next_event_after(&state, 250).is_none());
+        assert_eq!(next_event_after(&state, BASE + 150).unwrap().id, "b");
+        assert!(next_event_after(&state, BASE + 250).is_none());
     }
 
     #[test]
@@ -310,9 +312,14 @@ mod tests {
 
     #[test]
     fn refuses_oversized_schedule() {
+        /* لحظات صالحة حتى يكون الرفض بسبب العدد لا بسبب المدى. */
+        const BASE: i64 = 1_800_000_000_000;
         let mut state = AlarmState::default();
-        let events: Vec<AlarmEvent> = (0..MAX_EVENTS + 1).map(|i| event(&format!("e{i}"), 1_000 + i as i64)).collect();
-        assert!(apply_events(&mut state, events).is_err());
+        let events: Vec<AlarmEvent> = (0..MAX_EVENTS + 1)
+            .map(|i| event(&format!("e{i}"), BASE + i as i64))
+            .collect();
+        let error = apply_events(&mut state, events).unwrap_err();
+        assert!(error.contains("أكثر من"), "expected size rejection, got: {error}");
     }
 
     #[test]
