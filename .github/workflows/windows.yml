@@ -27,7 +27,8 @@ jobs:
         with: {node-version: 22, cache: npm}
       - run: npm ci
       - uses: dtolnay/rust-toolchain@stable
-        with: {toolchain: stable-x86_64-pc-windows-msvc}
+        with: {toolchain: 1.90.0-x86_64-pc-windows-msvc}
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --lib
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

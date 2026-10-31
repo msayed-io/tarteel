@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "prayer",
+  "description": "الموقع الجغرافي وإذن إشعارات المواقيت لنافذة الإعدادات فقط",
+  "windows": ["main"],
+  "permissions": [
+    "geolocation:allow-check-permissions",
+    "geolocation:allow-request-permissions",
+    "geolocation:allow-get-current-position",
+    "geolocation:allow-watch-position",
+    "geolocation:allow-clear-watch",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission"
+  ]
+}

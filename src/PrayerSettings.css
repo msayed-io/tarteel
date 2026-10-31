@@ -1,0 +1,31 @@
+.prayer-settings-backdrop{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:24px;background:rgba(0,0,0,.58);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.prayer-settings{position:relative;width:min(620px,100%);max-height:min(760px,calc(100vh - 48px));overflow:auto;padding:26px;border-radius:28px;color:var(--text);direction:rtl}
+.prayer-settings-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;padding-bottom:18px;border-bottom:1px solid var(--hairline)}
+.prayer-settings-head h2{font-size:21px;line-height:1.35}
+.prayer-settings-head p,.ps-source{margin-top:6px;color:var(--text-2);font-size:13px;line-height:1.7}
+.ps-close{width:34px;height:34px;flex:none;border-radius:50%;background:rgba(255,255,255,.08);font-size:24px;line-height:1;color:var(--text-2)}
+.ps-section{margin-top:20px}
+.ps-section h3{font-size:15px;margin-bottom:10px}
+.ps-current{display:flex;flex-direction:column;gap:3px;min-height:54px;padding:11px 13px;border:1px solid var(--hairline);border-radius:14px;background:rgba(255,255,255,.035)}
+.ps-current b{font-size:14px}.ps-current span{font-size:12px;color:var(--text-2);direction:ltr;text-align:right}
+.ps-action,.ps-city-search button,.ps-save,.ps-cancel{min-height:40px;padding:0 16px;border-radius:12px;font-weight:600}
+.ps-action{margin-top:10px;background:var(--accent-soft);color:var(--accent)}
+.ps-city-search{margin-top:14px}.ps-city-search label,.ps-grid label{display:block;color:var(--text-2);font-size:13px;font-weight:600}
+.ps-city-search>div{display:flex;gap:8px;margin-top:7px}
+.ps-city-search input,.ps-grid select{width:100%;height:42px;padding:0 12px;border:1px solid var(--hairline);border-radius:12px;background:rgba(255,255,255,.055);color:var(--text);font:inherit;outline:none}
+.ps-city-search input:focus,.ps-grid select:focus{border-color:var(--accent)}
+.ps-city-search input::placeholder{color:var(--text-3)}
+.ps-city-search button,.ps-save{background:var(--text);color:var(--bg)}
+.ps-city-search button:disabled,.ps-action:disabled,.ps-save:disabled,.ps-cancel:disabled{opacity:.5;cursor:not-allowed}
+.ps-results{display:flex;flex-direction:column;max-height:190px;margin-top:8px;overflow:auto;border:1px solid var(--hairline);border-radius:14px;background:#17191e}
+.ps-results button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 13px;text-align:right;border-bottom:1px solid var(--hairline)}
+.ps-results button:last-child{border-bottom:0}.ps-results button:hover,.ps-results button[aria-selected=true]{background:rgba(255,255,255,.08)}
+.ps-results b{font-size:13px}.ps-results span{font-size:11px;color:var(--text-2)}
+.ps-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}
+.ps-grid select{display:block;margin-top:7px;font-size:13px}.ps-grid option{background:#17191e;color:#fff}
+.ps-source{margin-top:14px}
+.ps-error,.ps-status{margin-top:10px;padding:10px 12px;border-radius:12px;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.ps-error{background:rgba(255,80,80,.11);color:#ffaaa5}.ps-status{background:rgba(90,169,255,.1);color:#c4e0ff}
+.ps-actions{display:flex;justify-content:flex-start;gap:10px;margin-top:18px}
+.ps-cancel{background:rgba(255,255,255,.08);color:var(--text)}
+@media(max-width:620px){.prayer-settings-backdrop{padding:12px}.prayer-settings{padding:20px}.ps-grid{grid-template-columns:1fr}.ps-actions{flex-wrap:wrap}.ps-save{flex:1}}

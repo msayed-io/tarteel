@@ -1,16 +1,18 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use serde::Serialize;
-use std::fs::File;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use tauri::webview::Color;
-use tauri::{Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_notification::NotificationExt;
 use walkdir::WalkDir;
 
 #[derive(Serialize, Clone)]
@@ -20,6 +22,27 @@ fn supported(p: &Path) -> bool { matches!(p.extension().and_then(|x| x.to_str())
 
 #[derive(Clone)]
 struct AudioServer { root: Arc<RwLock<Option<PathBuf>>>, token: String, port: u16 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrayerEvent { id: String, name: String, at: i64 }
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SchedulerData {
+  events: Vec<PrayerEvent>,
+  fired_ids: Vec<String>,
+  sleep_deadline_ms: Option<i64>,
+}
+
+struct PrayerScheduler { data: Arc<Mutex<SchedulerData>>, path: PathBuf }
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AdhanPayload { id: String, name: String, at: i64, notification_error: Option<String> }
+
+const LATE_ALARM_GRACE_MS: i64 = 3 * 60 * 1000;
+const MAX_FIRED_IDS: usize = 240;
 
 fn mime_for(path: &Path) -> &'static str {
   match path.extension().and_then(|x| x.to_str()).unwrap_or_default().to_ascii_lowercase().as_str() {
@@ -109,6 +132,91 @@ fn parse_range(value: &str) -> Option<(u64, u64)> {
   Some((start.parse().ok()?, end.parse().ok().unwrap_or(u64::MAX)))
 }
 
+fn write_scheduler(path: &Path, data: &SchedulerData) -> Result<(), String> {
+  let parent = path.parent().ok_or_else(|| "مسار إعدادات الجدولة غير صالح".to_string())?;
+  fs::create_dir_all(parent).map_err(|e| format!("تعذر إنشاء مجلد إعدادات الصلاة: {e}"))?;
+  let bytes = serde_json::to_vec(data).map_err(|e| format!("تعذر ترميز إعدادات الجدولة: {e}"))?;
+  fs::write(path, bytes).map_err(|e| format!("تعذر حفظ إعدادات الجدولة: {e}"))
+}
+
+fn read_scheduler(path: &Path) -> SchedulerData {
+  match fs::read(path) {
+    Ok(bytes) => match serde_json::from_slice::<SchedulerData>(&bytes) {
+      Ok(mut data) => { data.fired_ids.truncate(MAX_FIRED_IDS); data },
+      Err(e) => { eprintln!("Tarteel prayer scheduler settings are invalid: {e}"); SchedulerData::default() }
+    },
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => SchedulerData::default(),
+    Err(e) => { eprintln!("Tarteel prayer scheduler settings could not be read: {e}"); SchedulerData::default() }
+  }
+}
+
+fn process_due(data: &mut SchedulerData, now_ms: i64) -> (Vec<PrayerEvent>, bool, bool) {
+  let mut alarms = Vec::new();
+  let mut changed = false;
+  let fired: HashSet<String> = data.fired_ids.iter().cloned().collect();
+  for event in &data.events {
+    if event.at > now_ms || fired.contains(&event.id) { continue; }
+    data.fired_ids.push(event.id.clone());
+    changed = true;
+    if now_ms.saturating_sub(event.at) <= LATE_ALARM_GRACE_MS { alarms.push(event.clone()); }
+  }
+  if data.fired_ids.len() > MAX_FIRED_IDS { let remove = data.fired_ids.len() - MAX_FIRED_IDS; data.fired_ids.drain(0..remove); changed = true; }
+  let sleep_due = data.sleep_deadline_ms.is_some_and(|deadline| now_ms >= deadline);
+  if sleep_due { data.sleep_deadline_ms = None; changed = true; }
+  (alarms, sleep_due, changed)
+}
+
+#[tauri::command]
+fn set_prayer_schedule(scheduler: State<PrayerScheduler>, events: Vec<PrayerEvent>) -> Result<(), String> {
+  if events.len() > 500 { return Err("رفضت الجدولة أكثر من 500 موعد في تحديث واحد".into()); }
+  let mut unique = HashSet::new();
+  if events.iter().any(|event| event.id.trim().is_empty() || event.name.trim().is_empty() || !unique.insert(event.id.clone())) {
+    return Err("رفضت جدولة موعد ناقص أو مكرر المعرّف".into());
+  }
+  let mut ordered = events;
+  ordered.sort_by_key(|event| event.at);
+  let mut data = scheduler.data.lock().map_err(|_| "تعذر قفل حالة جدولة الصلاة".to_string())?;
+  data.events = ordered;
+  write_scheduler(&scheduler.path, &data)
+}
+
+#[tauri::command]
+fn set_sleep_deadline(scheduler: State<PrayerScheduler>, deadline_ms: Option<i64>) -> Result<(), String> {
+  let mut data = scheduler.data.lock().map_err(|_| "تعذر قفل حالة مؤقت النوم".to_string())?;
+  data.sleep_deadline_ms = deadline_ms.filter(|deadline| *deadline > 0);
+  write_scheduler(&scheduler.path, &data)
+}
+
+fn start_prayer_scheduler(app: tauri::AppHandle, data: Arc<Mutex<SchedulerData>>, path: PathBuf) {
+  let result = thread::Builder::new().name("tarteel-prayer-scheduler".into()).spawn(move || loop {
+    thread::sleep(Duration::from_millis(250));
+    let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().min(i64::MAX as u128) as i64;
+    let (alarms, sleep_due, changed) = match data.lock() {
+      Ok(mut state) => process_due(&mut state, now_ms),
+      Err(e) => { eprintln!("Tarteel prayer scheduler lock failed: {e}"); continue; }
+    };
+    if changed {
+      if let Ok(state) = data.lock() {
+        if let Err(e) = write_scheduler(&path, &state) { eprintln!("Tarteel prayer scheduler persistence failed: {e}"); }
+      }
+    }
+    for event in alarms {
+      let notification_error = app.notification().builder()
+        .title(format!("حان وقت صلاة {}", event.name))
+        .body(format!("حان موعد صلاة {} وفق الموقع وطريقة الحساب المحددين في تَرتيل.", event.name))
+        .show()
+        .err()
+        .map(|e| { eprintln!("Tarteel native prayer notification failed: {e}"); e.to_string() });
+      let payload = AdhanPayload { id: event.id, name: event.name, at: event.at, notification_error };
+      if let Err(e) = app.emit("prayer-adhan", payload) { eprintln!("Tarteel prayer event delivery failed: {e}"); }
+    }
+    if sleep_due {
+      if let Err(e) = app.emit("sleep-deadline", ()) { eprintln!("Tarteel sleep timer event delivery failed: {e}"); }
+    }
+  });
+  if let Err(e) = result { eprintln!("Tarteel prayer scheduler failed to start: {e}"); }
+}
+
 #[tauri::command]
 fn set_audio_root(server: State<AudioServer>, path: String) -> Result<(), String> {
   let root = PathBuf::from(path).canonicalize().map_err(|e| format!("مجلد الصوت غير موجود: {e}"))?;
@@ -143,25 +251,52 @@ fn scan_directory(path: String) -> Result<Vec<Track>, String> {
   out.sort_by_key(|x| x.file_name.to_lowercase()); Ok(out)
 }
 
+#[tauri::command]
+fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
+  let widths = [64.0, 144.0, 384.0, 440.0, 444.0, 480.0];
+  let heights = [34.0, 92.0, 188.0, 210.0, 262.0, 424.0];
+  let tools_height = width == 480.0 && (220.0..=430.0).contains(&height) && height.fract() == 0.0;
+  if !widths.contains(&width) || (!heights.contains(&height) && !tools_height) { return Err("رفضت أبعادًا غير معتمدة لنافذة الجزيرة".into()); }
+  let island = app.get_webview_window("island").ok_or_else(|| "نافذة الجزيرة غير متاحة".to_string())?;
+  island.set_size(tauri::Size::Logical(tauri::LogicalSize::new(width, height))).map_err(|e| format!("تعذر تغيير حجم نافذة الجزيرة: {e}"))?;
+  let monitor = island.current_monitor().map_err(|e| format!("تعذر تحديد شاشة الجزيرة: {e}"))?
+    .or(island.primary_monitor().map_err(|e| format!("تعذر تحديد الشاشة الرئيسية: {e}"))?)
+    .ok_or_else(|| "لم يُرجع Windows شاشة صالحة لتمركز الجزيرة".to_string())?;
+  let area = monitor.size();
+  let origin = monitor.position();
+  let window_size = island.inner_size().map_err(|e| format!("تعذر قراءة حجم نافذة الجزيرة: {e}"))?;
+  let scale = island.scale_factor().map_err(|e| format!("تعذر قراءة مقياس الشاشة: {e}"))?;
+  let x = origin.x + ((area.width as i64 - window_size.width as i64) / 2) as i32;
+  let y = origin.y + (10.0 * scale).round() as i32;
+  island.set_position(PhysicalPosition::new(x, y)).map_err(|e| format!("تعذر إعادة تمركز نافذة الجزيرة: {e}"))?;
+  Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let server = start_audio_server().expect("error while starting local audio server");
-  tauri::Builder::default().manage(server).plugin(tauri_plugin_dialog::init()).setup(|app| {
-    let island = WebviewWindowBuilder::new(app, "island", WebviewUrl::App("island.html".into()))
-      .title("تَرتيل")
-      .inner_size(480.0, 262.0)
-      .decorations(false)
-      .transparent(true)
-      .background_color(Color(0, 0, 0, 0))
-      .shadow(false)
-      .no_redirection_bitmap(true)
-      .always_on_top(true)
-      .focused(false)
-      .skip_taskbar(true)
-      .resizable(false)
-      .visible(true)
-      .build()?;
-    if let Ok(Some(monitor)) = island.primary_monitor() {
+  tauri::Builder::default()
+    .manage(server)
+    .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_geolocation::init())
+    .plugin(tauri_plugin_notification::init())
+    .setup(|app| {
+      let island = WebviewWindowBuilder::new(app, "island", WebviewUrl::App("island.html".into()))
+        .title("تَرتيل")
+        .inner_size(480.0, 262.0)
+        .decorations(false)
+        .transparent(true)
+        .background_color(Color(0, 0, 0, 0))
+        .shadow(false)
+        .no_redirection_bitmap(true)
+        .always_on_top(true)
+        .focused(false)
+        .skip_taskbar(true)
+        .resizable(false)
+        .visible(false)
+        .build()?;
+      let monitor = island.primary_monitor()?.or(island.current_monitor()?)
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "تعذر الحصول على شاشة لتمركز الجزيرة"))?;
       let area = monitor.size();
       let origin = monitor.position();
       let window_size = island.inner_size()?;
@@ -169,13 +304,56 @@ pub fn run() {
       let x = origin.x + ((area.width as i64 - window_size.width as i64) / 2) as i32;
       let y = origin.y + (10.0 * scale).round() as i32;
       island.set_position(PhysicalPosition::new(x, y))?;
-    }
-    Ok(())
-  }).on_window_event(|window, event| {
-    if window.label() == "main" && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-      if let Some(island) = window.app_handle().get_webview_window("island") {
-        let _ = island.destroy();
+      island.show()?;
+      let scheduler_path = app.path().app_config_dir()?.join("prayer-scheduler.json");
+      let scheduler_data = Arc::new(Mutex::new(read_scheduler(&scheduler_path)));
+      app.manage(PrayerScheduler { data: scheduler_data.clone(), path: scheduler_path.clone() });
+      start_prayer_scheduler(app.handle().clone(), scheduler_data, scheduler_path);
+      Ok(())
+    })
+    .on_window_event(|window, event| {
+      if window.label() == "main" && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+        if let Some(island) = window.app_handle().get_webview_window("island") {
+          let _ = island.destroy();
+        }
       }
-    }
-  }).invoke_handler(tauri::generate_handler![scan_directory, set_audio_root, audio_url]).run(tauri::generate_context!()).expect("error while running Tauri application");
+    })
+    .invoke_handler(tauri::generate_handler![scan_directory, set_audio_root, audio_url, resize_island, set_prayer_schedule, set_sleep_deadline])
+    .run(tauri::generate_context!())
+    .expect("error while running Tauri application");
+}
+
+#[cfg(test)]
+mod prayer_scheduler_tests {
+  use super::*;
+
+  #[test]
+  fn prayer_alarm_is_emitted_once_and_only_in_the_late_grace_period() {
+    let mut state = SchedulerData { events: vec![PrayerEvent { id: "date|fajr".into(), name: "الفجر".into(), at: 1_000 }], ..Default::default() };
+    let (first, sleep_due, changed) = process_due(&mut state, 1_000);
+    assert_eq!(first.len(), 1);
+    assert!(!sleep_due);
+    assert!(changed);
+    let (second, _, _) = process_due(&mut state, 1_001);
+    assert!(second.is_empty());
+
+    let mut stale = SchedulerData { events: vec![PrayerEvent { id: "old|asr".into(), name: "العصر".into(), at: 1_000 }], ..Default::default() };
+    let (late, _, _) = process_due(&mut stale, 1_000 + LATE_ALARM_GRACE_MS + 1);
+    assert!(late.is_empty());
+    assert_eq!(stale.fired_ids, vec!["old|asr"]);
+  }
+
+  #[test]
+  fn sleep_deadline_is_cleared_and_fired_only_once() {
+    let mut state = SchedulerData { sleep_deadline_ms: Some(5_000), ..Default::default() };
+    let (_, due, changed) = process_due(&mut state, 4_999);
+    assert!(!due);
+    assert!(!changed);
+    let (_, due, changed) = process_due(&mut state, 5_000);
+    assert!(due);
+    assert!(changed);
+    assert_eq!(state.sleep_deadline_ms, None);
+    let (_, due, _) = process_due(&mut state, 5_001);
+    assert!(!due);
+  }
 }
