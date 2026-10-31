@@ -17,6 +17,11 @@ use walkdir::WalkDir;
 
 mod alarm;
 mod task_scheduler;
+use audio::AudioEngine;
+mod audio;
+mod tray;
+#[cfg(windows)]
+mod toast;
 
 #[derive(Serialize, Clone)]
 pub struct Track { pub path: String, pub file_name: String, pub title: String, pub artist: String, pub duration: Option<u64>, pub cover: Option<String> }
@@ -298,6 +303,102 @@ fn run_headless_alarm(task_arg: &str) {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * منظومة الأذان: صوت أصلي في Rust + إشعار منبّه + كتم
+ * ------------------------------------------------------------------ */
+
+/// يضمن وجود ملف الأذان على القرص.
+///
+/// الملف مرفق بالحزمة كأصل (resource). في التشغيل التطويري لا يكون منسوخًا
+/// بعد، فنبحث في مسار المصدر كاحتياط حتى لا يفشل «تجربة التنبيه».
+fn resolve_adhan_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+  let candidates = [
+    app.path().resolve("assets/adhan.wav", tauri::path::BaseDirectory::Resource).ok(),
+    app.path().resolve("assets/adhan.wav", tauri::path::BaseDirectory::Resource).ok(),
+    Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets").join("adhan.mp3")),
+  ];
+  for candidate in candidates.into_iter().flatten() {
+    if candidate.exists() {
+      return Ok(candidate);
+    }
+  }
+  Err("ملف الأذان غير موجود في الحزمة".into())
+}
+
+#[tauri::command]
+fn play_adhan(app: tauri::AppHandle, engine: State<AudioEngine>, id: Option<String>) -> Result<(), String> {
+  let path = resolve_adhan_file(&app)?;
+  let key = id.unwrap_or_else(|| "manual".to_string());
+  engine.play(&key, &path, now_ms(), true)
+}
+
+#[tauri::command]
+fn stop_adhan(engine: State<AudioEngine>) -> Result<(), String> {
+  engine.stop();
+  Ok(())
+}
+
+#[tauri::command]
+fn set_adhan_volume(engine: State<AudioEngine>, volume: u32) -> Result<(), String> {
+  engine.set_volume(volume);
+  Ok(())
+}
+
+#[tauri::command]
+fn set_adhan_muted(engine: State<AudioEngine>, muted: bool) -> Result<(), String> {
+  engine.set_muted(muted);
+  Ok(())
+}
+
+#[tauri::command]
+fn adhan_state(engine: State<AudioEngine>) -> serde_json::Value {
+  serde_json::json!({
+    "muted": engine.is_muted(),
+    "volume": engine.volume(),
+    "playing": engine.is_playing(),
+  })
+}
+
+/// يعرض إشعار منبّه ويندوز. فشله لا يُسقط الأذان الصوتي.
+#[tauri::command]
+#[cfg(windows)]
+fn show_alarm_notification(title: String, body: String) -> Result<(), String> {
+  toast::show_alarm_toast(&title, &body)
+}
+
+#[tauri::command]
+#[cfg(not(windows))]
+fn show_alarm_notification(_title: String, _body: String) -> Result<(), String> {
+  Err("إشعارات المنبّه متاحة على ويندوز فقط".into())
+}
+
+#[tauri::command]
+fn set_next_prayer_label(app: tauri::AppHandle, label: String) -> Result<(), String> {
+  tray::update_next_prayer(&app, &label);
+  Ok(())
+}
+
+#[tauri::command]
+fn is_autostart_enabled<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
+  use tauri_plugin_autostart::ManagerExt;
+  app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_autostart<R: tauri::Runtime>(app: tauri::AppHandle<R>, enabled: bool) -> Result<bool, String> {
+  use tauri_plugin_autostart::ManagerExt;
+  let manager = app.autolaunch();
+  let result = if enabled { manager.enable() } else { manager.disable() };
+  result.map_err(|e| format!("تعذر تغيير إعداد البدء التلقائي: {e}"))?;
+  Ok(manager.is_enabled().unwrap_or(false))
+}
+
+/// يبثّ حدثًا إلى نافذة التطبيق الرئيسية.
+/// تستخدمه الصينية لإبلاغ الواجهة بتبديل الكتم، فتبقى الواجهة مصدر الحقيقة.
+pub fn emit_to_ui(app: &tauri::AppHandle, event: &str, payload: serde_json::Value) {
+  let _ = app.emit(event, payload);
+}
+
 #[tauri::command]
 fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
   let widths = [64.0, 144.0, 384.0, 440.0, 444.0, 480.0];
@@ -397,8 +498,14 @@ pub fn run() {
   let server = start_audio_server().expect("error while starting local audio server");
   tauri::Builder::default()
     .manage(server)
+    .manage(audio::AudioEngine::new())
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_notification::init())
+    .plugin(tauri_plugin_autostart::init(
+      tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+      /* البدء مع ويندوز يمرّر --hidden ليبدأ مصغرًا في الصينية. */
+      Some(vec!["--hidden"]),
+    ))
     .setup(|app| {
       let island = WebviewWindowBuilder::new(app, "island", WebviewUrl::App("island.html".into()))
         .title("تَرتيل")
@@ -435,19 +542,39 @@ pub fn run() {
       let alarm_state = Arc::new(Mutex::new(alarm::read_state(&alarm_path)));
       app.manage(AlarmHandle { state: alarm_state.clone(), path: alarm_path.clone() });
       start_alarm_loop(app.handle().clone(), alarm_state, alarm_path);
+
+      /* الصينية: تُبنى قبل إظهار النوافذ حتى يبقى التطبيق قابلًا للوصول
+         بعد الإخفاء. */
+      tray::build_tray(app.handle())?;
+
+      /* --hidden يعني إقلاعًا تلقائيًا مع ويندوز: ابدأ في الصينية. */
+      if std::env::args().any(|arg| arg == "--hidden") {
+        tray::hide_to_tray(app.handle());
+        if let Some(window) = app.get_webview_window("main") {
+          let _ = window.hide();
+        }
+      }
       Ok(())
     })
     .on_window_event(|window, event| {
-      if window.label() == "main" && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-        if let Some(island) = window.app_handle().get_webview_window("island") {
-          let _ = island.destroy();
-        }
+      if window.label() != "main" {
+        return;
+      }
+      /* إغلاق إلى الصينية: (X) يُخفي ولا يقتل. قتل العملية يُلغي الأذان،
+         والمستخدم يريد التنبيهات حتى بعد إغلاق النافذة. الخروج النهائي
+         متاح من قائمة الصينية وحدها. */
+      if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        api.prevent_close();
+        tray::hide_to_tray(window.app_handle());
       }
     })
     .invoke_handler(tauri::generate_handler![
       scan_directory, set_audio_root, audio_url, resize_island,
       set_alarm_schedule, set_sleep_deadline, sync_windows_tasks, clear_windows_tasks,
-      alarm_status, fire_alarm_now
+      alarm_status, fire_alarm_now,
+      play_adhan, stop_adhan, set_adhan_volume, set_adhan_muted, adhan_state,
+      show_alarm_notification, set_next_prayer_label,
+      is_autostart_enabled, set_autostart
     ])
     .run(tauri::generate_context!())
     .expect("error while running Tauri application");

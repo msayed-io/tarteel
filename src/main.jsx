@@ -31,6 +31,9 @@ const placeLabel = location => (location ? displayPlaceName(location) : '');
 /** الاسم العربي الكامل للمكان كما سيظهر في الآيلاند. */
 const prayerLocationLabel = config => placeLabel(config?.location) || 'موقعي';
 
+/* الشروق ليس صلاة، فلا تنبيه مسبق له. */
+const PRE_ALARM_KEYS = new Set(['fajr', 'dhuhr', 'asr', 'maghrib', 'isha']);
+
 const readJson = (key, fallback) => { try { const value = localStorage.getItem(key); return value ? JSON.parse(value) : fallback; } catch { return fallback; } };
 const DEFAULT_PRAYER_CONFIG = {
   location: null, showNext: false, pauseAtAdhan: true,
@@ -437,6 +440,38 @@ function App() {
     } else setNativeSleepDeadline(null);
   }, []);
 
+  /*
+   * التنبيه المسبق: نافذة لطيفة قبل الصلاة بـ N دقيقة (١٠ افتراضيًا في
+   * الإعدادات). لا يُشغّل صوت أذان — فقط إشعار هادئ للاستعداد، ويُسجّل
+   * المعرّف فلا يتكرر لنفس الصلاة.
+   */
+  const preAlarmFiredRef = useRef(new Set());
+  useEffect(() => {
+    const tick = () => {
+      const minutes = Number(prayerConfigRef.current.preAlarmMinutes) || 0;
+      if (minutes <= 0) return;
+      const events = prayerScheduleRef.current?.events;
+      if (!Array.isArray(events)) return;
+      const now = Date.now();
+      for (const event of events) {
+        if (!PRE_ALARM_KEYS.has(event.key)) continue;
+        const lead = event.at - minutes * 60000;
+        /* نافذة دقيقتين: تكفي لدورة فحص كل ٣٠ ثانية ولا تسمح بالتكرار. */
+        if (now < lead || now - lead > 120000) continue;
+        const firedId = `pre|${event.id}`;
+        if (preAlarmFiredRef.current.has(firedId)) continue;
+        preAlarmFiredRef.current.add(firedId);
+        invoke('show_alarm_notification', {
+          title: `بعد ${minutes} دقائق: صلاة ${event.name}`,
+          body: 'استعد لصلاة الفريضة.',
+        }).catch(cause => console.error('Tarteel pre-alarm failed', cause));
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     let day = '';
     const checkDay = () => {
@@ -564,6 +599,23 @@ function App() {
   const handleAdhan = payload => {
     if (!payload?.id || payload.id === lastAdhanIdRef.current) return;
     lastAdhanIdRef.current = payload.id;
+
+    /*
+     * الأذان يُشغّل في محرك Rust لا هنا: الصفحة تُجمّد عند إخفاء النافذة
+     * إلى الصينية، بينما محرك الصوت الأصلي يستمر. حراسة التكرار داخل
+     * المحرك نفسه، فلا حاجة لتكرارها في الواجهة.
+     */
+    if (prayerConfigRef.current.adhanSound && !prayerConfigRef.current.adhanMuted) {
+      invoke('play_adhan', { id: payload.id }).catch(cause => {
+        console.error('Tarteel adhan playback failed', cause);
+      });
+    }
+
+    /* إشعار المنبّه: يتجاوز عدم الإزعاج ويبقى حتى يتفاعل المستخدم. */
+    invoke('show_alarm_notification', {
+      title: `حان وقت صلاة ${payload.name || ''}`,
+      body: 'حان موعد الصلاة وفق موقعك وتوقيتك المحلي.',
+    }).catch(cause => console.error('Tarteel alarm toast failed', cause));
     const wasPlaying = !audio.current.paused;
     const shouldPause = wasPlaying && Boolean(prayerConfigRef.current.pauseAtAdhan);
     const record = {

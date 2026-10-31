@@ -1,6 +1,7 @@
 import { displayPlaceWithCountry } from './engine/display.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
+import { invoke } from '@tauri-apps/api/core';
 import { resolveLocation, describeLocationError } from './engine/location.js';
 import { METHODS, MANUAL_ADJUST_LIMIT, ARABIC_NAMES, methodForTimeZone } from './engine/astro.js';
 import './PrayerSettings.css';
@@ -31,6 +32,8 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
   const [preAlarmMinutes, setPreAlarmMinutes] = useState(config.preAlarmMinutes ?? 0);
   const [adhanSound, setAdhanSound] = useState(Boolean(config.adhanSound ?? true));
   const [adhanVolume, setAdhanVolume] = useState(config.adhanVolume ?? 80);
+  const [adhanMuted, setAdhanMuted] = useState(Boolean(config.adhanMuted ?? false));
+  const [autostart, setAutostart] = useState(false);
   const [methodId, setMethodId] = useState(config.methodId || 'auto');
   const [school, setSchool] = useState(config.school ?? 'auto');
   const [adjust, setAdjust] = useState(config.adjust || {});
@@ -46,10 +49,11 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
     preAlarmMinutes: Number(preAlarmMinutes) || 0,
     adhanSound,
     adhanVolume: Number(adhanVolume),
+    adhanMuted,
     methodId,
     school,
     adjust,
-  }), [location, notificationsAllowed, preAlarmMinutes, adhanSound, adhanVolume, methodId, school, adjust]);
+  }), [location, notificationsAllowed, preAlarmMinutes, adhanSound, adhanVolume, adhanMuted, methodId, school, adjust]);
 
   /* الحفظ التلقائي: أي تغيير ⇒ حفظ بعد هدوء قصير. */
   useEffect(() => {
@@ -97,6 +101,29 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
       setStatus(granted ? 'إشعارات ويندوز ممنوحة.' : 'لم يُمنح إذن الإشعارات. ستظهر البطاقة داخل التطبيق فقط.');
     } catch (cause) {
       setError(`تعذّر طلب إذن الإشعارات: ${String(cause)}`);
+    }
+  };
+
+  /* مستوى الصوت والكتم يُبثّان إلى محرك الصوت في Rust فورًا، لأن الأذان
+     يُشغّل هناك لا في الصفحة — يعمل والنافذة مخفية في الصينية. */
+  useEffect(() => {
+    invoke('set_adhan_volume', { volume: Number(adhanVolume) }).catch(() => {});
+  }, [adhanVolume]);
+  useEffect(() => {
+    invoke('set_adhan_muted', { muted: adhanMuted }).catch(() => {});
+  }, [adhanMuted]);
+
+  /* حالة البدء مع ويندوز تُقرأ من النظام لا من التخزين المحلي. */
+  useEffect(() => {
+    invoke('is_autostart_enabled').then(value => setAutostart(Boolean(value))).catch(() => {});
+  }, []);
+
+  const toggleAutostart = async enabled => {
+    try {
+      const applied = await invoke('set_autostart', { enabled });
+      setAutostart(Boolean(applied));
+    } catch (cause) {
+      setError(`تعذّر تغيير البدء مع ويندوز: ${String(cause)}`);
     }
   };
 
@@ -180,6 +207,10 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
             <input id="ps-volume" type="range" min="0" max="100" step="5" value={adhanVolume} onChange={e => setAdhanVolume(Number(e.target.value))} disabled={!adhanSound} />
           </div>
           <div className="ps-row">
+            <label htmlFor="ps-mute">كتم الأذان مؤقتًا</label>
+            <input id="ps-mute" type="checkbox" checked={adhanMuted} onChange={e => setAdhanMuted(e.target.checked)} />
+          </div>
+          <div className="ps-row">
             <label htmlFor="ps-pre">تنبيه مسبق</label>
             <select id="ps-pre" value={preAlarmMinutes} onChange={e => setPreAlarmMinutes(Number(e.target.value))}>
               <option value={0}>بدون</option>
@@ -192,6 +223,19 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
           {onPreviewAlarm && (
             <button type="button" className="ps-preview" onClick={onPreviewAlarm}>تجربة التنبيه الآن</button>
           )}
+        </div>
+
+        {/* ---------- التطبيق في الخلفية ---------- */}
+        <div className="ps-section">
+          <h3>التطبيق في الخلفية</h3>
+          <p className="ps-hint">
+            إغلاق النافذة لا يُنهي التطبيق: يبقى في صينية النظام بجانب الساعة
+            ليُطلق الأذان في موعده. الخروج النهائي من قائمة الصينية.
+          </p>
+          <div className="ps-row">
+            <label htmlFor="ps-autostart">البدء مع تشغيل ويندوز (مصغّرًا في الصينية)</label>
+            <input id="ps-autostart" type="checkbox" checked={autostart} onChange={e => toggleAutostart(e.target.checked)} />
+          </div>
         </div>
 
         {/* ---------- الضبط الدقيق (اختياري، مطوي) ---------- */}
