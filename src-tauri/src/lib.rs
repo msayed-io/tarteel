@@ -398,7 +398,6 @@ pub fn run() {
   tauri::Builder::default()
     .manage(server)
     .plugin(tauri_plugin_dialog::init())
-    .plugin(tauri_plugin_geolocation::init())
     .plugin(tauri_plugin_notification::init())
     .setup(|app| {
       let island = WebviewWindowBuilder::new(app, "island", WebviewUrl::App("island.html".into()))

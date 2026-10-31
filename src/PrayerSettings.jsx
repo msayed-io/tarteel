@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { checkPermissions, getCurrentPosition, requestPermissions } from '@tauri-apps/plugin-geolocation';
 import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
 import { resolveLocation, describeLocationError, LocationError } from './engine/location.js';
-import { METHODS, MANUAL_ADJUST_LIMIT, ARABIC_NAMES } from './engine/astro.js';
+import { METHODS } from './engine/astro.js';
 import './PrayerSettings.css';
 
 /**
@@ -13,7 +12,7 @@ import './PrayerSettings.css';
  *   • طريقة الحساب: لا يسأل المستخدم عنها. تُشتق من دولته تلقائيًا وتُعرض
  *     للعلم فقط.
  *   • العصر: يُشتق من الدولة تلقائيًا ويُعرض للعلم فقط.
- *   • يبقى للمستخدم ما يخصّه فعلًا: صوت الأذان والتنبيه المسبق والضبط الدقيق.
+ *   • يبقى للمستخدم ما يخصّه فعلًا: صوت الأذان ومستواه والتنبيه المسبق.
  */
 export default function PrayerSettings({ config, schedule, onSave, onClose, onPreviewAlarm }) {
   const [location, setLocation] = useState(config.location || null);
@@ -24,7 +23,6 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
   const [preAlarmMinutes, setPreAlarmMinutes] = useState(config.preAlarmMinutes ?? 0);
   const [adhanSound, setAdhanSound] = useState(Boolean(config.adhanSound ?? true));
   const [adhanVolume, setAdhanVolume] = useState(config.adhanVolume ?? 80);
-  const [adjust, setAdjust] = useState(config.adjust || {});
 
   /* إذا تغيّر الموقع خارج النافذة، نظهر القيمة الحديثة. */
   useEffect(() => { if (config.location) setLocation(config.location); }, [config.location]);
@@ -32,7 +30,7 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
   const requestDeviceLocation = async () => {
     setBusy(true); setError(''); setStatus('جارٍ طلب إذن الموقع من ويندوز…');
     try {
-      const resolved = await resolveLocation({ checkPermissions, requestPermissions, getCurrentPosition });
+      const resolved = await resolveLocation();
       setLocation(resolved);
       setStatus(resolved.precise
         ? `تم تحديد موقعك بدقة ${Math.round(resolved.accuracy)} متر — ${resolved.city || resolved.timeZone}.`
@@ -68,7 +66,6 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
         preAlarmMinutes: Number(preAlarmMinutes) || 0,
         adhanSound,
         adhanVolume: Number(adhanVolume),
-        adjust,
       });
       setStatus('حُفظت الإعدادات وأُعيد بناء جدول المواقيت.');
     } catch (cause) {
@@ -153,24 +150,6 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
           {onPreviewAlarm && (
             <button type="button" className="ps-preview" onClick={onPreviewAlarm}>تجربة التنبيه الآن</button>
           )}
-        </div>
-
-        {/* ---------- الضبط الدقيق ---------- */}
-        <div className="ps-section">
-          <h3>ضبط دقيق للمواقيت (دقائق)</h3>
-          <p className="ps-hint">اتركه صفرًا إلا إن كانت مسجد حيّك تعتمد إزاحة معروفة.</p>
-          <div className="ps-adjust">
-            {Object.entries(ARABIC_NAMES).filter(([key]) => key !== 'sunrise').map(([key, name]) => (
-              <label key={key}>
-                <span>{name}</span>
-                <input
-                  type="number" min={-MANUAL_ADJUST_LIMIT} max={MANUAL_ADJUST_LIMIT} step={1}
-                  value={adjust[key] ?? 0}
-                  onChange={e => setAdjust({ ...adjust, [key]: Math.max(-MANUAL_ADJUST_LIMIT, Math.min(MANUAL_ADJUST_LIMIT, Number(e.target.value) || 0)) })}
-                />
-              </label>
-            ))}
-          </div>
         </div>
 
         {error && <p className="ps-error" role="alert">{error}</p>}

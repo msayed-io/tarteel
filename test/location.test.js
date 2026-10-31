@@ -5,80 +5,92 @@ import {
   describeLocationError, LocationError, ACCURACY_TARGET_M,
 } from '../src/engine/location.js';
 
-describe('إذن الموقع — الطلب الصحيح من ويندوز', () => {
-  it('يعيد granted مباشرة إذا كان الإذن ممنوحًا دون إزعاج المستخدم', async () => {
-    const requestPermissions = vi.fn();
-    const state = await ensureLocationPermission({
-      checkPermissions: async () => ({ location: 'granted' }), requestPermissions,
+/**
+ * يزرع navigator.geolocation مؤقتًا لمحاكاة WebView2.
+ * بيئة الاختبار (node) لا توفّر navigator، فننشئه عند الحاجة.
+ */
+function withGeo(impl, run) {
+  if (typeof globalThis.navigator === 'undefined') {
+    Object.defineProperty(globalThis, 'navigator', { value: {}, configurable: true, writable: true });
+  }
+  const had = Object.prototype.hasOwnProperty.call(globalThis.navigator, 'geolocation');
+  const original = globalThis.navigator.geolocation;
+  Object.defineProperty(globalThis.navigator, 'geolocation', { value: impl, configurable: true, writable: true });
+  return Promise.resolve(run()).finally(() => {
+    if (had) Object.defineProperty(globalThis.navigator, 'geolocation', { value: original, configurable: true, writable: true });
+    else delete globalThis.navigator.geolocation;
+  });
+}
+
+describe('إذن الموقع — عبر WebView2 لا عبر إضافة', () => {
+  /* WebView2 يعرض نافذة إذن ويندوز تلقائيًا عند أول قراءة، ويسجّل التطبيق
+     في «الخصوصية والأمان ← الموقع». لا وجود لدوال إذن منفصلة. */
+  it('يعتبر الإذن متاحًا إذا كانت الواجهة موجودة', async () => {
+    await withGeo({ getCurrentPosition() {} }, async () => {
+      expect(await ensureLocationPermission()).toBe('granted');
     });
-    expect(state).toBe('granted');
-    expect(requestPermissions).not.toHaveBeenCalled();
   });
 
-  it('يطلب الإذن فعليًا عندما تكون الحالة prompt وليس بلا نهاية', async () => {
-    const requestPermissions = vi.fn(async () => ({ location: 'granted' }));
-    const state = await ensureLocationPermission({
-      checkPermissions: async () => ({ location: 'prompt' }), requestPermissions,
+  it('يرفض بوضوح إن لم تكن الواجهة موجودة', async () => {
+    await withGeo(undefined, async () => {
+      await expect(ensureLocationPermission()).rejects.toMatchObject({ code: 'unsupported' });
     });
-    expect(state).toBe('granted');
-    expect(requestPermissions).toHaveBeenCalledWith(['location']);
-  });
-
-  it('يطلب الإذن أيضًا في حالة prompt-with-rationale', async () => {
-    const requestPermissions = vi.fn(async () => ({ location: 'granted' }));
-    await ensureLocationPermission({
-      checkPermissions: async () => ({ location: 'prompt-with-rationale' }), requestPermissions,
-    });
-    expect(requestPermissions).toHaveBeenCalled();
-  });
-
-  it('لا يطلب مرة أخرى عندما يكون الإذن مرفوضًا، ويعيد denied', async () => {
-    const requestPermissions = vi.fn();
-    const state = await ensureLocationPermission({
-      checkPermissions: async () => ({ location: 'denied' }), requestPermissions,
-    });
-    expect(state).toBe('denied');
-    expect(requestPermissions).not.toHaveBeenCalled();
-  });
-
-  it('يميّز فشل طلب الإذن عن الرفض برمز خاص', async () => {
-    await expect(ensureLocationPermission({
-      checkPermissions: async () => ({ location: 'prompt' }),
-      requestPermissions: async () => { throw new Error('plugin unavailable'); },
-    })).rejects.toMatchObject({ code: 'permission-request-failed' });
   });
 });
 
 describe('قراءة الموقع — الدقة والتصعيد', () => {
-  it('يطلب دقة عالية ويحوّل الإحداثيات والأخطاء', async () => {
-    const getCurrentPosition = vi.fn(async options => {
-      expect(options.enableHighAccuracy).toBe(true);
-      expect(options.maximumAge).toBe(0);
-      expect(options.timeout).toBeGreaterThan(10000);
-      return { coords: { latitude: 30.5877, longitude: 31.502, accuracy: 65 }, timestamp: 123 };
+  const geo = (handler) => ({ getCurrentPosition: handler });
+
+  it('يطلب دقة عالية أولًا ويحوّل الإحداثيات', async () => {
+    let seen;
+    await withGeo(geo((ok, fail, options) => {
+      seen = options;
+      ok({ coords: { latitude: 30.5877, longitude: 31.502, accuracy: 65 }, timestamp: 123 });
+    }), async () => {
+      const fix = await readDevicePosition();
+      expect(seen.enableHighAccuracy).toBe(true);
+      expect(seen.maximumAge).toBe(0);
+      expect(fix).toMatchObject({ latitude: 30.5877, longitude: 31.502, accuracy: 65, source: 'device' });
     });
-    const fix = await readDevicePosition({ getCurrentPosition });
-    expect(fix).toMatchObject({ latitude: 30.5877, longitude: 31.502, accuracy: 65, source: 'device', timestamp: 123 });
+  });
+
+  it('يُصعّد إلى دقة عادية إذا انتهت المهلة في المحاولة العالية', async () => {
+    let attempts = 0;
+    await withGeo(geo((ok, fail, options) => {
+      attempts += 1;
+      if (attempts === 1) fail({ code: 3, message: 'timeout' });
+      else ok({ coords: { latitude: 30.5, longitude: 31.5, accuracy: 2000 } });
+    }), async () => {
+      const fix = await readDevicePosition();
+      expect(attempts).toBe(2);
+      expect(fix.accuracy).toBe(2000);
+    });
+  });
+
+  it('لا يعيد المحاولة بعد رفض المستخدم', async () => {
+    let attempts = 0;
+    await withGeo(geo((ok, fail) => { attempts += 1; fail({ code: 1, message: 'denied' }); }), async () => {
+      await expect(readDevicePosition()).rejects.toMatchObject({ code: 'permission-denied' });
+      expect(attempts).toBe(1);
+    });
   });
 
   it('يرفض إحداثيات خارج النطاق بدل تمريرها', async () => {
-    await expect(readDevicePosition({
-      getCurrentPosition: async () => ({ coords: { latitude: 190, longitude: 31 } }),
-    })).rejects.toMatchObject({ code: 'invalid-coordinates' });
+    await withGeo(geo(ok => ok({ coords: { latitude: 190, longitude: 31 } })), async () => {
+      await expect(readDevicePosition()).rejects.toMatchObject({ code: 'invalid-coordinates' });
+    });
   });
 
-  it('يفسّر فشل ويندوز بسبب دقيق: لا مزوّد / رفض / عام', async () => {
-    await expect(readDevicePosition({
-      getCurrentPosition: async () => { throw new Error('Position unavailable'); },
-    })).rejects.toMatchObject({ code: 'no-provider' });
-
-    await expect(readDevicePosition({
-      getCurrentPosition: async () => { throw new Error('Permission denied'); },
-    })).rejects.toMatchObject({ code: 'permission-denied-by-system' });
-
-    await expect(readDevicePosition({
-      getCurrentPosition: async () => { throw new Error('weird failure'); },
-    })).rejects.toMatchObject({ code: 'position-failed' });
+  it('يفسّر أكواد W3C الثلاثة بدقة: رفض / لا مزوّد / مهلة', async () => {
+    await withGeo(geo((ok, fail) => fail({ code: 2 })), async () => {
+      await expect(readDevicePosition()).rejects.toMatchObject({ code: 'no-provider' });
+    });
+    await withGeo(geo((ok, fail) => fail({ code: 3 })), async () => {
+      await expect(readDevicePosition()).rejects.toMatchObject({ code: 'timeout' });
+    });
+    await withGeo(geo((ok, fail) => fail({ code: 99 })), async () => {
+      await expect(readDevicePosition()).rejects.toMatchObject({ code: 'position-failed' });
+    });
   });
 });
 
@@ -134,34 +146,32 @@ describe('وصف المكان — تحسين عرض لا شرط نجاح', () =>
 });
 
 describe('الواجهة الموحّدة resolveLocation', () => {
-  const apiFor = (permission, position) => ({
-    checkPermissions: async () => ({ location: permission }),
-    requestPermissions: async () => ({ location: permission }),
-    getCurrentPosition: async () => ({ coords: position, timestamp: Date.now() }),
-  });
-
   it('تجمع الإحداثيات والمنطقة الزمنية والدولة في نتيجة واحدة', async () => {
-    const result = await resolveLocation(
-      apiFor('granted', { latitude: 30.5877, longitude: 31.502, accuracy: 45 }),
-      { fetchImpl: async () => ({ ok: true, json: async () => ({ city: 'الزقازيق', countryName: 'مصر', countryCode: 'EG' }) }) },
-    );
-    expect(result).toMatchObject({
-      source: 'device', latitude: 30.5877, longitude: 31.502,
-      timeZone: 'Africa/Cairo', countryCode: 'EG', city: 'الزقازيق', precise: true,
+    await withGeo({ getCurrentPosition: ok => ok({ coords: { latitude: 30.5877, longitude: 31.502, accuracy: 45 }, timestamp: Date.now() }) }, async () => {
+      const result = await resolveLocation({
+        fetchImpl: async () => ({ ok: true, json: async () => ({ city: 'الزقازيق', countryName: 'مصر', countryCode: 'EG' }) }),
+      });
+      expect(result).toMatchObject({
+        source: 'device', latitude: 30.5877, longitude: 31.502,
+        timeZone: 'Africa/Cairo', countryCode: 'EG', city: 'الزقازيق', precise: true,
+      });
     });
   });
 
-  it('تمدّد الدقة: دقة 45 مترًا تُعدّ دقيقة، و3000 متر لا', async () => {
-    const near = await resolveLocation(apiFor('granted', { latitude: 30.5, longitude: 31.5, accuracy: 45 }));
-    expect(near.precise).toBe(true);
-    const far = await resolveLocation(apiFor('granted', { latitude: 30.5, longitude: 31.5, accuracy: 3000 }));
-    expect(far.precise).toBe(false);
+  it('دقة 45 مترًا تُعدّ دقيقة، و3000 متر لا', async () => {
+    await withGeo({ getCurrentPosition: ok => ok({ coords: { latitude: 30.5, longitude: 31.5, accuracy: 45 } }) }, async () => {
+      expect((await resolveLocation()).precise).toBe(true);
+    });
+    await withGeo({ getCurrentPosition: ok => ok({ coords: { latitude: 30.5, longitude: 31.5, accuracy: 3000 } }) }, async () => {
+      expect((await resolveLocation()).precise).toBe(false);
+    });
     expect(ACCURACY_TARGET_M).toBe(1500);
   });
 
-  it('ترفض الإذن المرفوض برمز واضح ولا تخمّن موقعًا', async () => {
-    await expect(resolveLocation(apiFor('denied', { latitude: 0, longitude: 0 })))
-      .rejects.toMatchObject({ code: 'permission-denied' });
+  it('ترفض الرفض برمز واضح ولا تخمّن موقعًا', async () => {
+    await withGeo({ getCurrentPosition: (ok, fail) => fail({ code: 1 }) }, async () => {
+      await expect(resolveLocation()).rejects.toMatchObject({ code: 'permission-denied' });
+    });
   });
 });
 

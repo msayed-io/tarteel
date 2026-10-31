@@ -3,9 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { checkPermissions, clearWatch, getCurrentPosition, requestPermissions, watchPosition } from '@tauri-apps/plugin-geolocation';
 import PrayerSettings from './PrayerSettings.jsx';
-import { resolveLocation, locationNeedsRefresh, describeLocationError } from './engine/location.js';
+import { resolveLocation, readDevicePosition, locationNeedsRefresh, describeLocationError } from './engine/location.js';
 import { buildSchedule, scheduleNeedsRebuild, alarmEvents, upcoming, current as currentPrayerOf, countdownLabel } from './engine/schedule.js';
 import './styles.css';
 
@@ -243,9 +242,11 @@ function App() {
     return storePrayerSchedule(config, built);
   };
 
+  /* مراقبة الموقع: WebView2 لا يحتاج watchPosition؛ نكتفي بفحص دوري
+     خفيف يعيد بناء الجدول فقط عند تغيّر حقيقي (حركة أو منطقة زمنية أو عمر). */
   const stopLocationWatch = () => {
     if (locationWatchRef.current !== null) {
-      clearWatch(locationWatchRef.current).catch(cause => console.error('Tarteel location watch cleanup failed', cause));
+      clearInterval(locationWatchRef.current);
       locationWatchRef.current = null;
     }
   };
@@ -258,42 +259,32 @@ function App() {
   const startLocationWatch = async config => {
     stopLocationWatch();
     if (config.location?.source !== 'device') return;
-    try {
-      const permission = await checkPermissions();
-      if (permission?.location !== 'granted') return;
-      const watchId = await watchPosition({ enableHighAccuracy: true, maximumAge: 30_000, timeout: 30_000 }, async (position, watchError) => {
-        if (watchError) {
-          console.error('Tarteel device location watch error', watchError);
-          return;
-        }
-        const latest = prayerConfigRef.current;
-        if (latest.location?.source !== 'device') return;
-        const latitude = Number(position?.coords?.latitude);
-        const longitude = Number(position?.coords?.longitude);
-        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-        let next;
-        try {
-          next = await resolveLocation({ checkPermissions, requestPermissions, getCurrentPosition });
-        } catch (cause) {
-          console.error('Tarteel location refresh failed', cause);
-          return;
-        }
+    /* كل 10 دقائق نقرأ الموقع؛ ولا نعيد البناء إلا إذا قرّر المحرك أن
+       هناك تغيّرًا حقيقيًا: حركة > 500م، أو تغيّر المنطقة الزمنية، أو 30 دقيقة. */
+    const interval = setInterval(async () => {
+      const latest = prayerConfigRef.current;
+      if (latest.location?.source !== 'device') return;
+      try {
+        const fix = await readDevicePosition();
+        const next = {
+          ...latest.location,
+          latitude: fix.latitude, longitude: fix.longitude,
+          accuracy: fix.accuracy, resolvedAt: Date.now(),
+        };
+        const { timeZoneForCoordinates } = await import('./engine/location.js');
+        next.timeZone = timeZoneForCoordinates(fix.latitude, fix.longitude);
         if (!locationNeedsRefresh(latest.location, next)) return;
         const changed = { ...latest, location: next };
         prayerConfigRef.current = changed;
         setPrayerConfig(changed);
         localStorage.setItem('tarteel.prayer.settings', JSON.stringify(changed));
-        try {
-          await loadAndPublishSchedule(changed);
-          setError('تغيّر موقعك؛ حُدّثت المواقيت تلقائيًا.');
-        } catch (cause) {
-          console.error('Tarteel location-change schedule rebuild failed', cause);
-        }
-      });
-      locationWatchRef.current = watchId;
-    } catch (cause) {
-      console.error('Tarteel could not start location tracking', cause);
-    }
+        await loadAndPublishSchedule(changed);
+      } catch (cause) {
+        /* فشل قراءة دورية ليس خطأً يعرض للمستخدم. */
+        console.warn('Tarteel periodic location refresh skipped', cause);
+      }
+    }, 10 * 60 * 1000);
+    locationWatchRef.current = interval;
   };
 
   const savePrayerSettings = async selected => {

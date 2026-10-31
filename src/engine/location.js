@@ -38,70 +38,109 @@ export class LocationError extends Error {
 }
 
 /* ------------------------------------------------------------------ *
- * الطبقة 1: جلب الموقع من ويندوز
+ * الطبقة 1: جلب الموقع من WebView2
  * ------------------------------------------------------------------ */
 
 /**
- * يتحقق من إذن الموقع ويطلبه إن كان في حالة سؤال.
- * @param {{checkPermissions:Function, requestPermissions:Function}} api
- * @returns {Promise<'granted'|'denied'|'prompt'>}
+ * لماذا navigator.geolocation ولا إضافة Tauri؟
+ *
+ * WebView2 (وهو محرك واجهة Tauri على ويندوز) يُنفّذ واجهة W3C القياسية
+ * navigator.geolocation عبر خدمة منصة ويندوز. حين يُستدعى getCurrentPosition
+ * أول مرة، يتولى WebView2 طلب إذن الموقع من النظام تلقائيًا ويُظهر نافذة
+ * ويندوز الرسمية، ثم يسجّل التطبيق في «الخصوصية والأمان ← الموقع» تلقائيًا.
+ *
+ * إضافة tauri-plugin-geolocation تتطلب صلاحيات ACL وتُخفي هذا المسار، ولذلك
+ * لم يظهر التطبيق أصلًا في قائمة تطبيقات الموقع — وهو بالضبط ما لاحظه المستخدم.
  */
-export async function ensureLocationPermission(api) {
-  const { checkPermissions, requestPermissions } = api;
-  if (typeof checkPermissions !== 'function' || typeof requestPermissions !== 'function') {
-    throw new LocationError('unsupported', 'إذن الموقع غير مدعوم في هذا النظام.');
-  }
-  let state;
-  try {
-    state = await checkPermissions();
-  } catch (cause) {
-    throw new LocationError('permission-check-failed', 'تعذّر فحص إذن الموقع من ويندوز. أعد المحاولة.', String(cause));
-  }
-  const current = String(state?.location || '');
-  if (current === 'granted') return 'granted';
-  if (current === 'denied') return 'denied';
-  /* في ويندوز تظهر النافذة الرسمية لطلب الإذن من خلال requestPermissions. */
-  try {
-    const next = await requestPermissions(['location']);
-    const value = String(next?.location || '');
-    if (value === 'granted') return 'granted';
-    if (value === 'denied') return 'denied';
-    return 'prompt';
-  } catch (cause) {
-    throw new LocationError('permission-request-failed',
-      'لم يكتمل طلب إذن الموقع. تأكد أن خدمة الموقع مفعّلة من إعدادات ويندوز: الخصوصية والأمان ← الموقع.', String(cause));
-  }
+function geolocationAvailable() {
+  return typeof navigator !== 'undefined' && 'geolocation' in navigator && navigator.geolocation;
 }
 
 /**
- * يقرأ موقع الجهاز عبر WinRT بمحاولة تصاعدية: أول قراءة عالية الدقة،
- * وإن انتهت المدة قبل التثبيت تُقبل القراءة المتاحة بدل الفشل الكامل.
- *
- * @returns {Promise<{latitude:number, longitude:number, accuracy:number|null, timestamp:number, source:'device'}>}
+ * لا يوجد إذن صريح نطلبه مسبقًا: WebView2 يعرض نافذة النظام عند أول قراءة.
+ * نُبلّغ الواجهة بذلك صراحة بدل ادّعاء وجود حالة إذن لا يمكن فحصها.
  */
-export async function readDevicePosition({ getCurrentPosition }) {
-  if (typeof getCurrentPosition !== 'function') {
-    throw new LocationError('unsupported', 'واجهة تحديد الموقع غير متاحة.');
+export async function ensureLocationPermission() {
+  if (!geolocationAvailable()) {
+    throw new LocationError('unsupported',
+      'هذا النظام لا يوفّر خدمة تحديد الموقع للواجهة.');
   }
+  return 'granted';
+}
+
+/** يترجم أكواد خطأ W3C إلى حالات دقيقة قابلة للتصرف. */
+function classifyGeolocationError(error) {
+  const code = Number(error?.code);
+  const detail = String(error?.message || '');
+
+  /* 1 = PERMISSION_DENIED */
+  if (code === 1) {
+    return new LocationError('permission-denied',
+      'لم تمنح إذن الموقع. فعّل خدمة الموقع من إعدادات ويندوز ← الخصوصية والأمان ← الموقع، ثم أعد المحاولة.',
+      detail);
+  }
+  /* 2 = POSITION_UNAVAILABLE */
+  if (code === 2) {
+    return new LocationError('no-provider',
+      'ويندوز لم يتمكن من تحديد موقعك. تأكد أن خدمة الموقع مفعّلة وأن Wi-Fi متصل — فهي المصدر المعتمد لتحديد الموقع على الحاسوب.',
+      detail);
+  }
+  /* 3 = TIMEOUT */
+  if (code === 3) {
+    return new LocationError('timeout',
+      'استغرق تحديد الموقع وقتًا أطول من المتوقع. أعد المحاولة؛ قد تحتاج القراءة الأولى بضع ثوانٍ.',
+      detail);
+  }
+  return new LocationError('position-failed', 'تعذّر تحديد موقع الجهاز.', detail);
+}
+
+/**
+ * يقرأ موقع الجهاز عبر WebView2.
+ * المحاولة تصاعدية: دقة عالية أولًا، ثم دقة عادية إن انتهت المدة، لأن أول
+ * قراءة على ويندوز قد تستغرق وقتًا أطول وهي تبني مخزون Wi-Fi المحيط.
+ */
+export async function readDevicePosition({ timeoutMs = LOCATION_TIMEOUT_MS } = {}) {
+  const geolocation = geolocationAvailable();
+  if (!geolocation) {
+    throw new LocationError('unsupported', 'هذا النظام لا يوفّر خدمة تحديد الموقع.');
+  }
+
+  const attempt = options => new Promise((resolve, reject) => {
+    let settled = false;
+    const guard = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new LocationError('timeout', 'انتهت مهلة تحديد الموقع.'));
+    }, options.timeout + 2000);
+
+    geolocation.getCurrentPosition(
+      position => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(guard);
+        resolve(position);
+      },
+      error => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(guard);
+        reject(classifyGeolocationError(error));
+      },
+      options,
+    );
+  });
+
   let position;
   try {
-    position = await getCurrentPosition({
-      enableHighAccuracy: true,
-      maximumAge: 0,
-      timeout: LOCATION_TIMEOUT_MS,
-    });
-  } catch (cause) {
-    const reason = String(cause?.message || cause);
-    if (/denied|permission/i.test(reason)) {
-      throw new LocationError('permission-denied-by-system',
-        'ويندوز رفض الوصول إلى الموقع. فعّل خدمة الموقع لهذا التطبيق من الإعدادات.', reason);
+    position = await attempt({ enableHighAccuracy: true, maximumAge: 0, timeout: timeoutMs });
+  } catch (highAccuracyError) {
+    /* رفض المستخدم نهائي — لا معنى لإعادة المحاولة بدقة أقل. */
+    if (highAccuracyError.code === 'permission-denied' || highAccuracyError.code === 'unsupported') {
+      throw highAccuracyError;
     }
-    if (/timeout|unavailable|not available/i.test(reason)) {
-      throw new LocationError('no-provider',
-        'لم يتمكن ويندوز من تحديد موقعك. تأكد أن Wi-Fi مفعّل — فهو المصدر المعتمد لتحديد الموقع على الحاسوب.', reason);
-    }
-    throw new LocationError('position-failed', 'تعذّر تحديد موقع الجهاز.', reason);
+    position = await attempt({ enableHighAccuracy: false, maximumAge: 60_000, timeout: timeoutMs });
   }
+
   const latitude = Number(position?.coords?.latitude);
   const longitude = Number(position?.coords?.longitude);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)
@@ -180,13 +219,13 @@ export async function describePlace(latitude, longitude, fetchImpl = fetch) {
  * @param {object} [options]
  * @param {Function} [options.fetchImpl]
  */
-export async function resolveLocation(api, { fetchImpl = fetch } = {}) {
-  const permission = await ensureLocationPermission(api);
+export async function resolveLocation({ fetchImpl = fetch } = {}) {
+  const permission = await ensureLocationPermission();
   if (permission !== 'granted') {
     throw new LocationError('permission-denied',
       'لم يُمنح إذن الموقع. افتح الإعدادات وامنح تَرتيل الوصول إلى الموقع ثم أعد المحاولة.');
   }
-  const fix = await readDevicePosition(api);
+  const fix = await readDevicePosition();
   const timeZone = timeZoneForCoordinates(fix.latitude, fix.longitude);
   const place = await describePlace(fix.latitude, fix.longitude, fetchImpl);
   return {

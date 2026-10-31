@@ -54,22 +54,31 @@ describe('Tarteel production surface', () => {
     expect(astro).not.toContain('fetch(');
     expect(astro).toContain('solarPosition');
 
-    /* الموقع من ويندوز بدقة عالية، والمنطقة IANA لا فارق ثابت. */
+    /* الموقع من WebView2 بدقة عالية — لا إضافة Tauri للموقع.
+       إضافة tauri-plugin-geolocation لم تُظهر التطبيق في قائمة تطبيقات الموقع
+       في ويندوز إطلاقًا، لأنها لا تمرّ بمسار إذن WebView2. */
+    expect(location).toContain('navigator');
     expect(location).toContain('enableHighAccuracy: true');
     expect(location).toContain('tz-lookup');
-    expect(location).toContain("requestPermissions(['location'])");
+    expect(location).not.toContain('requestPermissions');
 
-    /* الموقع اليدوي وبحث المدن واختيار طريقة الحساب أُزيلت بناءً على طلب صريح. */
+    /* الموقع اليدوي وبحث المدن واختيار طريقة الحساب والضبط الدقيق أُزيلت. */
     expect(settings).not.toContain('اختيار يدوي');
     expect(settings).not.toContain('ps-city');
     expect(settings).not.toContain('طريقة حساب المواقيت');
     expect(settings).not.toContain('حساب صلاة العصر');
+    expect(settings).not.toContain('ضبط دقيق');
     expect(settings).toContain('استخدام موقع الجهاز وطلب الإذن');
+
+    /* لا أثر لإضافة الموقع في الطبقة الأصلية. */
+    const cargo = await read('src-tauri/Cargo.toml');
+    const rust = await read('src-tauri/src/lib.rs');
+    expect(cargo).not.toContain('tauri-plugin-geolocation');
+    expect(rust).not.toContain('tauri_plugin_geolocation');
 
     /* الصوت والتنبيه المسبق والضبط الدقيق هي ما يخصّ المستخدم فعلًا. */
     expect(settings).toContain('صوت الأذان');
     expect(settings).toContain('تنبيه مسبق');
-    expect(settings).toContain('ضبط دقيق');
   });
 
   it('passes PrayerSettings exactly the props it destructures', async () => {
