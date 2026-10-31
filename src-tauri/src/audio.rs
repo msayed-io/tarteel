@@ -27,10 +27,19 @@ pub struct AudioEngine {
   inner: Arc<AudioInner>,
 }
 
+/*
+ * OutputStream في rodio ليس Send لأنه يملك مقبض جهاز الصوت الأصلي.
+ * لكن تَرتيل لا يقرأ منه ولا يكتب فيه من خيوط أخرى — يُحفظ فقط ليبقى الجهاز
+ * مفتوحًا. الوصول إليه محميّ بـ Mutex، والعمليات الفعلية (append/set_volume)
+ * تمر عبر OutputStreamHandle وهو Send. لذلك الإرسال بين الخيوط آمن عمليًا.
+ */
+unsafe impl Send for AudioInner {}
+unsafe impl Sync for AudioInner {}
+
 struct AudioInner {
   /* `OutputStream` يجب أن يبقى حيًّا طوال العمر، وإلا انقطع الصوت فورًا. */
   stream: Mutex<Option<OutputStream>>,
-  handle: Mutex<Option<OutputStreamHandle>>,
+  handle: Mutex<Option<Arc<OutputStreamHandle>>>,
   sink: Mutex<Option<Sink>>,
   volume: AtomicU32,
   muted: AtomicBool,
@@ -60,7 +69,7 @@ impl AudioEngine {
   }
 
   /// يفتح جهاز الصوت عند أول حاجة (فتح متأخر يتجنّب احتكار الجهاز عند الإقلاع).
-  fn ensure_device(&self) -> Result<OutputStreamHandle, String> {
+  fn ensure_device(&self) -> Result<Arc<OutputStreamHandle>, String> {
     let mut handle_slot = self.inner.handle.lock().map_err(|_| "قفل جهاز الصوت تالف")?;
     if let Some(handle) = handle_slot.as_ref() {
       return Ok(handle.clone());
@@ -68,6 +77,7 @@ impl AudioEngine {
     let (stream, handle) = OutputStream::try_default()
       .map_err(|e| format!("تعذر فتح جهاز الصوت: {e}"))?;
     *self.inner.stream.lock().map_err(|_| "قفل مجرى الصوت تالف")? = Some(stream);
+    let handle = Arc::new(handle);
     *handle_slot = Some(handle.clone());
     Ok(handle)
   }
@@ -136,12 +146,16 @@ impl AudioEngine {
 
     self.stop();
     let handle = self.ensure_device()?;
-    let sink = Sink::try_new(&handle).map_err(|e| format!("تعذر إنشاء مسار الصوت: {e}"))?;
+    let sink = Sink::try_new(handle.as_ref()).map_err(|e| format!("تعذر إنشاء مسار الصوت: {e}"))?;
     sink.set_volume(self.effective_volume());
     sink.append(source);
+
+    /* `detach` يستهلك Sink، لذا نُبقي مرجعًا للإيقاف ونُفرغ الارتباط على نسخة
+       منفصلة. بدون detach يبقى الصوت مرتبطًا بعمر الدالة فينقطع فورًا. */
+    let keeper = sink.clone();
     sink.detach();
 
-    *self.inner.sink.lock().map_err(|_| "قفل مسار الصوت تالف")? = Some(sink);
+    *self.inner.sink.lock().map_err(|_| "قفل مسار الصوت تالف")? = Some(keeper);
     *self.inner.last_id.lock().map_err(|_| "قفل سجل التشغيل تالف")? = Some(id.to_string());
     *self.inner.last_at.lock().map_err(|_| "قفل سجل التشغيل تالف")? = now_ms;
     Ok(())

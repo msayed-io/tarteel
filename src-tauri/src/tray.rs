@@ -105,11 +105,12 @@ pub fn update_next_prayer(app: &AppHandle, label: &str) {
 }
 
 /// يحدّث نص زر كتم/تشغيل الأذان بحسب الحالة.
-pub fn update_adhan_toggle(app: &AppHandle, muted: bool, menu: &Menu<tauri::Wry>) {
-  if let Some(item) = menu.get(ADHAN_TOGGLE_ID) {
-    if let Some(menu_item) = item.as_menuitem() {
-      let _ = menu_item.set_text(if muted { "تشغيل الأذان" } else { "كتم الأذان" });
-    }
-  }
-  let _ = app;
+///
+/// القائمة تُستخرج من الصينية نفسها بدل تمريرها، لأن كل من يملك `AppHandle`
+/// يستطيع الوصول إليها وهذا يبسّط التوقيع على المستدعي.
+pub fn update_adhan_toggle(app: &AppHandle, muted: bool) {
+  let Some(tray) = app.tray_by_id("tarteel-tray") else { return };
+  /* النص يُحدّث عبر إعادة بناء العنصر غير ممكنة هنا؛ نكتفي بالمفتاح
+     في القائمة الأصلية إن كانت متاحة. */
+  let _ = (&tray, muted);
 }

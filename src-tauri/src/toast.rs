@@ -98,10 +98,9 @@ fn create_shortcut(exe: &std::path::Path, link: &std::path::Path, app_id: &str) 
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
     COINIT_APARTMENTTHREADED,
   };
-  use windows::Win32::UI::Shell::{
-    FileSystem, IShellLinkW, SetCurrentDirectoryW, ShellLink, PROPERTYKEY,
-  };
-  use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
+  use windows::Win32::System::Com::IPersistFile;
+  use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+  use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, PROPERTYKEY};
 
   /* PKEY_AppUserModel_ID = {9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}, 5 */
   const PKEY_APP_USER_MODEL_ID: PROPERTYKEY = PROPERTYKEY {
@@ -135,7 +134,7 @@ fn create_shortcut(exe: &std::path::Path, link: &std::path::Path, app_id: &str) 
       store.Commit().map_err(|e| format!("تعذر حفظ خصائص الاختصار: {e}"))?;
 
       let link_wide: Vec<u16> = link.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-      let persist: windows::Win32::UI::Shell::IPersistFile = shell_link
+      let persist: IPersistFile = shell_link
         .cast()
         .map_err(|e| format!("تعذر تحويل واجهة الاختصار: {e}"))?;
       persist
@@ -161,7 +160,7 @@ pub fn show_alarm_toast(title: &str, body: &str) -> Result<(), String> {
 
   ensure_start_menu_shortcut()?;
 
-  unsafe {
+  {
     let xml = XmlDocument::new().map_err(|e| format!("تعذر إنشاء مستند الإشعار: {e}"))?;
     xml.LoadXml(&HSTRING::from(build_alarm_xml(title, body)))
       .map_err(|e| format!("تعذر تحميل XML الإشعار: {e}"))?;
