@@ -15,6 +15,9 @@ use tauri::{Emitter, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindow
 use tauri_plugin_notification::NotificationExt;
 use walkdir::WalkDir;
 
+mod alarm;
+mod task_scheduler;
+
 #[derive(Serialize, Clone)]
 pub struct Track { pub path: String, pub file_name: String, pub title: String, pub artist: String, pub duration: Option<u64>, pub cover: Option<String> }
 
@@ -22,27 +25,6 @@ fn supported(p: &Path) -> bool { matches!(p.extension().and_then(|x| x.to_str())
 
 #[derive(Clone)]
 struct AudioServer { root: Arc<RwLock<Option<PathBuf>>>, token: String, port: u16 }
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PrayerEvent { id: String, name: String, at: i64 }
-
-#[derive(Debug, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct SchedulerData {
-  events: Vec<PrayerEvent>,
-  fired_ids: Vec<String>,
-  sleep_deadline_ms: Option<i64>,
-}
-
-struct PrayerScheduler { data: Arc<Mutex<SchedulerData>>, path: PathBuf }
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct AdhanPayload { id: String, name: String, at: i64, notification_error: Option<String> }
-
-const LATE_ALARM_GRACE_MS: i64 = 3 * 60 * 1000;
-const MAX_FIRED_IDS: usize = 240;
 
 fn mime_for(path: &Path) -> &'static str {
   match path.extension().and_then(|x| x.to_str()).unwrap_or_default().to_ascii_lowercase().as_str() {
@@ -132,146 +114,232 @@ fn parse_range(value: &str) -> Option<(u64, u64)> {
   Some((start.parse().ok()?, end.parse().ok().unwrap_or(u64::MAX)))
 }
 
-fn write_scheduler(path: &Path, data: &SchedulerData) -> Result<(), String> {
-  let parent = path.parent().ok_or_else(|| "مسار إعدادات الجدولة غير صالح".to_string())?;
-  fs::create_dir_all(parent).map_err(|e| format!("تعذر إنشاء مجلد إعدادات الصلاة: {e}"))?;
-  let bytes = serde_json::to_vec(data).map_err(|e| format!("تعذر ترميز إعدادات الجدولة: {e}"))?;
-  fs::write(path, bytes).map_err(|e| format!("تعذر حفظ إعدادات الجدولة: {e}"))
+/* ================================================================== *
+ * منظومة التنبيهات — الأوامر وحلقة الإطلاق
+ * ================================================================== */
+
+/// حالة التنبيهات المشتركة بين الواجهة وحلقة الإطلاق.
+struct AlarmHandle { state: alarm::SharedAlarm, path: PathBuf }
+
+/// حدث حان وقته، يُرسل إلى الواجهة لتعرضه في الجزيرة.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AdhanPayload {
+  id: String,
+  key: String,
+  name: String,
+  at: i64,
+  notification_error: Option<String>,
 }
 
-fn read_scheduler(path: &Path) -> SchedulerData {
-  match fs::read(path) {
-    Ok(bytes) => match serde_json::from_slice::<SchedulerData>(&bytes) {
-      Ok(mut data) => { data.fired_ids.truncate(MAX_FIRED_IDS); data },
-      Err(e) => { eprintln!("Tarteel prayer scheduler settings are invalid: {e}"); SchedulerData::default() }
-    },
-    Err(e) if e.kind() == std::io::ErrorKind::NotFound => SchedulerData::default(),
-    Err(e) => { eprintln!("Tarteel prayer scheduler settings could not be read: {e}"); SchedulerData::default() }
-  }
+/// ملخص الحالة، تستعلمه الواجهة بعد الإقلاع.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AlarmStatus {
+  scheduled: usize,
+  fired: usize,
+  next_at: Option<i64>,
+  next_name: Option<String>,
 }
 
-fn process_due(data: &mut SchedulerData, now_ms: i64) -> (Vec<PrayerEvent>, bool, bool) {
-  let mut alarms = Vec::new();
-  let mut changed = false;
-  let fired: HashSet<String> = data.fired_ids.iter().cloned().collect();
-  for event in &data.events {
-    if event.at > now_ms || fired.contains(&event.id) { continue; }
-    data.fired_ids.push(event.id.clone());
-    changed = true;
-    if now_ms.saturating_sub(event.at) <= LATE_ALARM_GRACE_MS { alarms.push(event.clone()); }
-  }
-  if data.fired_ids.len() > MAX_FIRED_IDS { let remove = data.fired_ids.len() - MAX_FIRED_IDS; data.fired_ids.drain(0..remove); changed = true; }
-  let sleep_due = data.sleep_deadline_ms.is_some_and(|deadline| now_ms >= deadline);
-  if sleep_due { data.sleep_deadline_ms = None; changed = true; }
-  (alarms, sleep_due, changed)
+/// يستبدل جدول المواعيد كله. هذا هو المصدر الوحيد للحقيقة.
+#[tauri::command]
+fn set_alarm_schedule(handle: State<AlarmHandle>, events: Vec<alarm::AlarmEvent>) -> Result<usize, String> {
+  let mut state = handle.state.lock().map_err(|_| "تعذر قفل حالة التنبيهات".to_string())?;
+  alarm::apply_events(&mut state, events)?;
+  let count = state.events.len();
+  alarm::write_state(&handle.path, &state)?;
+  Ok(count)
 }
 
 #[tauri::command]
-fn set_prayer_schedule(scheduler: State<PrayerScheduler>, events: Vec<PrayerEvent>) -> Result<(), String> {
-  if events.len() > 500 { return Err("رفضت الجدولة أكثر من 500 موعد في تحديث واحد".into()); }
-  let mut unique = HashSet::new();
-  if events.iter().any(|event| event.id.trim().is_empty() || event.name.trim().is_empty() || !unique.insert(event.id.clone())) {
-    return Err("رفضت جدولة موعد ناقص أو مكرر المعرّف".into());
-  }
-  let mut ordered = events;
-  ordered.sort_by_key(|event| event.at);
-  let mut data = scheduler.data.lock().map_err(|_| "تعذر قفل حالة جدولة الصلاة".to_string())?;
-  data.events = ordered;
-  write_scheduler(&scheduler.path, &data)
+fn set_sleep_deadline(handle: State<AlarmHandle>, deadline_ms: Option<i64>) -> Result<(), String> {
+  let mut state = handle.state.lock().map_err(|_| "تعذر قفل حالة مؤقت النوم".to_string())?;
+  state.sleep_deadline_ms = deadline_ms.filter(|deadline| *deadline > 0);
+  alarm::write_state(&handle.path, &state)
 }
 
 #[tauri::command]
-fn set_sleep_deadline(scheduler: State<PrayerScheduler>, deadline_ms: Option<i64>) -> Result<(), String> {
-  let mut data = scheduler.data.lock().map_err(|_| "تعذر قفل حالة مؤقت النوم".to_string())?;
-  data.sleep_deadline_ms = deadline_ms.filter(|deadline| *deadline > 0);
-  write_scheduler(&scheduler.path, &data)
+fn alarm_status(handle: State<AlarmHandle>) -> Result<AlarmStatus, String> {
+  let state = handle.state.lock().map_err(|_| "تعذر قفل حالة التنبيهات".to_string())?;
+  let now = now_ms();
+  let next = alarm::next_event_after(&state, now);
+  Ok(AlarmStatus {
+    scheduled: state.events.len(),
+    fired: state.fired_ids.len(),
+    next_at: next.map(|event| event.at),
+    next_name: next.map(|event| event.name.clone()),
+  })
 }
 
-fn start_prayer_scheduler(app: tauri::AppHandle, data: Arc<Mutex<SchedulerData>>, path: PathBuf) {
-  let result = thread::Builder::new().name("tarteel-prayer-scheduler".into()).spawn(move || loop {
+/// يزامن مهام ويندوز المجدولة مع المواعيد المقبولة.
+/// يُستدعى من الواجهة بعد كل تحديث للجدول، فتبقى المهام مطابقة دائمًا.
+#[tauri::command]
+fn sync_windows_tasks(handle: State<AlarmHandle>, ahead_ms: Option<i64>) -> Result<usize, String> {
+  let state = handle.state.lock().map_err(|_| "تعذر قفل حالة التنبيهات".to_string())?;
+  let horizon = now_ms() + ahead_ms.unwrap_or(7 * 24 * 3600 * 1000);
+  let specs: Vec<task_scheduler::TaskSpec> = state.events.iter()
+    .filter(|event| event.at > now_ms() && event.at <= horizon)
+    .map(|event| task_scheduler::TaskSpec {
+      name: task_scheduler::task_name_for(&event.id),
+      at_epoch_ms: event.at,
+      label: format!("حان وقت صلاة {}", event.name),
+    })
+    .collect();
+  task_scheduler::sync_tasks(&specs).map_err(|error| error.to_string())
+}
+
+/// يحذف كل مهام تَرتيل من مجدول ويندوز. لا يمسّ أي مهمة أخرى.
+#[tauri::command]
+fn clear_windows_tasks() -> usize {
+  task_scheduler::delete_all_tasks()
+}
+
+/// يُطلق تنبيهًا فورًا لأغراض الاختبار من الإعدادات.
+#[tauri::command]
+fn fire_alarm_now(app: tauri::AppHandle, handle: State<AlarmHandle>, key: Option<String>) -> Result<(), String> {
+  let state = handle.state.lock().map_err(|_| "تعذر قفل حالة التنبيهات".to_string())?;
+  let event = state.events.iter().find(|event| Some(&event.key) == key.as_ref())
+    .or_else(|| state.events.iter().find(|event| event.at > now_ms()))
+    .cloned();
+  drop(state);
+  if let Some(event) = event { deliver_alarm(&app, event); Ok(()) }
+  else { Err("لا يوجد موعد لإرسال تنبيهٍ عنه".to_string()) }
+}
+
+/// اللحظة الحالية بالمللي ثانية. دالة واحدة تستخدمها كل المنظومة.
+fn now_ms() -> i64 {
+  SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default()
+    .as_millis().min(i64::MAX as u128) as i64
+}
+
+/// يُرسل تنبيهًا واحدًا: إشعار ويندوز + حدث للواجهة.
+/// فشل الإشعار لا يمنع الحدث، ونجاح الاثنين لا يكرر أيًا منهما.
+fn deliver_alarm(app: &tauri::AppHandle, event: alarm::AlarmEvent) {
+  let notification_error = app.notification().builder()
+    .title(format!("حان وقت صلاة {}", event.name))
+    .body(format!("حان موعد صلاة {} وفق موقعك وتوقيتك المحلي.", event.name))
+    .show()
+    .err()
+    .map(|error| { eprintln!("Tarteel alarm notification failed: {error}"); error.to_string() });
+  let payload = AdhanPayload {
+    id: event.id, key: event.key, name: event.name, at: event.at, notification_error,
+  };
+  if let Err(error) = app.emit("prayer-adhan", payload) {
+    eprintln!("Tarteel alarm event delivery failed: {error}");
+  }
+  /* إظهار النافذة الرئيسية إن كانت مخفية، حتى يرى المستخدم البطاقة. */
+  if let Some(window) = app.get_webview_window("main") {
+    let _ = window.unminimize();
+  }
+  if let Some(island) = app.get_webview_window("island") {
+    let _ = island.show();
+  }
+}
+
+/// حلقة الإطلاق: تفحص كل 250ms. عند استئناف الجهاز من النوم لا تُطلق أحداثًا
+/// متأخرة، بل تُسجّلها كمُطلقة (انظر alarm::tick).
+fn start_alarm_loop(app: tauri::AppHandle, state: alarm::SharedAlarm, path: PathBuf) {
+  let spawned = thread::Builder::new().name("tarteel-alarm".into()).spawn(move || loop {
     thread::sleep(Duration::from_millis(250));
-    let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().min(i64::MAX as u128) as i64;
-    let (alarms, sleep_due, changed) = match data.lock() {
-      Ok(mut state) => process_due(&mut state, now_ms),
-      Err(e) => { eprintln!("Tarteel prayer scheduler lock failed: {e}"); continue; }
+    let tick_result = {
+      let Ok(mut guard) = state.lock() else { continue };
+      let result = alarm::tick(&mut guard, now_ms());
+      if result.changed {
+        if let Err(error) = alarm::write_state(&path, &guard) {
+          eprintln!("Tarteel alarm persistence failed: {error}");
+        }
+      }
+      result
     };
-    if changed {
-      if let Ok(state) = data.lock() {
-        if let Err(e) = write_scheduler(&path, &state) { eprintln!("Tarteel prayer scheduler persistence failed: {e}"); }
+    for event in tick_result.skipped {
+      /* فات وقته: يُسجَّل بلا صوت حتى لا يُزعج المستخدم بعد ساعات. */
+      eprintln!("Tarteel alarm skipped (too late): {}", event.id);
+    }
+    for event in tick_result.due { deliver_alarm(&app, event); }
+    if tick_result.sleep_due {
+      if let Err(error) = app.emit("sleep-deadline", ()) {
+        eprintln!("Tarteel sleep timer event delivery failed: {error}");
       }
     }
-    for event in alarms {
-      let notification_error = app.notification().builder()
-        .title(format!("حان وقت صلاة {}", event.name))
-        .body(format!("حان موعد صلاة {} وفق الموقع وطريقة الحساب المحددين في تَرتيل.", event.name))
-        .show()
-        .err()
-        .map(|e| { eprintln!("Tarteel native prayer notification failed: {e}"); e.to_string() });
-      let payload = AdhanPayload { id: event.id, name: event.name, at: event.at, notification_error };
-      if let Err(e) = app.emit("prayer-adhan", payload) { eprintln!("Tarteel prayer event delivery failed: {e}"); }
-    }
-    if sleep_due {
-      if let Err(e) = app.emit("sleep-deadline", ()) { eprintln!("Tarteel sleep timer event delivery failed: {e}"); }
-    }
   });
-  if let Err(e) = result { eprintln!("Tarteel prayer scheduler failed to start: {e}"); }
+  if let Err(error) = spawned { eprintln!("Tarteel alarm loop failed to start: {error}"); }
+}
+
+/// الوضع الخفي: يُنفّذه مجدول مهام ويندوز عند موعد الأذان حين يكون التطبيق مغلقًا.
+/// لا يفتح أي نافذة؛ يُطلق التنبيه ويلعب الصوت ثم يخرج.
+fn run_headless_alarm(task_arg: &str) {
+  let state_path = match std::env::var("APPDATA") {
+    Ok(appdata) => PathBuf::from(appdata).join("com.tarteel.desktop").join("alarm-state.json"),
+    Err(_) => { eprintln!("Tarteel headless alarm cannot resolve APPDATA"); return; }
+  };
+  let mut state = alarm::read_state(&state_path);
+  let now = now_ms();
+  let target = state.events.iter()
+    .find(|event| task_scheduler::task_name_for(&event.id) == task_arg && !state.fired_ids.contains(&event.id))
+    .cloned();
+  let Some(event) = target else { return };
+  if now - event.at > alarm::LATE_ALARM_GRACE_MS {
+    /* متأخر جدًا: لا إزعاج. */
+    state.fired_ids.push(event.id.clone());
+    let _ = alarm::write_state(&state_path, &state);
+    return;
+  }
+  state.fired_ids.push(event.id.clone());
+  let _ = alarm::write_state(&state_path, &state);
+
+  /* الإشعار عبر PowerShell/Toast غير متاح بلا سياق تطبيق، لذا نُشغّل التطبيق
+     نفسه في وضع الأذان: يظهر ويُطلق المنبّه. هذا هو المسار الموثوق. */
+  if let Ok(exe) = std::env::current_exe() {
+    let _ = std::process::Command::new(exe)
+      .arg("--adhan-ring")
+      .arg(&event.id)
+      .spawn();
+  }
 }
 
 #[tauri::command]
-fn set_audio_root(server: State<AudioServer>, path: String) -> Result<(), String> {
-  let root = PathBuf::from(path).canonicalize().map_err(|e| format!("مجلد الصوت غير موجود: {e}"))?;
-  if !root.is_dir() { return Err("المسار المختار ليس مجلدًا".into()); }
-  *server.root.write().map_err(|_| "تعذر تحديث مجلد الصوت".to_string())? = Some(root);
+fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
+  let widths = [64.0, 144.0, 384.0, 440.0, 444.0, 480.0];
+  let heights = [34.0, 92.0, 188.0, 210.0, 262.0, 424.0];
+  let tools_height = width == 480.0 && (220.0..=430.0).contains(&height) && height.fract() == 0.0;
+  if !widths.contains(&width) || (!heights.contains(&height) && !tools_height) { return Err("رفضت أبعادًا غير معتمدة لنافذة الجزيرة".into()); }
+  let island = app.get_webview_window("island").ok_or_else(|| "نافذة الجزيرة غير متاحة".to_string())?;
+  let monitor = island.current_monitor().map_err(|e| format!("تعذر تحديد شاشة الجزيرة: {e}"))?
+    .or(island.primary_monitor().map_err(|e| format!("تعذر تحديد الشاشة الرئيسية: {e}"))?)
+    .ok_or_else(|| "لم يُرجع Windows شاشة صالحة لتمركز الجزيرة".to_string())?;
+  let area = monitor.size();
+  let origin = monitor.position();
+  let scale = island.scale_factor().map_err(|e| format!("تعذر قراءة مقياس الشاشة: {e}"))?;
+  // Anchor the top-left corner at an integer physical site derived from the FINAL size.
+  // Measuring the window right after a resize request returns the still in-flight value,
+  // which centred the island one frame off and produced the visible jolt on every resize.
+  let target_width = (width * scale).round() as u32;
+  let target_height = (height * scale).round() as u32;
+  let (left, top) = centered_island_origin((area.width, area.height), (origin.x, origin.y), (target_width, target_height), scale);
+  let target = island.clone();
+  island.run_on_main_thread(move || {
+    if let Err(e) = apply_island_bounds(&target, left, top, target_width, target_height) {
+      eprintln!("Tarteel island bounds could not be applied: {e}");
+    }
+  }).map_err(|e| format!("تعذر جدولة تغيير أبعاد الجزيرة على خيط الواجهة: {e}"))?;
   Ok(())
 }
 
-#[tauri::command]
-fn audio_url(server: State<AudioServer>, path: String) -> Result<String, String> {
-  let candidate = PathBuf::from(&path).canonicalize().map_err(|e| format!("تعذر فتح الملف: {e}"))?;
-  let allowed = server.root.read().map_err(|_| "تعذر قراءة حالة خادم الصوت".to_string())?.as_ref().is_some_and(|root| candidate.starts_with(root));
-  if !allowed || !candidate.is_file() || !supported(&candidate) { return Err("الملف خارج مجلد الصوت أو صيغته غير مدعومة".into()); }
-  let encoded = URL_SAFE_NO_PAD.encode(path.as_bytes());
-  Ok(format!("http://127.0.0.1:{}/audio/{}/{encoded}", server.port, server.token))
-}
-
-#[tauri::command]
-fn scan_directory(path: String) -> Result<Vec<Track>, String> {
-  let root = PathBuf::from(&path); if !root.is_dir() { return Err("المجلد غير موجود أو غير قابل للقراءة".into()); }
-  let mut out = Vec::new();
-  for e in WalkDir::new(root).follow_links(false).into_iter().filter_map(Result::ok) {
-    let p = e.path(); if !e.file_type().is_file() || !supported(p) { continue; }
-    let file_name = p.file_name().and_then(|s| s.to_str()).unwrap_or_default().to_string();
-    let mut title = file_name.clone(); let mut artist = String::new(); let mut duration = None; let mut cover = None;
-    if let Ok(tagged) = Probe::open(p).and_then(|x| x.read()) { if let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) {
-      if let Some(v) = tag.title() { if !v.is_empty() { title = v.to_string(); } } if let Some(v) = tag.artist() { artist = v.to_string(); }
-      if let Some(pic) = tag.pictures().first() { cover = Some(format!("data:{};base64,{}", pic.mime_type().map(|m| m.to_string()).unwrap_or_else(|| "image/jpeg".into()), base64::engine::general_purpose::STANDARD.encode(pic.data()))); }
-    } duration = Some(tagged.properties().duration().as_secs()); }
-    out.push(Track { path: p.to_string_lossy().into_owned(), file_name, title, artist, duration, cover });
-  }
-  out.sort_by_key(|x| x.file_name.to_lowercase()); Ok(out)
-}
-
+/// يحسب موضع الركن الأعلى الأيسر لنافذة متمركزة أفقيًا أعلى الشاشة.
+/// يعيد إحداثيات فيزيائية صحيحة، ويُبقي الركن عددًا صحيحًا لتجنّب أي إزاحة
+/// بكسر بكسل عند مقاييس العرض 125% و150%.
 fn centered_island_origin(area: (u32, u32), origin: (i32, i32), size: (u32, u32), scale: f64) -> (i32, i32) {
   let x = origin.0 as i64 + ((area.0 as i64 - size.0 as i64) / 2);
   let y = origin.1 as i64 + (10.0 * scale).round() as i64;
   (x as i32, y as i32)
 }
 
-/// Applies the island position AND size in one window-manager call.
-///
-/// The island capsule is centred with `left:50%` inside its own window, so it is only
-/// visually still while the window width and the window centre change together. Doing
-/// `set_position` and `set_size` as two separate commands leaves a window in which the
-/// capsule is half the new width away from where it should be, and on Windows the size
-/// command lands a frame or two after the position command. That gap is what shows up
-/// as a shake with a momentary skew right after the collapse animation settles.
-///
 /// `SetWindowPos` changes position and size in a single call, so no frame ever sees one
 /// applied without the other. It has window thread affinity, hence the main-thread hop.
 fn apply_island_bounds(island: &tauri::WebviewWindow, left: i32, top: i32, width: u32, height: u32) -> Result<(), String> {
   apply_island_bounds_native(island, left, top, width, height)
 }
-
 #[cfg(windows)]
 fn apply_island_bounds_native(island: &tauri::WebviewWindow, left: i32, top: i32, width: u32, height: u32) -> Result<(), String> {
   use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
@@ -355,10 +423,12 @@ pub fn run() {
       );
       island.set_position(PhysicalPosition::new(x, y))?;
       island.show()?;
-      let scheduler_path = app.path().app_config_dir()?.join("prayer-scheduler.json");
-      let scheduler_data = Arc::new(Mutex::new(read_scheduler(&scheduler_path)));
-      app.manage(PrayerScheduler { data: scheduler_data.clone(), path: scheduler_path.clone() });
-      start_prayer_scheduler(app.handle().clone(), scheduler_data, scheduler_path);
+      /* حالة التنبيهات: تُقرأ من القرص عند الإقلاع، فتبقى المعرّفات المُطلقة
+         محفوظة عبر إعادة التشغيل ولا يتكرر أي أذان. */
+      let alarm_path = alarm::state_path(&app.path().app_config_dir()?);
+      let alarm_state = Arc::new(Mutex::new(alarm::read_state(&alarm_path)));
+      app.manage(AlarmHandle { state: alarm_state.clone(), path: alarm_path.clone() });
+      start_alarm_loop(app.handle().clone(), alarm_state, alarm_path);
       Ok(())
     })
     .on_window_event(|window, event| {
@@ -368,44 +438,18 @@ pub fn run() {
         }
       }
     })
-    .invoke_handler(tauri::generate_handler![scan_directory, set_audio_root, audio_url, resize_island, set_prayer_schedule, set_sleep_deadline])
+    .invoke_handler(tauri::generate_handler![
+      scan_directory, set_audio_root, audio_url, resize_island,
+      set_alarm_schedule, set_sleep_deadline, sync_windows_tasks, clear_windows_tasks,
+      alarm_status, fire_alarm_now
+    ])
     .run(tauri::generate_context!())
     .expect("error while running Tauri application");
 }
 
 #[cfg(test)]
-mod prayer_scheduler_tests {
+mod island_tests {
   use super::*;
-
-  #[test]
-  fn prayer_alarm_is_emitted_once_and_only_in_the_late_grace_period() {
-    let mut state = SchedulerData { events: vec![PrayerEvent { id: "date|fajr".into(), name: "الفجر".into(), at: 1_000 }], ..Default::default() };
-    let (first, sleep_due, changed) = process_due(&mut state, 1_000);
-    assert_eq!(first.len(), 1);
-    assert!(!sleep_due);
-    assert!(changed);
-    let (second, _, _) = process_due(&mut state, 1_001);
-    assert!(second.is_empty());
-
-    let mut stale = SchedulerData { events: vec![PrayerEvent { id: "old|asr".into(), name: "العصر".into(), at: 1_000 }], ..Default::default() };
-    let (late, _, _) = process_due(&mut stale, 1_000 + LATE_ALARM_GRACE_MS + 1);
-    assert!(late.is_empty());
-    assert_eq!(stale.fired_ids, vec!["old|asr"]);
-  }
-
-  #[test]
-  fn sleep_deadline_is_cleared_and_fired_only_once() {
-    let mut state = SchedulerData { sleep_deadline_ms: Some(5_000), ..Default::default() };
-    let (_, due, changed) = process_due(&mut state, 4_999);
-    assert!(!due);
-    assert!(!changed);
-    let (_, due, changed) = process_due(&mut state, 5_000);
-    assert!(due);
-    assert!(changed);
-    assert_eq!(state.sleep_deadline_ms, None);
-    let (_, due, _) = process_due(&mut state, 5_001);
-    assert!(!due);
-  }
 
   #[test]
   fn island_anchor_keeps_the_corner_integral_and_centred_for_every_state() {

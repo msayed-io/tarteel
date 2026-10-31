@@ -66,7 +66,12 @@ describe('Tarteel production surface', () => {
     for (const action of ['seek-by', 'set-speed', 'set-sleep', 'set-prayer-preference', 'resume-after-adhan']) expect(main).toContain(`payload.action === '${action}'`);
     expect(main).toContain('audio.current.playbackRate = Number(next.speed)');
     expect(main).toContain("sleepMode: 'end'");
-    expect(rust).toContain('set_prayer_schedule');
+    /* المنظومة القديمة أُعيد بناؤها: الجدولة الآن تمرّ بـ set_alarm_schedule
+       ومهام ويندوز، لا بأمر set_prayer_schedule القديم. */
+    expect(rust).toContain('set_alarm_schedule');
+    expect(rust).toContain('sync_windows_tasks');
+    expect(rust).toContain('mod alarm;');
+    expect(rust).toContain('mod task_scheduler;');
     expect(rust).toContain('tauri_plugin_notification::init()');
     expect(rust).toContain('WindowEvent::CloseRequested');
   });

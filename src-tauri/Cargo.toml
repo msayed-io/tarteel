@@ -30,4 +30,8 @@ custom-protocol = ["tauri/custom-protocol"]
 # The island applies position and size in one SetWindowPos call so the capsule can never
 # render half-shifted. That needs the Win32 WindowsAndMessaging bindings.
 [target."cfg(windows)".dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_System_Time",
+] }
