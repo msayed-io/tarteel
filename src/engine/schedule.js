@@ -20,7 +20,7 @@ import { ARABIC_NAMES, nextPrayer, currentPrayer } from './astro.js';
 import { haversineKm } from './location.js';
 /* المحرك الفلكي المنقول من Dar-Al-Hikayat: مكتبة adhan الرسمية، عبر سلسلة
    UTC متصلة. يحل محل الحساب اليدوي السابق بالكامل. */
-import { getDayPrayers } from '../lib/prayer-times.ts';
+import { getDayPrayers, getPrayerTimeline } from '../lib/prayer-times.ts';
 
 /** عدد الأيام المحسوبة مسبقًا. 3 أيام تكفي للمسار المتصل حول منتصف الليل. */
 export const TIMELINE_DAYS = 3;
@@ -79,6 +79,14 @@ export function buildSchedule(location, { now = Date.now(), adjust, methodId, sh
   }
   events.sort((a, b) => a.at - b.at);
 
+  /* الخط الزمني المرجعي: مصدر الحقيقة لـ«الآن» و«التالية» والمتبقي. */
+  let timeline = null;
+  try {
+    timeline = getPrayerTimeline(toPrayerLocation({ ...location, timeZone }), method, new Date(now));
+  } catch (cause) {
+    console.error('Tarteel prayer timeline failed', cause);
+  }
+
   /* الإزاحة اليدوية الاختيارية تُطبّق على المواعيد القادمة فقط. */
   const adjusted = applyAdjust(events, adjust);
   /* أحداث الآيلاند: ستة صفوف كما هو تصميمها. */
@@ -101,6 +109,20 @@ export function buildSchedule(location, { now = Date.now(), adjust, methodId, sh
     timeZone,
     /* توافق صريح مع عقد الآيلاند الذي يقرأ schedule.timezone بحرف صغير. */
     timezone: timeZone,
+    /* الحالة المحسوبة من المحرك المرجعي نفسه، لا من اشتقاق محلي. */
+    current: timeline?.current ? {
+      key: timeline.current.key, name: timeline.current.name,
+      at: Math.round(timeline.current.date.getTime()),
+      localTime: timeline.current.timeFormatted,
+    } : null,
+    next: timeline?.next ? {
+      key: timeline.next.key, name: timeline.next.name,
+      at: Math.round(timeline.next.date.getTime()),
+      localTime: timeline.next.timeFormatted,
+    } : null,
+    remainingSeconds: timeline?.remainingSeconds ?? null,
+    progress: timeline?.progress ?? null,
+    timezoneInfo: timeline?.timezoneInfo || null,
     builtAt: now,
   };
 }
@@ -113,6 +135,39 @@ const ISLAND_KEYS = new Set(['fajr', 'sunrise', 'dhuhr', 'asr', 'maghrib', 'isha
 /** الاسم العربي لكل مفتاح، بما في ذلك ما لا تعرفه astro مثل الضحى. */
 const EXTRA_NAMES = { duha: 'الضحى' };
 const arabicName = key => ARABIC_NAMES[key] || EXTRA_NAMES[key] || key;
+
+/**
+ * يبني الخط الزمني من كائن PrayerLocation المرجعي مباشرة.
+ * هذا هو الربط الذي يطلبه العقد: pass location straight in.
+ *
+ * لاحظ أن getPrayerTimeline نفسها تحسب السلسلة المتصلة
+ * [عشاء الأمس → فجر اليوم → ظهر → عصر → مغرب → عشاء → فجر الغد]
+ * وتُرجع الحالية والقادمة والمتبقي والنسبة — فلا نعيد اشتقاقها.
+ */
+export function buildTimelineFromLocation(location, { method = 'auto', now = new Date() } = {}) {
+  const resolved = resolveMethodId(method, location?.countryCode, location?.timezoneId || location?.timeZone);
+  const reference = toPrayerLocation(location);
+  return { method: resolved, timeline: getPrayerTimeline(reference, resolved, now) };
+}
+
+/**
+ * ترجمة الموقع الداخلي إلى كائن PrayerLocation بالعقد الصارم.
+ * الإحداثيات تُقرّب إلى ٦ أرقام عشرية كما يفعل المرجع (enrichCoordinatesToLocation).
+ */
+export function toPrayerLocation(location) {
+  return {
+    latitude: Number(Number(location?.latitude).toFixed(6)),
+    longitude: Number(Number(location?.longitude).toFixed(6)),
+    cityName: location?.cityName || location?.cityNameAr || location?.label || '',
+    cityNameAr: location?.cityNameAr || location?.cityName || location?.label || '',
+    countryNameAr: location?.countryNameAr || location?.country || undefined,
+    timezoneId: location?.timezoneId || location?.timeZone || 'Africa/Cairo',
+    isAutoDetected: location?.isAutoDetected !== false,
+    accuracyMeters: location?.accuracy ?? null,
+    capturedAt: location?.capturedAt || Date.now(),
+    displayAddress: location?.displayAddress || undefined,
+  };
+}
 
 /** أسماء الطرق كما في المرجع. */
 export const METHOD_NAMES = {

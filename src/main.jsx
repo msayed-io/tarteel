@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import PrayerSettings from './PrayerSettings.jsx';
+import { displayPlaceName } from './engine/display.js';
 import { resolveLocation, readDevicePosition, locationNeedsRefresh, describeLocationError } from './engine/location.js';
 import { buildSchedule, scheduleNeedsRebuild, alarmEvents, upcoming, current as currentPrayerOf, countdownLabel, toNativeEvents } from './engine/schedule.js';
 import './styles.css';
@@ -25,16 +26,7 @@ const norm = value => String(value)
   .trim().toLowerCase();
 const count = n => n === 0 ? 'لا توجد تلاوات' : n === 1 ? 'تلاوة واحدة' : n === 2 ? 'تلاوتان' : n <= 10 ? `${ar(n)} تلاوات` : `${ar(n)} تلاوة`;
 /** اسم المكان العربي: المدينة، المحافظة، الدولة — بلا أي منطقة زمنية إنجليزية. */
-const placeLabel = location => {
-  if (!location) return '';
-  /* عقد PrayerLocation المرجعي: cityNameAr ثم cityName ثم label */
-  const detailed = String(location.cityNameAr || location.cityName || location.label || '').trim();
-  if (detailed) return detailed;
-  const parts = [location.city, location.region, location.country]
-    .map(part => String(part || '').trim())
-    .filter((part, index, all) => part && all.indexOf(part) === index);
-  return parts.join('، ');
-};
+const placeLabel = location => (location ? displayPlaceName(location) : '');
 
 /** الاسم العربي الكامل للمكان كما سيظهر في الآيلاند. */
 const prayerLocationLabel = config => placeLabel(config?.location) || 'موقعي';

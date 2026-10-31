@@ -201,20 +201,12 @@ export async function reverseGeocodeCoordinates(
   const arcgisHierarchy = buildArcGISHierarchy(arcgisAddress);
   const photonHierarchy = buildPhotonHierarchy(photonProperties);
 
-  /*
-   * ترتيب الأفضلية:
-   * Nominatim (OpenStreetMap) أولًا لأنه الوحيد الذي يعيد أسماء عربية حقيقية
-   * للحي والشارع والمحافظة داخل مصر. ArcGIS يعيد أسماء POI لاتينية
-   * («American Dream Ismailia») فلا يصلح للعرض في واجهة عربية، ويأتي بعد
-   * Nominatim وBigDataCloud احتياطًا.
-   * خوارزميات التفكيك الأربع نفسها لم تُمس.
-   */
   const candidates: ReverseGeocodeResult[] = [
     {
-      placeName: nominatimHierarchy,
-      countryName: firstNonEmpty(nominatimAddress.country as string | undefined),
-      displayAddress: firstNonEmpty(nominatim?.display_name as string | undefined),
-      source: "nominatim",
+      placeName: arcgisHierarchy,
+      countryName: firstNonEmpty(arcgisAddress.Country as string | undefined),
+      displayAddress: firstNonEmpty(arcgisAddress.Match_addr as string | undefined, arcgisAddress.Address as string | undefined),
+      source: "arcgis",
     },
     {
       placeName: bdcHierarchy,
@@ -223,10 +215,10 @@ export async function reverseGeocodeCoordinates(
       source: "bigdatacloud",
     },
     {
-      placeName: arcgisHierarchy,
-      countryName: firstNonEmpty(arcgisAddress.Country as string | undefined),
-      displayAddress: firstNonEmpty(arcgisAddress.Match_addr as string | undefined, arcgisAddress.Address as string | undefined),
-      source: "arcgis",
+      placeName: nominatimHierarchy,
+      countryName: firstNonEmpty(nominatimAddress.country as string | undefined),
+      displayAddress: firstNonEmpty(nominatim?.display_name as string | undefined),
+      source: "nominatim",
     },
     {
       placeName: photonHierarchy,

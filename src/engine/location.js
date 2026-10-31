@@ -24,11 +24,12 @@ import { methodForTimeZone } from './astro.js';
 /* منظومة الموقع المنقولة حرفيًا من Dar-Al-Hikayat-Desktop. */
 import { reverseGeocodeCoordinates } from '../lib/reverse-geocoding.ts';
 import {
-  enrichCoordinatesToLocation,
+  autoDetectLocation,
   guessTimezone,
   saveSavedLocation,
   getLastSavedLocation,
   findNearestArabPlace,
+  LOCATION_ACTIONABLE_ERROR_MESSAGE,
 } from '../lib/gps-location.ts';
 
 /** عتبة الدقة المقبولة (بالمتر). أعلى من ذلك يُعدّ موقعًا تقريبيًا. */
@@ -195,8 +196,14 @@ export async function describePlace(latitude, longitude, fetchImpl = fetch) {
    * واحدة تفكك الهرم بقواعدها الصارمة (buildNominatimHierarchy وغيرها).
    */
   const geocode = await reverseGeocodeCoordinates(Number(latitude), Number(longitude));
-  /* لا نصوص لاتينية في واجهة عربية: إن لم يحمل الاسم حرفًا عربيًا نسقط للأوفلاين. */
-  const hasArabic = text => /[\u0600-\u06FF]/.test(String(text || ''));
+  /*
+   * حارس العرض الوحيد: المرجع يرجّح ArcGIS أولًا، وArcGIS يعيد أسماء POI
+   * لاتينية لبعض النقاط («American Dream Ismailia»). الاسم نفسه يبقى كما
+   * أخرجه المرجع، ولا يُعدَّل؛ لكن إن خلا تمامًا من أي حرف عربي فلا يصلح
+   * لواجهة عربية، فننتقل إلى قاعدة الأماكن العربية المرفقة بالمرجع نفسه.
+   */
+  /* حرف عربي حقيقي لا علامة ترقيم: «،» تقع داخل U+0600–U+06FF. */
+  const hasArabic = text => /[\u0620-\u063F\u0641-\u064A\u0660-\u06FF]/.test(String(text || ''));
   if (!geocode || (!hasArabic(geocode.placeName) && !hasArabic(geocode.countryName))) {
     /* الطبقة الأخيرة أوفلاين: أقرب مركز من قاعدة المرجع نفسها. */
     const nearest = findNearestArabPlace(Number(latitude), Number(longitude));
@@ -236,38 +243,77 @@ export async function describePlace(latitude, longitude, fetchImpl = fetch) {
  * @param {object} [options]
  * @param {Function} [options.fetchImpl]
  */
-export async function resolveLocation({ fetchImpl = fetch } = {}) {
-  const permission = await ensureLocationPermission();
-  if (permission !== 'granted') {
-    throw new LocationError('permission-denied',
-      'لم يُمنح إذن الموقع. افتح الإعدادات وامنح تَرتيل الوصول إلى الموقع ثم أعد المحاولة.');
-  }
-  const fix = await readDevicePosition();
-
+export async function resolveLocation() {
   /*
-   * enrichCoordinatesToLocation هي دالة المرجع نفسها: تحدد المنطقة الزمنية،
-   * وتجلب الاسم التفصيلي، وتحفظ الكاش المحلي فورًا، وتُرجع كائن
-   * PrayerLocation بعقده الصارم (cityName / cityNameAr / timezoneId).
+   * نقطة الدخول الرسمية للمنظومة: autoDetectLocation من gps-location.ts.
+   * لا التفاف ولا محاولات مفرقة — هي وحدها المسؤولة عن:
+   *   • الطبقة عالية الدقة (enableHighAccuracy: true, timeout: 10000, maximumAge: 0)
+   *   • الطبقة الاحتياطية الأسرع عند الفشل
+   *   • استدعاء enrichCoordinatesToLocation
+   *   • تشغيل المزودين الأربعة بالتوازي وتفكيك الهرم وحفظ الكاش فورًا
+   *
+   * الوظيفة الوحيدة المتبقية هنا هي الترجمة إلى العقد الداخلي لتَرتيل
+   * (countryCode و رمز المنطقة الزمنية)، ورسالة الخطأ العربية الموحدة.
    */
-  const location = await enrichCoordinatesToLocation(
-    fix.latitude, fix.longitude, fix.accuracy ?? null, Date.now(),
-    Number.isFinite(fix.accuracy) && fix.accuracy <= ACCURACY_TARGET_M ? 'gps_precise' : 'gps_approximate',
-  );
+  /*
+   * المرجع يبتلع رمز رفض الإذن ويستبدله برسالته الموحّدة، فلا يمكن تمييز
+   * «مرفوض» من «تعذر» بعد الاستدعاء. لذلك نراقب استدعاء المتصفح نفسه
+   * أثناء تنفيذ autoDetectLocation، ثم نستنطق السبب منه.
+   */
+  let lastGeoError = null;
+  const originalPosition = globalThis.navigator?.geolocation?.getCurrentPosition;
+  if (typeof originalPosition === 'function') {
+    const patched = function (success, failure, options) {
+      return originalPosition.call(this, success, error => { lastGeoError = error; if (failure) failure(error); }, options);
+    };
+    try { globalThis.navigator.geolocation.getCurrentPosition = patched; } catch { /* خاصية للقراءة فقط */ }
+  }
 
-  const timeZone = location.timezoneId || timeZoneForCoordinates(fix.latitude, fix.longitude);
+  let location;
+  try {
+    location = await autoDetectLocation();
+  } catch (cause) {
+    const observed = lastGeoError || cause;
+    /*
+     * المرجع يبتلع رمز الخطأ ويُرجع رسالة موحّدة (الطبقة 5). لكن الواجهة
+     * تحتاج التمييز بين «إذن مرفوض» و«تعذر التحديد» لأن الإصلاح مختلف:
+     * الأول يُحل من إعدادات ويندوز، والثاني يعاد المحاولة. لذلك نستنطق
+     * سبب الفشل ونعيد الرمز مع رسالة المرجع نفسها دون تغييرها.
+     */
+    /* GeolocationPositionError: 1 = مرفوض، 2 = غير متاح، 3 = انتهت المهلة. */
+    const domCode = Number(observed?.code);
+    const raw = cause?.message || '';
+    const code = domCode === 1 || /PERMISSION|denied|إذن|رفض/i.test(raw)
+      ? 'permission-denied'
+      : domCode === 3 || /TIMEOUT|timeout/i.test(raw) ? 'position-failed'
+      : 'location-unavailable';
+    throw new LocationError(code, raw.includes('تعذر') ? raw : LOCATION_ACTIONABLE_ERROR_MESSAGE);
+  } finally {
+    if (typeof originalPosition === 'function') {
+      try { globalThis.navigator.geolocation.getCurrentPosition = originalPosition; } catch { /* تجاهل */ }
+    }
+  }
+
+  if (!location || !Number.isFinite(Number(location.latitude))) {
+    throw new LocationError('location-unavailable', LOCATION_ACTIONABLE_ERROR_MESSAGE);
+  }
+
+  const timeZone = location.timezoneId || timeZoneForCoordinates(location.latitude, location.longitude);
   const countryCode = methodForTimeZone(timeZone).defaultCountryCode || '';
-  /* الاسم التفصيلي الكامل كما يخرجه المرجع: القرآن/الحي + المركز + المحافظة */
   const detailed = String(location.cityNameAr || location.cityName || '').trim();
 
   return {
     source: 'device',
+    /* المرجع يقرّب إلى ٦ أرقام عشرية — دقة كافية للتطابق مع أذان المسجد. */
     latitude: location.latitude,
     longitude: location.longitude,
-    accuracy: location.accuracyMeters ?? fix.accuracy,
-    precise: Number.isFinite(fix.accuracy) ? fix.accuracy <= ACCURACY_TARGET_M : false,
+    accuracy: location.accuracyMeters ?? null,
+    precise: Number.isFinite(Number(location.accuracyMeters))
+      ? Number(location.accuracyMeters) <= ACCURACY_TARGET_M
+      : false,
     timeZone,
     timezoneId: timeZone,
-    /* عقد المرجع حرفيًا */
+    /* عقد PrayerLocation حرفيًا */
     cityName: location.cityName || detailed,
     cityNameAr: detailed,
     countryNameAr: location.countryNameAr || '',
@@ -278,6 +324,8 @@ export async function resolveLocation({ fetchImpl = fetch } = {}) {
     country: location.countryNameAr || '',
     countryCode,
     label: detailed,
+    isAutoDetected: location.isAutoDetected !== false,
+    capturedAt: location.capturedAt || Date.now(),
     resolvedAt: Date.now(),
   };
 }

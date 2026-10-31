@@ -10,8 +10,8 @@ const reference = name => resolve(root, 'reference/dar-al-hikayat', `${name}.ts`
 const local = name => resolve(root, 'src/lib', `${name}.ts`);
 
 describe('مطابقة المستودع المرجعي', () => {
-  /* خمسة ملفات منقولة بايت-ببايت بلا أي تعديل. */
-  for (const file of ['gps-location', 'egypt-places', 'prayer-times', 'prayer-config', 'prayer-cities']) {
+  /* كل الملفات منقولة بايت-ببايت، بلا استثناء. */
+  for (const file of ['reverse-geocoding', 'gps-location', 'egypt-places', 'prayer-times', 'prayer-config', 'prayer-cities']) {
     it(`${file}.ts منقول حرفيًا بلا تعديل`, () => {
       expect(existsSync(local(file))).toBe(true);
       const a = readFileSync(local(file), 'utf8');
@@ -20,25 +20,19 @@ describe('مطابقة المستودع المرجعي', () => {
     });
   }
 
-  /*
-   * reverse-geocoding.ts هو الملف الوحيد المعدَّل، وتعديله في موضع واحد:
-   * ترتيب المرشحين (Nominatim أولًا) لأن ArcGIS يعيد أسماء POI لاتينية.
-   * خوارزميات الهرم الأربع لم تُمس. الاختبار يثبت أن الفرق محصور في الترتيب.
-   */
-  it('reverse-geocoding: الفرق محصور في ترتيب المرشحين فقط', () => {
-    const ours = readFileSync(local('reverse-geocoding'), 'utf8');
-    const theirs = readFileSync(reference('reverse-geocoding'), 'utf8');
-    for (const fn of ['buildNominatimHierarchy', 'buildBDCHierarchy', 'buildArcGISHierarchy', 'buildPhotonHierarchy']) {
-      const extract = src => {
-        const i = src.indexOf(`function ${fn}`);
-        const j = src.indexOf('\n}', i);
-        return src.slice(i, j).replace(/\s+/g, ' ');
-      };
-      expect(extract(ours), `${fn} عُدِّلت`).toBe(extract(theirs));
-    }
-    /* الأسطر غير المرتبطة بالترتيب متطابقة */
-    const urlLines = src => src.split('\n').filter(l => l.includes('Url =') || l.includes('timeout('));
-    expect(urlLines(ours)).toEqual(urlLines(theirs));
+  it('ترتيب المزودين مطابق للمرجع: ArcGIS ثم BigDataCloud ثم Nominatim ثم Photon', () => {
+    const src = readFileSync(local('reverse-geocoding'), 'utf8');
+    /* نقرأ داخل مصفوفة المرشحين فقط، لا تعريف النوع أعلى الملف. */
+    const arrayStart = src.indexOf('const candidates:');
+    const arrayBody = src.slice(arrayStart, src.indexOf('];', arrayStart));
+    const order = ['"arcgis"', '"bigdatacloud"', '"nominatim"', '"photon"']
+      .map(s => arrayBody.indexOf(s));
+    for (let i = 1; i < order.length; i++) expect(order[i], 'ترتيب المرشحين').toBeGreaterThan(order[i - 1]);
+    /* الشروط الأربعة كلها حاضرة */
+    expect(src).toContain('langCode=ARA');
+    expect(src).toContain('localityLanguage=ar');
+    expect(src).toContain('zoom=18');
+    expect(src).toContain('photon.komoot.io');
   });
 
   it('reverse-geocoding فيه دوال الهرم الأربع كما في المرجع', () => {

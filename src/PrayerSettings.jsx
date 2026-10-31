@@ -1,3 +1,4 @@
+import { displayPlaceWithCountry } from './engine/display.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
 import { resolveLocation, describeLocationError } from './engine/location.js';
@@ -230,17 +231,6 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
 
 /** اسم المكان بالعربية: المدينة، المحافظة، الدولة. */
 function placeName(location) {
-  if (!location) return '';
-  /* عقد المرجع: الاسم التفصيلي الكامل أولًا. */
-  const detailed = String(location.cityNameAr || location.cityName || '').trim();
-  if (detailed) {
-    return location.countryNameAr ? `${detailed}، ${location.countryNameAr}` : detailed;
-  }
-  const parts = [location.city, location.region, location.country]
-    .map(part => String(part || '').trim())
-    .filter((part, index, all) => part && all.indexOf(part) === index);
-  if (parts.length) return parts.join('، ');
-  /* لا اسم مكان عربي متاح: نطلب من المستخدم تحديث الموقع بدل عرض منطقة
-     زمنية إنجليزية في واجهة عربية. */
-  return 'الموقع غير محدد بدقة — اضغط تحديث موقعي';
+  /* الاسم التفصيلي العربي الكامل، مع الدولة إن وُجدت — بلا أي نص لاتيني. */
+  return displayPlaceWithCountry(location);
 }
