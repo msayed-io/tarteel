@@ -118,5 +118,12 @@ describe('Tarteel production surface', () => {
     const goBody = island.split('async function go(')[1].split('async function')[0];
     expect(goBody).not.toContain('reportWindowError(cause);return');
     expect(island).toContain('const ask=++hostSeq');
+    // The native window is a fixed stage that only grows. Shrinking it back after the
+    // collapse made the WebView repaint at the old centre for a frame, which is the shake.
+    // v0.1.5 never resized the window at all, and it was smooth.
+    expect(island).not.toContain('shrinkHostWhenSettled');
+    const tickBody = island.split('function tick(now)')[1].split('const kick=')[0];
+    expect(tickBody).not.toContain('resize');
+    expect(tickBody).not.toContain('host');
   });
 });
