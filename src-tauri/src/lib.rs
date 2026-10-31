@@ -257,6 +257,38 @@ fn centered_island_origin(area: (u32, u32), origin: (i32, i32), size: (u32, u32)
   (x as i32, y as i32)
 }
 
+/// Applies the island position AND size in one window-manager call.
+///
+/// The island capsule is centred with `left:50%` inside its own window, so it is only
+/// visually still while the window width and the window centre change together. Doing
+/// `set_position` and `set_size` as two separate commands leaves a window in which the
+/// capsule is half the new width away from where it should be, and on Windows the size
+/// command lands a frame or two after the position command. That gap is what shows up
+/// as a shake with a momentary skew right after the collapse animation settles.
+///
+/// `SetWindowPos` changes position and size in a single call, so no frame ever sees one
+/// applied without the other. It has window thread affinity, hence the main-thread hop.
+fn apply_island_bounds(island: &tauri::WebviewWindow, left: i32, top: i32, width: u32, height: u32) -> Result<(), String> {
+  apply_island_bounds_native(island, left, top, width, height)
+}
+
+#[cfg(windows)]
+fn apply_island_bounds_native(island: &tauri::WebviewWindow, left: i32, top: i32, width: u32, height: u32) -> Result<(), String> {
+  use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
+  let hwnd = island.hwnd().map_err(|e| format!("تعذر الحصول على مقبض نافذة الجزيرة: {e}"))?;
+  // SAFETY: hwnd belongs to this process and this call runs on the window's own thread.
+  unsafe { SetWindowPos(hwnd, None, left, top, width as i32, height as i32, SWP_NOZORDER | SWP_NOACTIVATE) }
+    .map_err(|e| format!("تعذر تطبيق موضع وحجم الجزيرة في نداء واحد: {e}"))
+}
+
+#[cfg(not(windows))]
+fn apply_island_bounds_native(island: &tauri::WebviewWindow, left: i32, top: i32, width: u32, height: u32) -> Result<(), String> {
+  let scale = island.scale_factor().map_err(|e| e.to_string())?;
+
+  island.set_position(PhysicalPosition::new(left, top)).map_err(|e| e.to_string())?;
+  island.set_size(tauri::Size::Logical(tauri::LogicalSize::new(width as f64 / scale, height as f64 / scale))).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
   let widths = [64.0, 144.0, 384.0, 440.0, 444.0, 480.0];
@@ -275,9 +307,13 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
   // which centred the island one frame off and produced the visible jolt on every resize.
   let target_width = (width * scale).round() as u32;
   let target_height = (height * scale).round() as u32;
-  let (x, y) = centered_island_origin((area.width, area.height), (origin.x, origin.y), (target_width, target_height), scale);
-  island.set_position(PhysicalPosition::new(x, y)).map_err(|e| format!("تعذر إعادة تمركز نافذة الجزيرة: {e}"))?;
-  island.set_size(tauri::Size::Logical(tauri::LogicalSize::new(width, height))).map_err(|e| format!("تعذر تغيير حجم نافذة الجزيرة: {e}"))?;
+  let (left, top) = centered_island_origin((area.width, area.height), (origin.x, origin.y), (target_width, target_height), scale);
+  let target = island.clone();
+  island.run_on_main_thread(move || {
+    if let Err(e) = apply_island_bounds(&target, left, top, target_width, target_height) {
+      eprintln!("Tarteel island bounds could not be applied: {e}");
+    }
+  }).map_err(|e| format!("تعذر جدولة تغيير أبعاد الجزيرة على خيط الواجهة: {e}"))?;
   Ok(())
 }
 

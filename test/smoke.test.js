@@ -104,6 +104,15 @@ describe('Tarteel production surface', () => {
     // set_position must not read a stale in-flight inner_size() to compute the anchor.
     expect(resizeBody).not.toContain('inner_size');
     expect(resizeBody).toContain('centered_island_origin');
+    // Position and size must reach the window manager as ONE call, otherwise a frame can
+    // render with the new width but the old centre, which is the collapse-time shake.
+    expect(resizeBody).not.toContain('set_position');
+    expect(resizeBody).not.toContain('set_size');
+    expect(resizeBody).toContain('run_on_main_thread');
+    const rustFile = await read('src-tauri/src/lib.rs');
+    const atomic = rustFile.split('fn apply_island_bounds_native')[1].split('\n}')[0];
+    expect(atomic).toContain('SetWindowPos');
+    expect(atomic).toContain('SWP_NOACTIVATE');
     // The transition must still complete when the window grows or shrinks.
     const island = await read('island.html');
     const goBody = island.split('async function go(')[1].split('async function')[0];
