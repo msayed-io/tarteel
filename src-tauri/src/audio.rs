@@ -40,7 +40,7 @@ struct AudioInner {
   /* `OutputStream` يجب أن يبقى حيًّا طوال العمر، وإلا انقطع الصوت فورًا. */
   stream: Mutex<Option<OutputStream>>,
   handle: Mutex<Option<Arc<OutputStreamHandle>>>,
-  sink: Mutex<Option<Sink>>,
+  sink: Mutex<Option<Arc<Sink>>>,
   volume: AtomicU32,
   muted: AtomicBool,
   last_id: Mutex<Option<String>>,
@@ -150,12 +150,12 @@ impl AudioEngine {
     sink.set_volume(self.effective_volume());
     sink.append(source);
 
-    /* `detach` يستهلك Sink، لذا نُبقي مرجعًا للإيقاف ونُفرغ الارتباط على نسخة
-       منفصلة. بدون detach يبقى الصوت مرتبطًا بعمر الدالة فينقطع فورًا. */
-    let keeper = sink.clone();
-    sink.detach();
-
-    *self.inner.sink.lock().map_err(|_| "قفل مسار الصوت تالف")? = Some(keeper);
+    /*
+     * Sink في rodio 0.20 يبدأ التشغيل فورًا بمجرد append، ويستمر ما دام
+     * حيًّا. لا حاجة إلى detach: نخزّنه في الحالة فيبقى حيًّا حتى نستبدله
+     * أو نوقفه. الإسقاط وحده هو ما يقطع الصوت.
+     */
+    *self.inner.sink.lock().map_err(|_| "قفل مسار الصوت تالف")? = Some(Arc::new(sink));
     *self.inner.last_id.lock().map_err(|_| "قفل سجل التشغيل تالف")? = Some(id.to_string());
     *self.inner.last_at.lock().map_err(|_| "قفل سجل التشغيل تالف")? = now_ms;
     Ok(())

@@ -100,7 +100,8 @@ fn create_shortcut(exe: &std::path::Path, link: &std::path::Path, app_id: &str) 
   };
   use windows::Win32::System::Com::IPersistFile;
   use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
-  use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, PROPERTYKEY};
+  use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
+  use windows::Win32::UI::Shell::PROPERTYKEY;
 
   /* PKEY_AppUserModel_ID = {9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}, 5 */
   const PKEY_APP_USER_MODEL_ID: PROPERTYKEY = PROPERTYKEY {
@@ -127,7 +128,7 @@ fn create_shortcut(exe: &std::path::Path, link: &std::path::Path, app_id: &str) 
       let store: IPropertyStore = shell_link
         .cast()
         .map_err(|e| format!("تعذر الوصول إلى خصائص الاختصار: {e}"))?;
-      let app_id_value = windows::core::PROPVARIANT::from(HSTRING::from(app_id));
+      let app_id_value = windows::Win32::System::Variant::PROPVARIANT::from(app_id);
       store
         .SetValue(&PKEY_APP_USER_MODEL_ID, &app_id_value)
         .map_err(|e| format!("تعذر ضبط معرّف التطبيق: {e}"))?;
