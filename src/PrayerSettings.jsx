@@ -1,19 +1,26 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
-import { resolveLocation, describeLocationError, LocationError } from './engine/location.js';
-import { METHODS } from './engine/astro.js';
+import { resolveLocation, describeLocationError } from './engine/location.js';
+import { METHODS, MANUAL_ADJUST_LIMIT, ARABIC_NAMES, methodForTimeZone } from './engine/astro.js';
 import './PrayerSettings.css';
 
 /**
- * إعدادات الصلاة والتنبيهات — مبسّطة بقرار المنتج:
+ * إعدادات الصلاة والتنبيهات.
  *
- *   • الموقع: زر واحد يطلب إذن ويندوز ويجلب الموقع الحقيقي. لا بحث مدن،
- *     ولا إدخال إحداثيات باليد — لأن أي خطأ في الموقع يعني مواقيت خاطئة.
- *   • طريقة الحساب: لا يسأل المستخدم عنها. تُشتق من دولته تلقائيًا وتُعرض
- *     للعلم فقط.
- *   • العصر: يُشتق من الدولة تلقائيًا ويُعرض للعلم فقط.
- *   • يبقى للمستخدم ما يخصّه فعلًا: صوت الأذان ومستواه والتنبيه المسبق.
+ * قرارات التصميم:
+ *   • لا زر حفظ. كل تغيير يُحفظ ويُعاد بناء الجدول ويُنشر إلى Rust فورًا
+ *     (debounce قصير لتفادي عشرات الاستدعاءات أثناء تحريك المؤشر).
+ *   • الموقع من ويندوز فقط. لا بحث مدن ولا إدخال إحداثيات.
+ *   • الطريقة والمذهب لهما قيمة تلقائية مشتقة من الدولة، مع إمكانية التغيير.
+ *   • كل نص للمستخدم عربي صريح: اسم المدينة والمحافظة لا إحداثيات جافة.
  */
+const SAVE_DELAY_MS = 400;
+
+const METHOD_ORDER = [
+  'auto', 'egyptian', 'umm_al_qura', 'muslim_world_league', 'karachi',
+  'dubai', 'kuwait', 'turkey', 'singapore', 'isna',
+];
+
 export default function PrayerSettings({ config, schedule, onSave, onClose, onPreviewAlarm }) {
   const [location, setLocation] = useState(config.location || null);
   const [busy, setBusy] = useState(false);
@@ -23,9 +30,46 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
   const [preAlarmMinutes, setPreAlarmMinutes] = useState(config.preAlarmMinutes ?? 0);
   const [adhanSound, setAdhanSound] = useState(Boolean(config.adhanSound ?? true));
   const [adhanVolume, setAdhanVolume] = useState(config.adhanVolume ?? 80);
+  const [methodId, setMethodId] = useState(config.methodId || 'auto');
+  const [school, setSchool] = useState(config.school ?? 'auto');
+  const [adjust, setAdjust] = useState(config.adjust || {});
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
-  /* إذا تغيّر الموقع خارج النافذة، نظهر القيمة الحديثة. */
-  useEffect(() => { if (config.location) setLocation(config.location); }, [config.location]);
+  /* آخر إعدادات أُرسلت، لمنع حلقة حفظ لا نهائية عند تحديث الأب. */
+  const lastSavedRef = useRef('');
+  const timerRef = useRef(0);
+
+  const snapshot = useCallback(() => ({
+    location,
+    notificationsAllowed,
+    preAlarmMinutes: Number(preAlarmMinutes) || 0,
+    adhanSound,
+    adhanVolume: Number(adhanVolume),
+    methodId,
+    school,
+    adjust,
+  }), [location, notificationsAllowed, preAlarmMinutes, adhanSound, adhanVolume, methodId, school, adjust]);
+
+  /* الحفظ التلقائي: أي تغيير ⇒ حفظ بعد هدوء قصير. */
+  useEffect(() => {
+    if (!location) return;
+    const payload = snapshot();
+    const key = JSON.stringify(payload);
+    if (key === lastSavedRef.current) return;
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(async () => {
+      lastSavedRef.current = key;
+      try {
+        await onSave(payload);
+        setError('');
+        setStatus('حُفظ تلقائيًا');
+      } catch (cause) {
+        setError(String(cause?.message || cause));
+        setStatus('');
+      }
+    }, SAVE_DELAY_MS);
+    return () => clearTimeout(timerRef.current);
+  }, [snapshot, location, onSave]);
 
   const requestDeviceLocation = async () => {
     setBusy(true); setError(''); setStatus('جارٍ طلب إذن الموقع من ويندوز…');
@@ -33,8 +77,8 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
       const resolved = await resolveLocation();
       setLocation(resolved);
       setStatus(resolved.precise
-        ? `تم تحديد موقعك بدقة ${Math.round(resolved.accuracy)} متر — ${resolved.city || resolved.timeZone}.`
-        : `تم تحديد موقعك تقريبًا (دقة ${Math.round(resolved.accuracy || 0)} متر). لتحسين الدقة فعّل Wi-Fi.`);
+        ? `تم تحديد موقعك بدقة ${Math.round(resolved.accuracy)} متر.`
+        : `تم تحديد موقعك تقريبًا (${Math.round(resolved.accuracy || 0)} متر). لتحسين الدقة فعّل Wi-Fi.`);
     } catch (cause) {
       setError(describeLocationError(cause));
       setStatus('');
@@ -55,29 +99,14 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
     }
   };
 
-  const save = async event => {
-    event.preventDefault();
-    if (!location) { setError('اطلب موقع الجهاز أولًا — لا يمكن حساب مواقيت دون موقع مؤكد.'); return; }
-    setBusy(true); setError('');
-    try {
-      await onSave({
-        location,
-        notificationsAllowed,
-        preAlarmMinutes: Number(preAlarmMinutes) || 0,
-        adhanSound,
-        adhanVolume: Number(adhanVolume),
-      });
-      setStatus('حُفظت الإعدادات وأُعيد بناء جدول المواقيت.');
-    } catch (cause) {
-      setError(String(cause?.message || cause));
-      setStatus('');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const method = schedule?.methodName || (location ? 'تُحدَّد تلقائيًا بعد حساب المواقيت' : '—');
-  const asrLabel = schedule?.shadowFactor === 2 ? 'الحنفي (ظل ×٢)' : 'الجمهور (ظل ×١)';
+  /* اسم عربي صريح: المدينة، المحافظة، الدولة. لا إحداثيات جافة. */
+  const placeLabel = location ? placeName(location) : '';
+  const effectiveMethod = methodId === 'auto'
+    ? (schedule?.methodName || methodForTimeZone(location?.timeZone).method.name)
+    : (METHODS[methodId]?.name || '—');
+  const effectiveSchool = school === 'auto'
+    ? (schedule?.shadowFactor === 2 ? 'الحنفي (ظل ×٢)' : 'الجمهور (ظل ×١)')
+    : (Number(school) === 2 ? 'الحنفي (ظل ×٢)' : 'الجمهور (ظل ×١)');
 
   return (
     <div className="prayer-settings-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
@@ -85,7 +114,7 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
         <header className="prayer-settings-head">
           <div>
             <h2 id="ps-title">إعدادات الصلاة والتنبيهات</h2>
-            <p>يُحدَّد موقعك تلقائيًا من ويندوز، وتُشتق طريقة الحساب من دولتك.</p>
+            <p>يُحفظ كل تغيير تلقائيًا. يُحدَّد موقعك من ويندوز وتُشتق طريقة الحساب من دولتك.</p>
           </div>
           <button type="button" className="ps-close" aria-label="إغلاق الإعدادات" onClick={onClose}>×</button>
         </header>
@@ -96,10 +125,9 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
           <div className="ps-current" aria-live="polite">
             {location ? (
               <>
-                <b>{location.city ? `${location.city}${location.country ? `، ${location.country}` : ''}` : 'موقع الجهاز'}</b>
+                <b>{placeLabel}</b>
                 <span>
-                  {Number(location.latitude).toFixed(4)}, {Number(location.longitude).toFixed(4)}
-                  {location.timeZone ? ` · ${location.timeZone}` : ''}
+                  {location.timeZone}
                   {Number.isFinite(location.accuracy) ? ` · دقة ${Math.round(location.accuracy)} م` : ''}
                 </span>
               </>
@@ -110,14 +138,27 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
           </button>
         </div>
 
-        {/* ---------- طريقة الحساب: تلقائية ---------- */}
+        {/* ---------- طريقة الحساب ---------- */}
         <div className="ps-section">
           <h3>طريقة الحساب</h3>
-          <p className="ps-auto">
-            <b>{method}</b>
-            <span>تُختار تلقائيًا حسب دولتك: {methodsForCountry(location?.countryCode)}</span>
-            <span>حساب العصر: <b>{asrLabel}</b></span>
-          </p>
+          <div className="ps-row">
+            <label htmlFor="ps-method">الطريقة</label>
+            <select id="ps-method" value={methodId} onChange={e => setMethodId(e.target.value)}>
+              <option value="auto">تلقائي حسب الدولة — {methodForTimeZone(location?.timeZone).method.name}</option>
+              {METHOD_ORDER.filter(id => id !== 'auto').map(id => (
+                <option key={id} value={id}>{METHODS[id].name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="ps-row">
+            <label htmlFor="ps-school">حساب العصر</label>
+            <select id="ps-school" value={String(school)} onChange={e => setSchool(e.target.value === 'auto' ? 'auto' : Number(e.target.value))}>
+              <option value="auto">تلقائي حسب الدولة</option>
+              <option value="1">جمهور الفقهاء (ظل ×١)</option>
+              <option value="2">المذهب الحنفي (ظل ×٢)</option>
+            </select>
+          </div>
+          <p className="ps-hint">المطبَّق الآن: <b>{effectiveMethod}</b> · <b>{effectiveSchool}</b></p>
         </div>
 
         {/* ---------- التنبيهات ---------- */}
@@ -152,24 +193,48 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
           )}
         </div>
 
+        {/* ---------- الضبط الدقيق (اختياري، مطوي) ---------- */}
+        <div className="ps-section">
+          <button type="button" className="ps-disclosure" aria-expanded={showAdvanced} onClick={() => setShowAdvanced(v => !v)}>
+            {showAdvanced ? 'إخفاء' : 'إظهار'} الضبط الدقيق للمواقيت (اختياري)
+          </button>
+          {showAdvanced && (
+            <div className="ps-adjust">
+              {Object.entries(ARABIC_NAMES).filter(([key]) => key !== 'sunrise').map(([key, name]) => (
+                <label key={key}>
+                  <span>{name}</span>
+                  <input
+                    type="number" min={-MANUAL_ADJUST_LIMIT} max={MANUAL_ADJUST_LIMIT} step={1}
+                    value={adjust[key] ?? 0}
+                    onChange={e => setAdjust({
+                      ...adjust,
+                      [key]: Math.max(-MANUAL_ADJUST_LIMIT, Math.min(MANUAL_ADJUST_LIMIT, Number(e.target.value) || 0)),
+                    })}
+                  />
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
         {error && <p className="ps-error" role="alert">{error}</p>}
         {status && <p className="ps-status" role="status">{status}</p>}
 
         <footer className="ps-actions">
-          <button type="button" className="ps-cancel" onClick={onClose} disabled={busy}>إلغاء</button>
-          <button type="button" className="ps-save" onClick={save} disabled={busy || !location}>
-            {busy ? 'جارٍ الحفظ…' : 'حفظ وإعادة بناء المواقيت'}
-          </button>
+          <button type="button" className="ps-save" onClick={onClose}>تم</button>
         </footer>
       </section>
     </div>
   );
 }
 
-/** أسماء الطرق المعتمدة في الدول ذات الأولوية، للعرض فقط. */
-function methodsForCountry(countryCode) {
-  const code = String(countryCode || '').toUpperCase();
-  const found = Object.values(METHODS).filter(method => method.countryCodes.includes(code));
-  if (found.length) return found.map(method => method.name).join('، ');
-  return 'رابطة العالم الإسلامي (الافتراضي العالمي)';
+/** اسم المكان بالعربية: المدينة، المحافظة، الدولة. */
+function placeName(location) {
+  if (!location) return '';
+  const parts = [location.city, location.region, location.country]
+    .map(part => String(part || '').trim())
+    .filter((part, index, all) => part && all.indexOf(part) === index);
+  if (parts.length) return parts.join('، ');
+  /* لا وصف شبكي: نعرض المنطقة الزمنية مقروءة بدل الإحداثيات الجافة. */
+  return location.timeZone ? `موقع داخل نطاق ${location.timeZone}` : 'موقع الجهاز';
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   computeDay, buildTimeline, civilDateAnchorUtc, civilDateAt, addDays,
-  solarPosition, julianDay, methodForCountry, shadowFactorForCountry, nextPrayer, currentPrayer,
+  solarPosition, julianDay, methodForCountry, shadowFactorForCountry, nextPrayer, currentPrayer, methodForTimeZone,
 } from '../src/engine/astro.js';
 
 const D = Math.PI / 180;
@@ -226,5 +226,57 @@ describe('العروض العالية وحدود الإدخال', () => {
   it('addDays يعبر حدود الشهر والسنة', () => {
     expect(addDays({ year: 2026, month: 12, day: 31 }, 1)).toEqual({ year: 2027, month: 1, day: 1 });
     expect(addDays({ year: 2026, month: 3, day: 1 }, -1)).toEqual({ year: 2026, month: 2, day: 28 });
+  });
+});
+
+
+describe('اللحظات المطلقة أعداد صحيحة — منع فشل IPC', () => {
+  /* عطل حقيقي: قيمة مثل 179332850336.03 أُرسلت إلى Rust التي تتوقع i64،
+     ففشل فك الترميز وسقطت الجدولة كلها. المصدر: تحويل JD يعطي كسورًا. */
+  it('كل مواقيت اليوم أعداد صحيحة', () => {
+    const day = computeDay({
+      latitude: 30.7717, longitude: 31.8982, timeZone: 'Africa/Cairo',
+      countryCode: 'EG', year: 2026, month: 11, day: 1,
+    });
+    for (const [key, value] of Object.entries(day.instants)) {
+      expect(Number.isInteger(value), `${key} must be an integer, got ${value}`).toBe(true);
+    }
+  });
+
+  it('كل أحداث المسار أعداد صحيحة وصالحة كـ i64', () => {
+    const events = buildTimeline({
+      latitude: 30.7717, longitude: 31.8982, timeZone: 'Africa/Cairo',
+      countryCode: 'EG', from: Date.UTC(2026, 9, 31, 12), daysAhead: 3,
+    });
+    for (const event of events) {
+      expect(Number.isInteger(event.at)).toBe(true);
+      expect(Number.isSafeInteger(event.at)).toBe(true);
+      expect(event.at).toBeGreaterThan(1_600_000_000_000);
+      expect(event.at).toBeLessThan(4_100_000_000_000);
+    }
+  });
+});
+
+describe('اشتقاق الدولة من المنطقة الزمنية', () => {
+  /* عطل حقيقي: موقع في مصر حُسب برابطة العالم الإسلامي لأن رمز الدولة
+     كان فارغًا بعد فشل جلب اسم المكان. */
+  it('مصر تُعطي الهيئة المصرية لا الافتراضي العالمي', () => {
+    const { method, defaultCountryCode } = methodForTimeZone('Africa/Cairo');
+    expect(defaultCountryCode).toBe('EG');
+    expect(method.id).toBe('egyptian');
+    expect(method.fajrAngle).toBe(19.5);
+    expect(method.ishaAngle).toBe(17.5);
+  });
+
+  it('السعودية تُعطي أم القرى والخليج يُعطي رابطة العالم الإسلامي', () => {
+    expect(methodForTimeZone('Asia/Riyadh').method.id).toBe('umm_al_qura');
+    expect(methodForTimeZone('Asia/Dubai').method.id).toBe('muslim_world_league');
+    expect(methodForTimeZone('America/New_York').method.id).toBe('isna');
+    expect(methodForTimeZone('Asia/Karachi').method.id).toBe('karachi');
+  });
+
+  it('منطقة زمنية مجهولة تسقط إلى الافتراضي بلا انهيار', () => {
+    expect(methodForTimeZone('Antarctica/Troll').method.id).toBe('muslim_world_league');
+    expect(methodForTimeZone(undefined).method.id).toBe('muslim_world_league');
   });
 });

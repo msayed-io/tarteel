@@ -41,8 +41,33 @@ pub struct AlarmEvent {
     pub key: String,
     /// الاسم العربي للعرض.
     pub name: String,
-    /// اللحظة المطلقة (epoch ms).
+    /// اللحظة المطلقة (epoch ms). تُستقبل كـ f64 ثم تُقرَّب، لأن JavaScript
+    /// لا تفرّق بين int و float وقد يصل الكسر عبر IPC فيفشل فك الترميز كله.
+    #[serde(deserialize_with = "epoch_from_number")]
     pub at: i64,
+}
+
+/// يقرأ رقمًا (صحيحًا أو عشريًا أو نصًا رقميًا) ويحوّله إلى i64.
+///
+/// عطل حقيقي حدث: محرك الفلك ينتج لحظات بكسور عشرية لأنها مشتقة من اليوم
+/// اليولياني، فأرسلت JavaScript قيمة `179332850336.03` بينما الحقل `i64`،
+/// ففشل فك الترميز وفشلت الجدولة كلها. التحويل هنا يجعل الطبقة الأصلية
+/// منيعة أمام أي كسر قادم من أي مصدر، بدل الاعتماد على انضباط الطرف الآخر.
+fn epoch_from_number<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let number = match &value {
+        serde_json::Value::Number(n) => n.as_f64(),
+        serde_json::Value::String(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    };
+    match number {
+        Some(f) if f.is_finite() => Ok(f.round() as i64),
+        _ => Err(D::Error::custom(format!("لحظة زمنية غير صالحة: {value}"))),
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -136,6 +161,12 @@ pub fn apply_events(state: &mut AlarmState, mut events: Vec<AlarmEvent>) -> Resu
         }
         if event.at <= 0 {
             return Err("رفضت جدولة موعد بلحظة غير صالحة.".to_string());
+        }
+        /* حماية من قيم مشوهة: بأي وحدة كانت، لحظة 1970 قريبة أو سنة 5138 ليست موعد صلاة. */
+        const MIN_SANE_MS: i64 = 1_600_000_000_000;   // 2020-09
+        const MAX_SANE_MS: i64 = 4_100_000_000_000;   // 2099-12
+        if !(MIN_SANE_MS..=MAX_SANE_MS).contains(&event.at) {
+            return Err(format!("رفضت جدولة موعد خارج المدى الزمني المعقول: {}", event.id));
         }
         if !seen.insert(event.id.clone()) {
             return Err(format!("رفضت جدولة موعد مكرر المعرّف: {}", event.id));
@@ -282,6 +313,33 @@ mod tests {
         let mut state = AlarmState::default();
         let events: Vec<AlarmEvent> = (0..MAX_EVENTS + 1).map(|i| event(&format!("e{i}"), 1_000 + i as i64)).collect();
         assert!(apply_events(&mut state, events).is_err());
+    }
+
+    #[test]
+    fn accepts_floating_point_timestamps_from_javascript() {
+        /* العطل الأصلي: 179332850336.03 وصل من JS فرفضه i64. */
+        let json = r#"{"id":"2026-11-01|fajr","key":"fajr","name":"الفجر","at":1793328503360.03}"#;
+        let event: AlarmEvent = serde_json::from_str(json).expect("float timestamp must deserialize");
+        assert_eq!(event.at, 1793328503360);
+    }
+
+    #[test]
+    fn accepts_string_and_integer_timestamps() {
+        let from_string: AlarmEvent = serde_json::from_str(
+            r#"{"id":"a","key":"fajr","name":"الفجر","at":"1793328503360"}"#,
+        ).expect("numeric string must deserialize");
+        assert_eq!(from_string.at, 1793328503360);
+        let from_int: AlarmEvent = serde_json::from_str(
+            r#"{"id":"b","key":"fajr","name":"الفجر","at":1793328503360}"#,
+        ).expect("integer must deserialize");
+        assert_eq!(from_int.at, 1793328503360);
+    }
+
+    #[test]
+    fn rejects_nonsense_timestamps() {
+        assert!(serde_json::from_str::<AlarmEvent>(r#"{"id":"a","key":"fajr","name":"x","at":"abc"}"#).is_err());
+        let mut state = AlarmState::default();
+        assert!(apply_events(&mut state, vec![AlarmEvent { id: "z".into(), key: "fajr".into(), name: "الفجر".into(), at: 5 }]).is_err());
     }
 
     #[test]

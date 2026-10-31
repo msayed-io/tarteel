@@ -37,7 +37,7 @@ const ALARM_KEYS = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'];
  * @param {object} [options.adjust] إزاحات يدوية بالدقائق (−5..+5)
  * @returns {{events:Array, days:Array, method:string, methodName:string, timeZone:string, builtAt:number}}
  */
-export function buildSchedule(location, { now = Date.now(), adjust } = {}) {
+export function buildSchedule(location, { now = Date.now(), adjust, methodId, shadowFactor } = {}) {
   if (!location || !Number.isFinite(Number(location.latitude)) || !Number.isFinite(Number(location.longitude))) {
     throw new Error('لا يمكن بناء جدول دون موقع مؤكد.');
   }
@@ -49,6 +49,8 @@ export function buildSchedule(location, { now = Date.now(), adjust } = {}) {
     timeZone: location.timeZone,
     countryCode: location.countryCode || '',
     adjust,
+    methodId,
+    shadowFactor,
   };
 
   const events = buildTimeline({ ...common, from: now, daysAhead: TIMELINE_DAYS });
@@ -91,10 +93,28 @@ export function buildSchedule(location, { now = Date.now(), adjust } = {}) {
     days,
     method: sample.method,
     methodName: sample.methodName,
+    requestedMethod: methodId || 'auto',
     shadowFactor: sample.shadowFactor,
     timeZone: location.timeZone,
     builtAt: now,
   };
+}
+
+/**
+ * يبني الحمولة المرسلة إلى Rust: لحظات صحيحة، واسم عربي، ومفتاح.
+ * التحصين هنا خط الدفاع الأخير قبل IPC: أي كسر عشري يفشل فك الترميز في Rust
+ * ويُسقط الجدولة كلها، فلا نسمح به بالمرور.
+ */
+export function toNativeEvents(schedule) {
+  if (!Array.isArray(schedule?.events)) return [];
+  return schedule.events
+    .filter(event => Number.isFinite(Number(event.at)))
+    .map(event => ({
+      id: String(event.id),
+      key: String(event.key),
+      name: String(event.name || ARABIC_NAMES[event.key] || event.key),
+      at: Math.round(Number(event.at)),
+    }));
 }
 
 /** الأحداث التي تستحق تنبيهًا فقط (بلا شروق). */

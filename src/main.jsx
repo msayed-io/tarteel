@@ -5,7 +5,7 @@ import { emit, listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import PrayerSettings from './PrayerSettings.jsx';
 import { resolveLocation, readDevicePosition, locationNeedsRefresh, describeLocationError } from './engine/location.js';
-import { buildSchedule, scheduleNeedsRebuild, alarmEvents, upcoming, current as currentPrayerOf, countdownLabel } from './engine/schedule.js';
+import { buildSchedule, scheduleNeedsRebuild, alarmEvents, upcoming, current as currentPrayerOf, countdownLabel, toNativeEvents } from './engine/schedule.js';
 import './styles.css';
 
 const DIG = '٠١٢٣٤٥٦٧٨٩';
@@ -28,7 +28,7 @@ const readJson = (key, fallback) => { try { const value = localStorage.getItem(k
 const DEFAULT_PRAYER_CONFIG = {
   location: null, showNext: false, pauseAtAdhan: true,
   notificationsAllowed: false, adhanSound: true, adhanVolume: 80,
-  preAlarmMinutes: 0, adjust: {},
+  preAlarmMinutes: 0, adjust: {}, methodId: 'auto', school: 'auto',
 };
 const DEFAULT_AUDIO_PREFS = { speed: 1, sleepMode: 'off', sleepMinutes: 0, sleepDeadline: null };
 /* بصمة الجدول: الموقع والضبط الدقيق فقط. طريقة الحساب لم تعد اختيارًا
@@ -44,6 +44,8 @@ const prayerSignature = config => {
     Number(loc.longitude).toFixed(5),
     loc.timeZone || '',
     adjustKey,
+    config?.methodId || 'auto',
+    String(config?.school ?? 'auto'),
   ].join('|');
 };
 const prayerDayKey = (epoch, timeZone) => {
@@ -206,7 +208,7 @@ function App() {
    * المهام المجدولة هي ما يُبقي الأذان يعمل والتطبيق مغلق.
    */
   const publishScheduleToNative = async schedule => {
-    const events = (schedule?.events || []).map(({ id, key, name, at }) => ({ id, key, name, at }));
+    const events = toNativeEvents(schedule);
     await invoke('set_alarm_schedule', { events });
     /* فشل مهام ويندوز لا يُسقط الجدولة المقيمة: تُغطّى الحالتان معًا. */
     invoke('sync_windows_tasks', { aheadMs: 7 * 24 * 3600 * 1000 })
@@ -237,7 +239,11 @@ function App() {
       return null;
     }
     const requestId = ++scheduleRequestRef.current;
-    const built = buildSchedule(config.location, { adjust: config.adjust });
+    const built = buildSchedule(config.location, {
+      adjust: config.adjust,
+      methodId: config.methodId && config.methodId !== 'auto' ? config.methodId : undefined,
+      shadowFactor: config.school === 2 ? 2 : config.school === 1 ? 1 : undefined,
+    });
     if (requestId !== scheduleRequestRef.current) return prayerScheduleRef.current;
     return storePrayerSchedule(config, built);
   };
@@ -294,10 +300,6 @@ function App() {
     localStorage.setItem('tarteel.prayer.settings', JSON.stringify(next));
     const result = await loadAndPublishSchedule(next);
     await startLocationWatch(next);
-    setPrayerSettingsOpen(false);
-    if (!next.notificationsAllowed) {
-      setError('المواقيت محدّثة، لكن إشعارات ويندوز غير ممنوحة؛ ستظهر البطاقة داخل التطبيق فقط.');
-    }
     return result;
   };
 

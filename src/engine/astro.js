@@ -73,6 +73,12 @@ const fixAngle = a => ((a % 360) + 360) % 360;
  * ------------------------------------------------------------------ */
 
 /** اليوم اليولياني من لحظة مطلقة (epoch ms). */
+/** يضمن أن كل لحظة مطلقة عدد صحيح بالمللي ثانية. */
+export const toEpochMs = value => {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n) : NaN;
+};
+
 export function julianDay(epochMs) {
   return epochMs / 86400000 + 2440587.5;
 }
@@ -212,10 +218,17 @@ function clampLatitudeForAltitude(lat, declination, angle) {
   return sign * Math.max(0, limit - 0.001);
 }
 
-/** يحوّل اليوم اليولياني إلى لحظة مطلقة (epoch ms). */
+/**
+ * يحوّل اليوم اليولياني إلى لحظة مطلقة (epoch ms) صحيحة.
+ *
+ * التقريب هنا ضروري لا تجميلي: تحويل JD يعطي كسورًا عشرية دائمًا، وTauri
+ * يمرّر الأرقام إلى Rust التي تتوقع i64 فيفشل فك الترميز. الوقت بالمليمتر
+ * ثانية لا يحمل معنى دون الجزء الصحيح، فالتقريب يزيل الفشل من جذره بدل
+ * ترقيعه في طبقة الاستدعاء.
+ */
 function jdToEpoch(jd) {
   if (!Number.isFinite(jd)) return NaN;
-  return (jd - 2440587.5) * 86400000;
+  return Math.round((jd - 2440587.5) * 86400000);
 }
 
 /* ------------------------------------------------------------------ *
@@ -229,6 +242,38 @@ export function methodForCountry(countryCode) {
     if (method.countryCodes.includes(code)) return method;
   }
   return METHODS.muslim_world_league;
+}
+
+/**
+ * خريطة المنطقة الزمنية ← الدولة المرجعية ← طريقة الحساب.
+ *
+ * لماذا المنطقة الزمنية؟ لأن وصف المكان قد يفشل (شبكة، CSP، خدمة خارجية)،
+ * فيبقى رمز الدولة فارغًا فتسقط الطريقة إلى الافتراضي العالمي — وهو ما حدث
+ * فعلًا: موقع في مصر حُسب برابطة العالم الإسلامي.
+ *
+ * لكل منطقة زمنية دولة مرجعية واحدة في سياق المواقيت، وذلك أدقّ من الافتراضي.
+ */
+const TIMEZONE_COUNTRY = {
+  'Africa/Cairo': 'EG', 'Africa/Khartoum': 'SD', 'Africa/Tripoli': 'LY',
+  'Asia/Riyadh': 'SA', 'Asia/Dubai': 'AE', 'Asia/Kuwait': 'KW', 'Asia/Qatar': 'QA',
+  'Asia/Bahrain': 'BH', 'Asia/Muscat': 'OM', 'Asia/Aden': 'YE',
+  'Asia/Amman': 'JO', 'Asia/Beirut': 'LB', 'Asia/Damascus': 'SY',
+  'Asia/Baghdad': 'IQ', 'Asia/Hebron': 'PS', 'Asia/Gaza': 'PS',
+  'Asia/Karachi': 'PK', 'Asia/Kolkata': 'IN', 'Asia/Dhaka': 'BD', 'Asia/Kabul': 'AF',
+  'Asia/Colombo': 'LK', 'Asia/Kathmandu': 'NP', 'Asia/Male': 'MV',
+  'Europe/Istanbul': 'TR', 'Asia/Istanbul': 'TR',
+  'Africa/Casablanca': 'MA', 'Africa/Algiers': 'DZ', 'Africa/Tunis': 'TN',
+  'Africa/Nouakchott': 'MR', 'Africa/Mogadishu': 'SO',
+  'Asia/Kuala_Lumpur': 'MY', 'Asia/Singapore': 'SG', 'Asia/Jakarta': 'ID',
+  'America/New_York': 'US', 'America/Chicago': 'US', 'America/Denver': 'US',
+  'America/Los_Angeles': 'US', 'America/Toronto': 'CA', 'America/Vancouver': 'CA',
+  'Europe/London': 'GB', 'Europe/Paris': 'FR', 'Europe/Berlin': 'DE',
+};
+
+/** يحدّد الدولة من المنطقة الزمنية، ثم منها الطريقة. */
+export function methodForTimeZone(timeZone) {
+  const country = TIMEZONE_COUNTRY[String(timeZone || '')] || '';
+  return { method: methodForCountry(country), defaultCountryCode: country };
 }
 
 /** معامل ظل العصر تلقائيًا من رمز الدولة. */

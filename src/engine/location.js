@@ -20,6 +20,7 @@
  */
 
 import tzLookup from 'tz-lookup';
+import { methodForTimeZone } from './astro.js';
 
 /** عتبة الدقة المقبولة (بالمتر). أعلى من ذلك يُعدّ موقعًا تقريبيًا. */
 export const ACCURACY_TARGET_M = 1500;
@@ -228,6 +229,9 @@ export async function resolveLocation({ fetchImpl = fetch } = {}) {
   const fix = await readDevicePosition();
   const timeZone = timeZoneForCoordinates(fix.latitude, fix.longitude);
   const place = await describePlace(fix.latitude, fix.longitude, fetchImpl);
+  /* إن فشل الوصف الشبكي، تُستنتج الدولة من المنطقة الزمنية حتى لا تسقط
+     طريقة الحساب إلى الافتراضي العالمي داخل مصر أو السعودية. */
+  const countryCode = place?.countryCode || methodForTimeZone(timeZone).defaultCountryCode || '';
   return {
     source: 'device',
     latitude: fix.latitude,
@@ -238,7 +242,7 @@ export async function resolveLocation({ fetchImpl = fetch } = {}) {
     city: place?.city || '',
     region: place?.region || '',
     country: place?.country || '',
-    countryCode: place?.countryCode || '',
+    countryCode,
     resolvedAt: Date.now(),
   };
 }
