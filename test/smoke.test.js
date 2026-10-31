@@ -162,8 +162,15 @@ describe('Tarteel production surface', () => {
     const islandBuilder = rust.split('WebviewWindowBuilder::new(app, "island"')[1].split('.build()?')[0];
     expect(islandBuilder).not.toContain('.parent(');
     expect(rust).toContain('centered_island_origin');
-    expect(rust).toContain('window.label() == "main"');
-    expect(rust).toContain('island.destroy()');
+    expect(rust).toContain('window.label() != "main"');
+    /* تغيّر مقصود في v0.6.0: (X) يُخفي إلى الصينية ولا يقتل العملية، لأن
+       قتلها يُلغي الأذان. الخروج النهائي من قائمة الصينية وحدها. */
+    expect(rust).toContain('api.prevent_close()');
+    expect(rust).toContain('tray::hide_to_tray');
+    /* الخروج النهائي معرّف في tray.rs لا في lib.rs. */
+    const tray = await read('src-tauri/src/tray.rs');
+    expect(tray).toContain('QUIT_ID');
+    expect(tray).toContain('app.exit(0)');
     expect(rust).not.toContain('WindowEvent::Focused(false)');
   });
 
