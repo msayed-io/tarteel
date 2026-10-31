@@ -72,6 +72,14 @@ describe('Tarteel production surface', () => {
     expect(rust).toContain('sync_windows_tasks');
     expect(rust).toContain('mod alarm;');
     expect(rust).toContain('mod task_scheduler;');
+    /* حماية من تكرار الدوال: خطأ سابق في هذه الجلسة حذف أوامر المشغّل الأساسية
+       وكرّر أخرى. لكل دالة يجب أن يظهر تعريف واحد فقط. */
+    for (const fn of ['scan_directory', 'set_audio_root', 'audio_url', 'resize_island',
+      'centered_island_origin', 'apply_island_bounds', 'set_alarm_schedule',
+      'set_sleep_deadline', 'sync_windows_tasks', 'deliver_alarm', 'now_ms']) {
+      const declarations = rust.split(`fn ${fn}(`).length - 1;
+      expect(declarations, `fn ${fn} must be declared exactly once`).toBe(1);
+    }
     expect(rust).toContain('tauri_plugin_notification::init()');
     expect(rust).toContain('WindowEvent::CloseRequested');
   });

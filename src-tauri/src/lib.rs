@@ -340,6 +340,40 @@ fn centered_island_origin(area: (u32, u32), origin: (i32, i32), size: (u32, u32)
 fn apply_island_bounds(island: &tauri::WebviewWindow, left: i32, top: i32, width: u32, height: u32) -> Result<(), String> {
   apply_island_bounds_native(island, left, top, width, height)
 }
+#[tauri::command]
+fn set_audio_root(server: State<AudioServer>, path: String) -> Result<(), String> {
+  let root = PathBuf::from(path).canonicalize().map_err(|e| format!("مجلد الصوت غير موجود: {e}"))?;
+  if !root.is_dir() { return Err("المسار المختار ليس مجلدًا".into()); }
+  *server.root.write().map_err(|_| "تعذر تحديث مجلد الصوت".to_string())? = Some(root);
+  Ok(())
+}
+
+#[tauri::command]
+fn audio_url(server: State<AudioServer>, path: String) -> Result<String, String> {
+  let candidate = PathBuf::from(&path).canonicalize().map_err(|e| format!("تعذر فتح الملف: {e}"))?;
+  let allowed = server.root.read().map_err(|_| "تعذر قراءة حالة خادم الصوت".to_string())?.as_ref().is_some_and(|root| candidate.starts_with(root));
+  if !allowed || !candidate.is_file() || !supported(&candidate) { return Err("الملف خارج مجلد الصوت أو صيغته غير مدعومة".into()); }
+  let encoded = URL_SAFE_NO_PAD.encode(path.as_bytes());
+  Ok(format!("http://127.0.0.1:{}/audio/{}/{encoded}", server.port, server.token))
+}
+
+#[tauri::command]
+fn scan_directory(path: String) -> Result<Vec<Track>, String> {
+  let root = PathBuf::from(&path); if !root.is_dir() { return Err("المجلد غير موجود أو غير قابل للقراءة".into()); }
+  let mut out = Vec::new();
+  for e in WalkDir::new(root).follow_links(false).into_iter().filter_map(Result::ok) {
+    let p = e.path(); if !e.file_type().is_file() || !supported(p) { continue; }
+    let file_name = p.file_name().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+    let mut title = file_name.clone(); let mut artist = String::new(); let mut duration = None; let mut cover = None;
+    if let Ok(tagged) = Probe::open(p).and_then(|x| x.read()) { if let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) {
+      if let Some(v) = tag.title() { if !v.is_empty() { title = v.to_string(); } } if let Some(v) = tag.artist() { artist = v.to_string(); }
+      if let Some(pic) = tag.pictures().first() { cover = Some(format!("data:{};base64,{}", pic.mime_type().map(|m| m.to_string()).unwrap_or_else(|| "image/jpeg".into()), base64::engine::general_purpose::STANDARD.encode(pic.data()))); }
+    } duration = Some(tagged.properties().duration().as_secs()); }
+    out.push(Track { path: p.to_string_lossy().into_owned(), file_name, title, artist, duration, cover });
+  }
+  out.sort_by_key(|x| x.file_name.to_lowercase()); Ok(out)
+}
+
 #[cfg(windows)]
 fn apply_island_bounds_native(island: &tauri::WebviewWindow, left: i32, top: i32, width: u32, height: u32) -> Result<(), String> {
   use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
