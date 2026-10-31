@@ -82,9 +82,32 @@ describe('Tarteel production surface', () => {
     expect(rust).toContain('.shadow(false)');
     const islandBuilder = rust.split('WebviewWindowBuilder::new(app, "island"')[1].split('.build()?')[0];
     expect(islandBuilder).not.toContain('.parent(');
-    expect(rust).toContain('window_size.width as i64');
+    expect(rust).toContain('centered_island_origin');
     expect(rust).toContain('window.label() == "main"');
     expect(rust).toContain('island.destroy()');
     expect(rust).not.toContain('WindowEvent::Focused(false)');
+  });
+
+  it('paints no shadow, border or second rectangle behind or around the island', async () => {
+    const html = await read('island.html');
+    const islandShell = html.split('.island{')[1].split('}')[0];
+    expect(islandShell).not.toContain('box-shadow');
+    expect(islandShell).not.toContain('border:');
+    // The former growth-driven drop shadow is gone from both the style and the script.
+    expect(html).not.toContain('--p,0');
+    expect(html).not.toContain("setProperty('--p'");
+  });
+
+  it('never re-centres a window that is still resizing', async () => {
+    const rust = await read('src-tauri/src/lib.rs');
+    const resizeBody = rust.split('fn resize_island')[1].split('\n}')[0];
+    // set_position must not read a stale in-flight inner_size() to compute the anchor.
+    expect(resizeBody).not.toContain('inner_size');
+    expect(resizeBody).toContain('centered_island_origin');
+    // The transition must still complete when the window grows or shrinks.
+    const island = await read('island.html');
+    const goBody = island.split('async function go(')[1].split('async function')[0];
+    expect(goBody).not.toContain('reportWindowError(cause);return');
+    expect(island).toContain('const ask=++hostSeq');
   });
 });

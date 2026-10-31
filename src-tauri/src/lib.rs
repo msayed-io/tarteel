@@ -251,6 +251,12 @@ fn scan_directory(path: String) -> Result<Vec<Track>, String> {
   out.sort_by_key(|x| x.file_name.to_lowercase()); Ok(out)
 }
 
+fn centered_island_origin(area: (u32, u32), origin: (i32, i32), size: (u32, u32), scale: f64) -> (i32, i32) {
+  let x = origin.0 as i64 + ((area.0 as i64 - size.0 as i64) / 2);
+  let y = origin.1 as i64 + (10.0 * scale).round() as i64;
+  (x as i32, y as i32)
+}
+
 #[tauri::command]
 fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
   let widths = [64.0, 144.0, 384.0, 440.0, 444.0, 480.0];
@@ -258,17 +264,20 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
   let tools_height = width == 480.0 && (220.0..=430.0).contains(&height) && height.fract() == 0.0;
   if !widths.contains(&width) || (!heights.contains(&height) && !tools_height) { return Err("رفضت أبعادًا غير معتمدة لنافذة الجزيرة".into()); }
   let island = app.get_webview_window("island").ok_or_else(|| "نافذة الجزيرة غير متاحة".to_string())?;
-  island.set_size(tauri::Size::Logical(tauri::LogicalSize::new(width, height))).map_err(|e| format!("تعذر تغيير حجم نافذة الجزيرة: {e}"))?;
   let monitor = island.current_monitor().map_err(|e| format!("تعذر تحديد شاشة الجزيرة: {e}"))?
     .or(island.primary_monitor().map_err(|e| format!("تعذر تحديد الشاشة الرئيسية: {e}"))?)
     .ok_or_else(|| "لم يُرجع Windows شاشة صالحة لتمركز الجزيرة".to_string())?;
   let area = monitor.size();
   let origin = monitor.position();
-  let window_size = island.inner_size().map_err(|e| format!("تعذر قراءة حجم نافذة الجزيرة: {e}"))?;
   let scale = island.scale_factor().map_err(|e| format!("تعذر قراءة مقياس الشاشة: {e}"))?;
-  let x = origin.x + ((area.width as i64 - window_size.width as i64) / 2) as i32;
-  let y = origin.y + (10.0 * scale).round() as i32;
+  // Anchor the top-left corner at an integer physical site derived from the FINAL size.
+  // Measuring the window right after a resize request returns the still in-flight value,
+  // which centred the island one frame off and produced the visible jolt on every resize.
+  let target_width = (width * scale).round() as u32;
+  let target_height = (height * scale).round() as u32;
+  let (x, y) = centered_island_origin((area.width, area.height), (origin.x, origin.y), (target_width, target_height), scale);
   island.set_position(PhysicalPosition::new(x, y)).map_err(|e| format!("تعذر إعادة تمركز نافذة الجزيرة: {e}"))?;
+  island.set_size(tauri::Size::Logical(tauri::LogicalSize::new(width, height))).map_err(|e| format!("تعذر تغيير حجم نافذة الجزيرة: {e}"))?;
   Ok(())
 }
 
@@ -299,10 +308,15 @@ pub fn run() {
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "تعذر الحصول على شاشة لتمركز الجزيرة"))?;
       let area = monitor.size();
       let origin = monitor.position();
-      let window_size = island.inner_size()?;
       let scale = island.scale_factor()?;
-      let x = origin.x + ((area.width as i64 - window_size.width as i64) / 2) as i32;
-      let y = origin.y + (10.0 * scale).round() as i32;
+      // Anchor from the requested logical size: inner_size() can still report the
+      // in-flight value on a freshly built translucent window.
+      let (x, y) = centered_island_origin(
+        (area.width, area.height),
+        (origin.x, origin.y),
+        ((480.0 * scale).round() as u32, (262.0 * scale).round() as u32),
+        scale,
+      );
       island.set_position(PhysicalPosition::new(x, y))?;
       island.show()?;
       let scheduler_path = app.path().app_config_dir()?.join("prayer-scheduler.json");
@@ -355,5 +369,19 @@ mod prayer_scheduler_tests {
     assert_eq!(state.sleep_deadline_ms, None);
     let (_, due, _) = process_due(&mut state, 5_001);
     assert!(!due);
+  }
+
+  #[test]
+  fn island_anchor_keeps_the_corner_integral_and_centred_for_every_state() {
+    let area = (1920u32, 1080u32);
+    let origin = (0i32, 0i32);
+    for (width, height) in [(64.0, 34.0), (144.0, 34.0), (384.0, 210.0), (444.0, 188.0), (480.0, 290.0), (440.0, 92.0)] {
+      let (x, y) = centered_island_origin(area, origin, ((width as f64 * 1.0) as u32, (height as f64 * 1.0) as u32), 1.0);
+      assert_eq!(y, 10, "the island top inset must not depend on the state");
+      assert!(x >= 0);
+    }
+    // 125% scaling: the width rounds once, so the anchor stays whole and symmetric.
+    let (x, y) = centered_island_origin(area, origin, ((480.0f64 * 1.25).round() as u32, (262.0f64 * 1.25).round() as u32), 1.25);
+    assert_eq!((x, y), ((1920i64 - 600) as i32 / 2, 13));
   }
 }
