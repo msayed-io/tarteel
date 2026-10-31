@@ -139,9 +139,31 @@ describe('وصف المكان — تحسين عرض لا شرط نجاح', () =>
     expect(place).toMatchObject({ city: 'الزقازيق', country: 'مصر', countryCode: 'EG' });
   });
 
-  it('لا يُسقط الموقع عند فشل الشبكة', async () => {
+  it('عند فشل كل الشبكات يعود بالمطابق الأوفلاين بالعربية', async () => {
+    /* الطبقة الثالثة: لا نعرض null ولا اسمًا إنجليزيًا — بل أقرب مدينة عربية. */
     const place = await describePlace(30.5877, 31.502, async () => { throw new Error('offline'); });
-    expect(place).toBeNull();
+    expect(place).not.toBeNull();
+    expect(place.provider).toBe('offline');
+    expect(place.city).toBe('الزقازيق');
+    expect(place.country).toBe('مصر');
+    expect(place.countryCode).toBe('EG');
+  });
+
+  it('يتجاهل الأسماء اللاتينية ويعود للعربي', async () => {
+    const place = await describePlace(30.5965, 32.2715, async () => ({
+      ok: true, json: async () => ({ city: 'Ismailia', countryName: 'Egypt', countryCode: 'EG', principalSubdivision: 'Ismailia' }),
+    }));
+    expect(place.city).toBe('الإسماعيلية');
+    expect(place.provider).toBe('offline');
+  });
+
+  it('يقبل النتيجة العربية من أي خدمة من الثلاث', async () => {
+    const place = await describePlace(30.5965, 32.2715, async () => ({
+      ok: true, json: async () => ({ city: 'الإسماعيلية', principalSubdivision: 'الإسماعيلية', countryName: 'مصر', countryCode: 'EG' }),
+    }));
+    expect(place.city).toBe('الإسماعيلية');
+    expect(place.countryCode).toBe('EG');
+    expect(place.provider).not.toBe('offline');
   });
 });
 

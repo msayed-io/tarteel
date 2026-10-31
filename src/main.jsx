@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import PrayerSettings from './PrayerSettings.jsx';
+import DailyPrayerTable from './DailyPrayerTable.jsx';
 import { resolveLocation, readDevicePosition, locationNeedsRefresh, describeLocationError } from './engine/location.js';
 import { buildSchedule, scheduleNeedsRebuild, alarmEvents, upcoming, current as currentPrayerOf, countdownLabel, toNativeEvents } from './engine/schedule.js';
 import './styles.css';
@@ -24,6 +25,15 @@ const norm = value => String(value)
   .replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه')
   .trim().toLowerCase();
 const count = n => n === 0 ? 'لا توجد تلاوات' : n === 1 ? 'تلاوة واحدة' : n === 2 ? 'تلاوتان' : n <= 10 ? `${ar(n)} تلاوات` : `${ar(n)} تلاوة`;
+/** اسم المكان العربي: المدينة، المحافظة، الدولة — بلا أي منطقة زمنية إنجليزية. */
+const placeLabel = location => {
+  if (!location) return '';
+  const parts = [location.city, location.region, location.country]
+    .map(part => String(part || '').trim())
+    .filter((part, index, all) => part && all.indexOf(part) === index);
+  return parts.join('، ');
+};
+
 const readJson = (key, fallback) => { try { const value = localStorage.getItem(key); return value ? JSON.parse(value) : fallback; } catch { return fallback; } };
 const DEFAULT_PRAYER_CONFIG = {
   location: null, showNext: false, pauseAtAdhan: true,
@@ -693,6 +703,11 @@ function App() {
       <div className="tools"><label className="search glass"><Icon name="search"/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="ابحث عن سورة أو قارئ" aria-label="بحث"/></label><button className="circle glass btn" aria-label="اختيار مجلد الصوت" onClick={selectFolder}><Icon name="folder"/></button><button className="circle glass btn" aria-label="إعدادات الصلاة والموقع" onClick={() => setPrayerSettingsOpen(true)}><Icon name="sliders"/></button></div>
     </header>
     <main>
+      <DailyPrayerTable
+        schedule={prayerSchedule}
+        placeName={placeLabel(prayerConfig.location)}
+        onOpenSettings={() => setPrayerSettingsOpen(true)}
+      />
       <h1>{filter === 'all' ? 'المكتبة' : 'المفضلة'}</h1><p className="sub">{count(visible.length)}</p>
       {error && <p className="error" role="alert">{error}</p>}
       {!tracks.length ? <div className="empty">{busy ? 'جارٍ فحص مجلد الصوت…' : 'اختر مجلد الصوت لبدء مكتبتك'}</div> : visible.length ? <div className="list" role="list">{visible.map(track => {

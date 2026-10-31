@@ -235,6 +235,7 @@ function placeName(location) {
     .map(part => String(part || '').trim())
     .filter((part, index, all) => part && all.indexOf(part) === index);
   if (parts.length) return parts.join('، ');
-  /* لا وصف شبكي: نعرض المنطقة الزمنية مقروءة بدل الإحداثيات الجافة. */
-  return location.timeZone ? `موقع داخل نطاق ${location.timeZone}` : 'موقع الجهاز';
+  /* لا اسم مكان عربي متاح: نطلب من المستخدم تحديث الموقع بدل عرض منطقة
+     زمنية إنجليزية في واجهة عربية. */
+  return 'الموقع غير محدد بدقة — اضغط تحديث موقعي';
 }

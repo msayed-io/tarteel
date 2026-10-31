@@ -21,6 +21,7 @@
 
 import tzLookup from 'tz-lookup';
 import { methodForTimeZone } from './astro.js';
+import { nearestArabCity } from './places.js';
 
 /** عتبة الدقة المقبولة (بالمتر). أعلى من ذلك يُعدّ موقعًا تقريبيًا. */
 export const ACCURACY_TARGET_M = 1500;
@@ -179,33 +180,128 @@ export function timeZoneForCoordinates(latitude, longitude) {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
 
-const REVERSE_GEOCODE = 'https://api.bigdatacloud.net/data/reverse-geocode-client';
+/* ------------------------------------------------------------------ *
+ * الطبقة 2أ: الترجمة الجغرافية العكسية — ثلاث خدمات بالتوازي
+ * ------------------------------------------------------------------ */
 
 /**
- * وصف المكان (مدينة/دولة) من الإحداثيات. أي فشل شبكي لا يُسقط الموقع:
- * المنطقة الزمنية محسوبة محليًا أصلًا، والوصف النصي تحسينٌ للعرض فقط.
+ * نجمع نتائج ثلاث خدمات مستقلة بدل الاعتماد على واحدة:
+ * كل خدمة لها نقاط قوة وضعف، وأي واحدة تنجح تكفي. الفشل الكامل لا يُسقط
+ * الموقع، لأن الطبقة الأوفلاين أدناه تتولى المهمة.
+ *
+ * كل الاستدعاءات تطلب العربية صراحة:
+ *   • ArcGIS: langCode=ARA
+ *   • BigDataCloud: localityLanguage=ar
+ *   • Nominatim: accept-language=ar
  */
-export async function describePlace(latitude, longitude, fetchImpl = fetch) {
+function buildProviders(latitude, longitude) {
+  const lat = Number(latitude), lon = Number(longitude);
+  return [
+    {
+      name: 'arcgis',
+      url: `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/reverseGeocode?location=${lon},${lat}&f=json&langCode=ARA`,
+      parse: data => {
+        const a = data?.address;
+        if (!a) return null;
+        const city = a.City || a.Municipality || a.District || a.Subregion || '';
+        const region = a.Region || a.Subregion || a.Province || '';
+        return {
+          city: String(city).trim(),
+          region: String(region).trim(),
+          country: String(a.CountryCode === 'EG' ? 'مصر' : (a.CountryCode || '')).trim(),
+          countryCode: String(a.CountryCode || '').toUpperCase(),
+        };
+      },
+    },
+    {
+      name: 'bigdatacloud',
+      url: `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=ar`,
+      parse: data => ({
+        city: String(data?.city || data?.locality || '').trim(),
+        region: String(data?.principalSubdivision || '').trim(),
+        country: String(data?.countryName || '').trim(),
+        countryCode: String(data?.countryCode || '').toUpperCase(),
+      }),
+    },
+    {
+      name: 'nominatim',
+      url: `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1&accept-language=ar`,
+      parse: data => {
+        const a = data?.address || {};
+        const city = a.city || a.town || a.village || a.municipality || a.county || a.state_district || '';
+        const region = a.state || a.province || a.region || '';
+        return {
+          city: String(city).trim(),
+          region: String(region).trim(),
+          country: String(a.country || '').trim(),
+          countryCode: String(a.country_code || '').toUpperCase(),
+        };
+      },
+    },
+  ];
+}
+
+/** يستدعي خدمة واحدة بمهلة قصيرة، ويعيد null عند أي فشل. */
+async function askProvider(provider, fetchImpl) {
   try {
-    const url = new URL(REVERSE_GEOCODE);
-    url.search = new URLSearchParams({
-      latitude: String(latitude), longitude: String(longitude), localityLanguage: 'ar',
-    }).toString();
-    const response = await fetchImpl(url.toString(), {
-      headers: { Accept: 'application/json' }, cache: 'no-store',
-      signal: AbortSignal.timeout(8000),
+    const response = await fetchImpl(provider.url, {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(6000),
     });
     if (!response?.ok) return null;
     const data = await response.json();
-    return {
-      city: String(data?.city || data?.locality || data?.principalSubdivision || ''),
-      region: String(data?.principalSubdivision || ''),
-      country: String(data?.countryName || ''),
-      countryCode: String(data?.countryCode || '').toUpperCase(),
-    };
+    const parsed = provider.parse(data);
+    if (!parsed) return null;
+    /* نص عربي فقط: نرفض أي اسم لاتيني لأنه لا يخدم واجهة عربية. */
+    const city = latinFree(parsed.city);
+    if (!city && !latinFree(parsed.country)) return null;
+    return { ...parsed, city, region: latinFree(parsed.region), country: latinFree(parsed.country), provider: provider.name };
   } catch {
     return null;
   }
+}
+
+/**
+ * يرفض النص اللاتيني ويعيد العربي فقط.
+ * الخدمات قد تعيد أسماء بخط لاتيني رغم طلب العربية (قرى صغيرة بلا ترجمة)،
+ * فلا نعرضها في واجهة عربية.
+ */
+function latinFree(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return /[\u0600-\u06FF]/.test(text) ? text : '';
+}
+
+/**
+ * نتيجة الوصف: المدينة والدولة بالعربية، مع تحديد المصدر.
+ * يُجرَّب كل شيء بالتوازي ثم تُختار أفضل نتيجة عربية متاحة.
+ */
+export async function describePlace(latitude, longitude, fetchImpl = fetch) {
+  const providers = buildProviders(latitude, longitude);
+  const settled = await Promise.allSettled(providers.map(provider => askProvider(provider, fetchImpl)));
+  const results = settled
+    .filter(entry => entry.status === 'fulfilled' && entry.value)
+    .map(entry => entry.value);
+
+  /* نُفضّل نتيجة تحمل اسم مدينة عربيًا ورمز دولة. */
+  const best = results.find(r => r.city && r.countryCode) || results.find(r => r.city) || results.find(r => r.countryCode);
+  if (best) {
+    return {
+      city: best.city, region: best.region, country: best.country,
+      countryCode: best.countryCode, provider: best.provider,
+    };
+  }
+
+  /* الطبقة الأوفلاين: تعمل بلا إنترنت إطلاقًا. */
+  const offline = nearestArabCity(latitude, longitude);
+  if (offline) {
+    return {
+      city: offline.city, region: offline.region, country: offline.country,
+      countryCode: offline.countryCode, provider: 'offline', distanceKm: offline.distanceKm,
+    };
+  }
+  return null;
 }
 
 /* ------------------------------------------------------------------ *
