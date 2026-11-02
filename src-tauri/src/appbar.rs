@@ -73,14 +73,13 @@ pub fn window_stop_offset() -> i32 {
 mod imp {
   use super::*;
   use std::mem::size_of;
-  use windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
+  use windows::Win32::Foundation::{HWND, RECT};
   use windows::Win32::UI::Shell::{
     SHAppBarMessage, ABE_TOP, ABM_NEW, ABM_QUERYPOS, ABM_REMOVE, ABM_SETPOS, APPBARDATA,
   };
   use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-    RegisterClassW, TranslateMessage, MSG, WINDOW_EX_STYLE, WINDOW_STYLE, WM_USER, WNDCLASSW,
-    WS_OVERLAPPED,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GetSystemMetrics, RegisterClassW,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_USER, WNDCLASSW, WS_EX_TOOLWINDOW, SM_CXSCREEN,
   };
 
   /// رسالة الإشعار التي يرسلها ويندوز إلى شريطنا عند تغيّر موضع شريط المهام.
@@ -108,12 +107,12 @@ mod imp {
 
     let hwnd = CreateWindowExW(
       /* بلا WINDOW_EX_STYLE مرئي: النافذة موجودة لاستقبال الرسائل فقط. */
-      WINDOW_EX_STYLE(0x00000080), // WS_EX_TOOLWINDOW — تبعيدها عن Alt+Tab
+      WS_EX_TOOLWINDOW, // تبعيدها عن Alt+Tab وشريط المهام
       windows::core::PCWSTR(class_name.as_ptr()),
       windows::core::PCWSTR(class_name.as_ptr()),
-      WS_OVERLAPPED, // بلا WS_VISIBLE إطلاقًا
+      WINDOW_STYLE(0), // بلا أي نمط مرئي، ولا WS_VISIBLE إطلاقًا
       0, 0, 0, 0,
-      None, None, Some(instance.into()), None,
+      None, None, Some(windows::Win32::Foundation::HINSTANCE(instance.0)), None,
     )
     .map_err(|e| format!("تعذر إنشاء نافذة الرسائل: {e}"))?;
     Ok(hwnd)
@@ -129,6 +128,7 @@ mod imp {
         cbSize: size_of::<APPBARDATA>() as u32,
         hWnd: hwnd,
         uCallbackMessage: APPBAR_CALLBACK,
+        uEdge: ABE_TOP,
         ..Default::default()
       };
 
@@ -140,9 +140,7 @@ mod imp {
       CALLBACK_MSG.store(APPBAR_CALLBACK as i32, Ordering::SeqCst);
 
       /* نطلب الموضع المقترح ثم نحجز فعليًا — الترتيب الذي يفرضه ويندوز. */
-      let screen_w = windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(
-        windows::Win32::UI::WindowsAndMessaging::SM_CXSCREEN,
-      );
+      let screen_w = GetSystemMetrics(SM_CXSCREEN);
       let (left, top, right, bottom) = reserved_rect(screen_w, i32::MAX, reserved_height());
       data.rc = RECT { left, top, right, bottom };
 
@@ -194,11 +192,6 @@ mod imp {
     }
   }
 
-  /* مراجع مستوردة لكن غير مستخدمة مباشرة — تُبقي الاستيرادات صريحة للتوثيق. */
-  #[allow(dead_code)]
-  fn _keep_imports(_: MSG, _: WPARAM, _: LPARAM, _: ABE_TOP) {
-    let _ = (GetMessageW, TranslateMessage, DispatchMessageW);
-  }
 }
 
 #[cfg(windows)]
