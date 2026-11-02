@@ -20,6 +20,9 @@ mod task_scheduler;
 use audio::AudioEngine;
 mod audio;
 mod appbar;
+mod frame;
+mod geometry;
+mod hittest;
 mod tray;
 #[cfg(windows)]
 mod toast;
@@ -443,12 +446,48 @@ fn set_header_guard(enabled: bool) -> Result<serde_json::Value, String> {
 /// مقبض نافذة الرسائل المحفوظة (خام ليكون Send).
 pub struct HeaderGuard(pub std::sync::Mutex<Option<isize>>);
 
+
+/// تُستدعى من الجزيرة لتحديد المنطقة التفاعلية الفعلية.
+///
+/// الواجهة تعرف شكل الكبسولة بعد كل انتقال، فتبلّغ به. كل ما هو خارج هذا
+/// المستطيل يصبح شفافًا للنقر، فتصل النقرات إلى نوافذ المستخدم تحته.
+#[tauri::command]
+fn set_island_hit_rect(x: f64, y: f64, width: f64, height: f64, app: tauri::AppHandle) -> Result<(), String> {
+  let island = app.get_webview_window("island").ok_or_else(|| "نافذة الجزيرة غير متاحة".to_string())?;
+  let scale = island.scale_factor().map_err(|e| format!("تعذر قراءة مقياس الشاشة: {e}"))?;
+  let to_px = |v: f64| (v * scale).round() as i32;
+  hittest::set_interactive_rect(to_px(x), to_px(y), to_px(width), to_px(height));
+  Ok(())
+}
+
+/// يفعّل أو يوقف تمرير النقرات. الموسّعات توقفه لتلتقط كل نقراتها.
+#[tauri::command]
+fn set_island_pass_through(enabled: bool) {
+  hittest::set_pass_through(enabled);
+}
+
+/// هندسة الشريط كما يراها النظام — للتشخيص والتحقق.
+#[tauri::command]
+fn band_geometry(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+  let island = app.get_webview_window("island").ok_or_else(|| "نافذة الجزيرة غير متاحة".to_string())?;
+  let scale = island.scale_factor().map_err(|e| e.to_string())?;
+  Ok(serde_json::json!({
+    "scale": scale,
+    "barLogical": geometry::BAR_LOGICAL_HEIGHT,
+    "barPhysical": geometry::bar_height_px(scale),
+    "reservedPhysical": appbar::reserved_height(),
+  }))
+}
+
 #[tauri::command]
 fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
-  let widths = [64.0, 144.0, 384.0, 440.0, 444.0, 480.0];
-  let heights = [34.0, 92.0, 188.0, 210.0, 262.0, 424.0];
+  /* يجب أن تطابق TARGET في island.html بكسلًا ببكسل. */
+  let widths = [56.0, 64.0, 126.0, 144.0, 384.0, 440.0, 444.0, 480.0];
+  let heights = [26.0, 34.0, 92.0, 188.0, 210.0, 262.0, 424.0];
   let tools_height = width == 480.0 && (220.0..=430.0).contains(&height) && height.fract() == 0.0;
-  if !widths.contains(&width) || (!heights.contains(&height) && !tools_height) { return Err("رفضت أبعادًا غير معتمدة لنافذة الجزيرة".into()); }
+  if !widths.contains(&width) || (!heights.contains(&height) && !tools_height) {
+    return Err("رفضت أبعادًا غير معتمدة لنافذة الجزيرة".into());
+  }
   let island = app.get_webview_window("island").ok_or_else(|| "نافذة الجزيرة غير متاحة".to_string())?;
   let monitor = island.current_monitor().map_err(|e| format!("تعذر تحديد شاشة الجزيرة: {e}"))?
     .or(island.primary_monitor().map_err(|e| format!("تعذر تحديد الشاشة الرئيسية: {e}"))?)
@@ -456,14 +495,22 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
   let area = monitor.size();
   let origin = monitor.position();
   let scale = island.scale_factor().map_err(|e| format!("تعذر قراءة مقياس الشاشة: {e}"))?;
-  // Anchor the top-left corner at an integer physical site derived from the FINAL size.
-  // Measuring the window right after a resize request returns the still in-flight value,
-  // which centred the island one frame off and produced the visible jolt on every resize.
+
+  /* القاعدة الوحيدة: ارتفاع النافذة لا يقل عن ارتفاع الشريط.
+     النافذة أكبر من الجزيرة المرئية، والمحتوى داخلها يُرسم من أعلى الشريط،
+     فتظهر الكبسولة في منتصفه بالضبط. لو سمحنا بالنافذة الصغيرة وحدها
+     لعادت المشكلة: نافذة أقصر من الشريط تُوضع عند حدّه لا داخله. */
   let target_width = (width * scale).round() as u32;
-  let target_height = (height * scale).round() as u32;
-  let (left, top) = centered_island_origin((area.width, area.height), (origin.x, origin.y), (target_width, target_height), scale);
+  let floor = geometry::island_floor_height_px(scale).max(1) as u32;
+  let desired = (height * scale).round() as u32;
+  let target_height = desired.max(floor);
+
+  let (left, top) = geometry::island_origin(origin.x, area.width as i32, target_width as i32);
+  let _ = (target_width, target_height, &area);
+
   let target = island.clone();
   island.run_on_main_thread(move || {
+    /* قبل القياس: الصبغة أُزيلت منذ الإقلاع، فالمستطيل المرئي = المطلوب. */
     if let Err(e) = apply_island_bounds(&target, left, top, target_width, target_height) {
       eprintln!("Tarteel island bounds could not be applied: {e}");
     }
@@ -474,38 +521,17 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
 /// يحسب موضع الركن الأعلى الأيسر لنافذة متمركزة أفقيًا أعلى الشاشة.
 /// يعيد إحداثيات فيزيائية صحيحة، ويُبقي الركن عددًا صحيحًا لتجنّب أي إزاحة
 /// بكسر بكسل عند مقاييس العرض 125% و150%.
-fn centered_island_origin(area: (u32, u32), origin: (i32, i32), size: (u32, u32), scale: f64) -> (i32, i32) {
-  let band = band_height_px(scale);
-  let x = origin.0 as i64 + ((area.0 as i64 - size.0 as i64) / 2);
-  /* التموضع العمودي: الجزيرة تُركَّز داخل الشريط المحجوز.
-     القيمة القديمة `10 * scale` كانت إزاحة ثابتة من أعلى الشاشة. حين أضفنا
-     حجز 32 بكسل أصبحت الجزيرة تبدأ من حدّ الشريط السفلي تمامًا: ملتصقة
-     بحافته العليا لا داخله. التمركز الحقيقي هو قسمة الفراغ المتبقي نصفين،
-     فيبقى فوقها وتحتها مقدار متساوٍ مهما تغيّر حجمها أو مقياس العرض. */
-  let inset = ((band as i64 - size.1 as i64) / 2).max(0);
-  (x as i32, (origin.1 as i64 + inset) as i32)
-}
-
-/// ارتفاع الشريط العلوي المحجوز بالبكسل الفيزيائي.
+/// يحسب موضع الجزيرة من الشاشة الحقيقية.
 ///
-/// الشريط يُحجز بـ 32 وحدة منطقية. ويندوز يضع النوافذ بوحدات فيزيائية، وعلى
-/// شاشة بمقياس 125% تساوي 32 منطقية 40 فيزيائية. تجاهل المقياس يجعل الشريط
-/// أرقّ من الجزيرة على الشاشات الكبيرة، فتبرز خارج حدّه.
-fn band_height_px(scale: f64) -> i32 {
-  let safe = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
-  // يجب أن يطابق ارتفاع الحجز الفعلي في appbar، وإلا اختلفت الهندسة.
-  let from_reserved = appbar::reserved_height();
-  let from_scale = (RESERVED_BAND_LOGICAL as f64 * safe).round() as i32;
-  // نأخذ الأكبر كي لا تخرج الجزيرة أبدًا فوق شريط أقل ارتفاعًا مما تظن.
-  from_reserved.max(from_scale).max(size_floor())
+/// نقطة واحدة تحدد كل شيء: **أعلى الشريط**. يبقى `top = 0` دائمًا، وx في
+/// منتصف الشاشة تمامًا. الأبعاد تأتي من `geometry` المشتقة من مقياس العرض
+/// الفعلي، لا من أرقام ثابتة.
+fn island_bounds_from_monitor(monitor_left: i32, monitor_width: i32, scale: f64) -> (i32, i32, i32, i32) {
+  let width = (56.0 * scale).round() as i32;
+  let height = geometry::island_floor_height_px(scale);
+  let (x, y) = geometry::island_origin(monitor_left, monitor_width, width);
+  (x, y, width, height)
 }
-
-fn size_floor() -> i32 {
-  appbar::RESERVED_HEIGHT_PX
-}
-
-/// ارتفاع الشريط بوحدات التصميم المنطقية.
-const RESERVED_BAND_LOGICAL: u32 = 32;
 
 /// `SetWindowPos` changes position and size in a single call, so no frame ever sees one
 /// applied without the other. It has window thread affinity, hence the main-thread hop.
@@ -594,7 +620,8 @@ pub fn run() {
     .setup(|app| {
       let island = WebviewWindowBuilder::new(app, "island", WebviewUrl::App("island.html".into()))
         .title("تَرتيل")
-        .inner_size(480.0, 262.0)
+        /* العرض والارتفاع فيزيائيان هنا: النافذة تبدأ بعرض idle الفيزيائي
+           وارتفاع الشريط، ثم تُعاد إلى الشريط في كل تغيير حجم. */
         .decorations(false)
         .transparent(true)
         .background_color(Color(0, 0, 0, 0))
@@ -611,14 +638,25 @@ pub fn run() {
       let area = monitor.size();
       let origin = monitor.position();
       let scale = island.scale_factor()?;
-      // Anchor from the requested logical size: inner_size() can still report the
-      // in-flight value on a freshly built translucent window.
-      let (x, y) = centered_island_origin(
-        (area.width, area.height),
-        (origin.x, origin.y),
-        ((480.0 * scale).round() as u32, (262.0 * scale).round() as u32),
-        scale,
-      );
+
+      /* الصبغة أولًا: إزالة الإطار غير المرئي تجعل مستطيل النافذة المرئي
+         مطابقًا للإحداثيات التي نطلبها. بدونها ينزاح المحتوى بضعة بكسلات
+         للأسفل واليمين، وهي إزاحة كافية لإخراج الجزيرة من الشريط. */
+      #[cfg(windows)]
+      if let Ok(hwnd) = island.hwnd() {
+        if let Err(cause) = frame::strip_frame(hwnd) {
+          eprintln!("Tarteel island frame strip failed: {cause}");
+        }
+        /* النقرات: كل نقطة خارج الكبسولة تُمرَّر إلى النافذة التي تحتها.
+           هذا ما يوقف «تعطيل» أعلى نوافذ المستخدم. */
+        if let Err(cause) = hittest::attach(hwnd) {
+          eprintln!("Tarteel island hit-test attach failed: {cause}");
+        }
+        let _ = appbar::set_reserved_height(geometry::bar_height_px(scale));
+      }
+
+      let (x, y, w, h) = island_bounds_from_monitor(origin.x, area.width as i32, scale);
+      let _ = (w, h);
       island.set_position(PhysicalPosition::new(x, y))?;
       island.show()?;
       /* حالة التنبيهات: تُقرأ من القرص عند الإقلاع، فتبقى المعرّفات المُطلقة
@@ -669,6 +707,7 @@ pub fn run() {
       set_alarm_schedule, set_sleep_deadline, sync_windows_tasks, clear_windows_tasks,
       alarm_status, fire_alarm_now,
       header_guard_status, set_header_guard,
+      set_island_hit_rect, set_island_pass_through, band_geometry,
       play_adhan, stop_adhan, set_adhan_volume, set_adhan_muted, adhan_state,
       show_alarm_notification, set_next_prayer_label,
       is_autostart_enabled, set_autostart

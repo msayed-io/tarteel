@@ -7,17 +7,25 @@ const tray = readFileSync(resolve(__dirname, '../src-tauri/src/tray.rs'), 'utf8'
 const cargo = readFileSync(resolve(__dirname, '../src-tauri/Cargo.toml'), 'utf8');
 
 describe('تموضع الجزيرة داخل الشريط', () => {
-  it('التمركز يُحسب من فرق الارتفاع، لا بإزاحة ثابتة', () => {
-    /* الخطأ السابق: 10*scale إزاحة ثابتة، فالجزيرة تبدأ عند حدّ الشريط. */
+  it('التمركز يُحسب من الشاشة الحقيقية، لا بإزاحة ثابتة', () => {
+    /* الخطأ السابق: 10*scale إزاحة ثابتة، فالجزيرة تبدأ عند حدّ الشريط.
+       الآن المصدر الوحيد للحقيقة هو geometry::island_origin. */
     expect(lib).not.toContain('(10.0 * scale)');
-    expect(lib).toContain('(band as i64 - size.1 as i64) / 2');
+    expect(lib).toContain('geometry::island_origin');
+  });
+
+  it('الكبسولة تُرسم في منتصف الشريط رأسياً', () => {
+    expect(lib).toContain('geometry::island_floor_height_px');
+    const html = readFileSync(resolve(__dirname, '../island.html'), 'utf8');
+    expect(html).toContain('(window.innerHeight-h)/2');
   });
 
   it('ارتفاع الشريط واعٍ بمقياس العرض', () => {
-    expect(lib).toContain('fn band_height_px(scale: f64) -> i32');
-    expect(lib).toContain('RESERVED_BAND_LOGICAL');
-    /* لا يقل أبدًا عن الحجز الفعلي، وإلا خرجت الجزيرة فوق حدّه. */
-    expect(lib).toContain('from_reserved.max(from_scale)');
+    /* انتقل المصدر إلى geometry.rs: معامل واحد يشتق الاثنين. */
+    const geo = readFileSync(resolve(__dirname, '../src-tauri/src/geometry.rs'), 'utf8');
+    expect(geo).toContain('fn bar_height_px(scale: f64) -> i32');
+    expect(geo).toContain('fn scale_from_dpi');
+    expect(geo).toContain('BAR_LOGICAL_HEIGHT');
   });
 
   it('اختبارات Rust تفرض تمركزًا متماثلًا في كل الحالات', () => {

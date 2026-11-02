@@ -141,7 +141,7 @@ describe('Tarteel production surface', () => {
     /* حماية من تكرار الدوال: خطأ سابق في هذه الجلسة حذف أوامر المشغّل الأساسية
        وكرّر أخرى. لكل دالة يجب أن يظهر تعريف واحد فقط. */
     for (const fn of ['scan_directory', 'set_audio_root', 'audio_url', 'resize_island',
-      'centered_island_origin', 'apply_island_bounds', 'set_alarm_schedule',
+      'island_bounds_from_monitor', 'apply_island_bounds', 'set_alarm_schedule',
       'set_sleep_deadline', 'sync_windows_tasks', 'deliver_alarm', 'now_ms']) {
       const declarations = rust.split(`fn ${fn}(`).length - 1;
       expect(declarations, `fn ${fn} must be declared exactly once`).toBe(1);
@@ -155,13 +155,17 @@ describe('Tarteel production surface', () => {
     const rust = await read('src-tauri/src/lib.rs');
     expect(html).not.toContain('setSize(');
     expect(html).not.toContain('setPosition(');
-    expect(rust).toContain('.inner_size(480.0, 262.0)');
+    /* الحجم يأتي من الشاشة الفعلية عبر island_bounds_from_monitor، لا من
+       رقم ثابت لا يعرف مقياس العرض. */
+    expect(rust).toContain('island_bounds_from_monitor');
+    expect(rust).toContain('geometry::island_origin');
     expect(rust).toContain('.transparent(true)');
     expect(rust).toContain('.background_color');
     expect(rust).toContain('.shadow(false)');
     const islandBuilder = rust.split('WebviewWindowBuilder::new(app, "island"')[1].split('.build()?')[0];
     expect(islandBuilder).not.toContain('.parent(');
-    expect(rust).toContain('centered_island_origin');
+    expect(rust).toContain('frame::strip_frame');
+    expect(rust).toContain('hittest::attach');
     expect(rust).toContain('window.label() != "main"');
     /* تغيّر مقصود في v0.6.0: (X) يُخفي إلى الصينية ولا يقتل العملية، لأن
        قتلها يُلغي الأذان. الخروج النهائي من قائمة الصينية وحدها. */
@@ -189,7 +193,7 @@ describe('Tarteel production surface', () => {
     const resizeBody = rust.split('fn resize_island')[1].split('\n}')[0];
     // set_position must not read a stale in-flight inner_size() to compute the anchor.
     expect(resizeBody).not.toContain('inner_size');
-    expect(resizeBody).toContain('centered_island_origin');
+    expect(resizeBody).toContain('geometry::island_origin');
     // Position and size must reach the window manager as ONE call, otherwise a frame can
     // render with the new width but the old centre, which is the collapse-time shake.
     expect(resizeBody).not.toContain('set_position');
