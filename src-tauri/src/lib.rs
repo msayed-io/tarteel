@@ -718,7 +718,7 @@ mod island_tests {
     /* الخطأ الذي رآه المستخدم: y = 0 أو y = حدّ الشريط => ملتصقة. */
     for height in [26u32, 34, 92, 188, 210] {
       let (_, y) = centered_island_origin((1920, 1080), (0, 0), (56, height), 1.0);
-      assert!(y > 0 || height >= band_height_px(1.0), "الجزيرة ملتصقة بالحافة عند ارتفاع {height}");
+      assert!(y > 0 || height as i32 >= band_height_px(1.0), "الجزيرة ملتصقة بالحافة عند ارتفاع {height}");
     }
   }
 
