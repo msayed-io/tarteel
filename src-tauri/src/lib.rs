@@ -20,7 +20,9 @@ mod task_scheduler;
 use audio::AudioEngine;
 mod audio;
 mod appbar;
+mod sysmon;
 mod tray;
+mod winaction;
 #[cfg(windows)]
 mod toast;
 
@@ -443,10 +445,102 @@ fn set_header_guard(enabled: bool) -> Result<serde_json::Value, String> {
 /// مقبض نافذة الرسائل المحفوظة (خام ليكون Send).
 pub struct HeaderGuard(pub std::sync::Mutex<Option<isize>>);
 
+
+/* ------------------------------------------------------------------ *
+ * أوامر الشريط العلوي
+ * ------------------------------------------------------------------ */
+
+static BAR_SAMPLER: std::sync::OnceLock<sysmon::Sampler> = std::sync::OnceLock::new();
+
+fn bar_sampler() -> &'static sysmon::Sampler {
+  BAR_SAMPLER.get_or_init(sysmon::Sampler::new)
+}
+
+#[tauri::command]
+fn bar_snapshot() -> sysmon::Snapshot {
+  sysmon::snapshot(bar_sampler())
+}
+
+#[tauri::command]
+#[cfg(windows)]
+fn bar_volume(direction: String) -> Result<(), String> {
+  match direction.as_str() {
+    "up" => sysmon::volume_up(),
+    "down" => sysmon::volume_down(),
+    "mute" => sysmon::toggle_mute(),
+    other => Err(format!("اتجاه صوت غير معروف: {other}")),
+  }
+}
+
+#[tauri::command]
+#[cfg(not(windows))]
+fn bar_volume(_: String) -> Result<(), String> { Err("التحكم بالصوت متاح على ويندوز فقط".into()) }
+
+#[tauri::command]
+#[cfg(windows)]
+fn bar_brightness(delta: i32) -> Result<f32, String> {
+  let current = sysmon::brightness().unwrap_or(100.0);
+  let next = (current + delta as f32).clamp(10.0, 100.0);
+  sysmon::set_brightness(next)?;
+  Ok(next)
+}
+
+#[tauri::command]
+#[cfg(not(windows))]
+fn bar_brightness(_: i32) -> Result<f32, String> { Err("التحكم بالسطوع متاح على ويندوز فقط".into()) }
+
+#[tauri::command]
+#[cfg(windows)]
+fn bar_set_brightness(percent: f32) -> Result<f32, String> {
+  let next = percent.clamp(10.0, 100.0);
+  sysmon::set_brightness(next)?;
+  Ok(next)
+}
+
+#[tauri::command]
+#[cfg(not(windows))]
+fn bar_set_brightness(_: f32) -> Result<f32, String> { Err("التحكم بالسطوع متاح على ويندوز فقط".into()) }
+
+#[tauri::command]
+#[cfg(windows)]
+fn bar_set_volume(percent: f32) -> Result<f32, String> {
+  sysmon::set_volume(percent.clamp(0.0, 100.0))
+}
+
+#[tauri::command]
+#[cfg(not(windows))]
+fn bar_set_volume(_: f32) -> Result<f32, String> { Err("التحكم بالصوت متاح على ويندوز فقط".into()) }
+
+#[tauri::command]
+#[cfg(windows)]
+fn bar_window(action: String) -> Result<(), String> {
+  let parsed = winaction::WindowAction::parse(&action).ok_or_else(|| format!("إجراء نافذة غير معروف: {action}"))?;
+  winaction::apply(parsed)
+}
+
+#[tauri::command]
+#[cfg(not(windows))]
+fn bar_window(_: String) -> Result<(), String> { Err("التحكم بالنوافذ متاح على ويندوز فقط".into()) }
+
+/// يظهر الشريط ويخفيه.
+#[tauri::command]
+fn bar_set_visible(visible: bool, app: tauri::AppHandle) -> Result<(), String> {
+  let bar = app.get_webview_window("bar").ok_or_else(|| "نافذة الشريط غير متاحة".to_string())?;
+  if visible { bar.show().map_err(|e| e.to_string())? } else { bar.hide().map_err(|e| e.to_string())? }
+  Ok(())
+}
+
+/// موضع الجزيرة بالنسبة للشريط — تستخدمه الواجهة للتحقق من التمركز.
+#[tauri::command]
+fn bar_geometry() -> serde_json::Value {
+  serde_json::json!({ "barLogicalHeight": BAR_HEIGHT_LOGICAL, "reservedPhysicalHeight": appbar::reserved_height() })
+}
+
 #[tauri::command]
 fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
-  let widths = [64.0, 144.0, 384.0, 440.0, 444.0, 480.0];
-  let heights = [34.0, 92.0, 188.0, 210.0, 262.0, 424.0];
+  /* يجب أن تطابق TARGET في island.html بكسلًا ببكسل. */
+  let widths = [56.0, 64.0, 126.0, 144.0, 384.0, 440.0, 444.0, 480.0];
+  let heights = [26.0, 34.0, 92.0, 188.0, 210.0, 262.0, 424.0];
   let tools_height = width == 480.0 && (220.0..=430.0).contains(&height) && height.fract() == 0.0;
   if !widths.contains(&width) || (!heights.contains(&height) && !tools_height) { return Err("رفضت أبعادًا غير معتمدة لنافذة الجزيرة".into()); }
   let island = app.get_webview_window("island").ok_or_else(|| "نافذة الجزيرة غير متاحة".to_string())?;
@@ -475,10 +569,29 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
 /// يعيد إحداثيات فيزيائية صحيحة، ويُبقي الركن عددًا صحيحًا لتجنّب أي إزاحة
 /// بكسر بكسل عند مقاييس العرض 125% و150%.
 fn centered_island_origin(area: (u32, u32), origin: (i32, i32), size: (u32, u32), scale: f64) -> (i32, i32) {
+  let band = bar_height_px(scale);
   let x = origin.0 as i64 + ((area.0 as i64 - size.0 as i64) / 2);
-  let y = origin.1 as i64 + (10.0 * scale).round() as i64;
+  /* الجزيرة تُركَّز عموديًا داخل الشريط المحجوز، لا تحته.
+     سابقًا كان الإزاحة 10 بكسل ثابتة، فإذا حجزنا شريط 32 بكسل بدأت
+     الجزيرة من حدّه السفلي بالضبط وبدت خارجه تمامًا. */
+  let y = origin.1 as i64 + ((band as i64 - size.1 as i64) / 2).max(0);
   (x as i32, y as i32)
 }
+
+/// ارتفاع الشريط العلوي بالبكسل الفيزيائي، مدركًا لمقياس العرض.
+///
+/// الويندوز يعمل بوحدات فيزيائية، والتصميم بوحدات منطقية. 32 منطقية على
+/// شاشة 150% تساوي 48 فيزيائية؛ تجاهل ذلك يجعل الشريط رقيقًا على الشاشات
+/// الكبيرة وسميكًا على الصغيرة.
+pub fn bar_height_px(scale: f64) -> i32 {
+  ((BAR_HEIGHT_LOGICAL as f64) * if scale.is_finite() && scale > 0.0 { scale } else { 1.0 }).round() as i32
+}
+
+/// ارتفاع الشريط بالوحدات المنطقية.
+const BAR_HEIGHT_LOGICAL: u32 = 32;
+
+/// ارتفاع الجزيرة الأقصى: 300 منطقية تغطي أعلى توسعة (tools).
+const ISLAND_STAGE_HEIGHT: f64 = 480.0;
 
 /// `SetWindowPos` changes position and size in a single call, so no frame ever sees one
 /// applied without the other. It has window thread affinity, hence the main-thread hop.
@@ -592,6 +705,57 @@ pub fn run() {
          بعد الإخفاء. */
       tray::build_tray(app.handle())?;
 
+      /* الشريط المرئي: نافذة مستقلة أعلى الشاشة، شفافة خلفيتها، بلا إطار
+         ولا ظل، ولا تستقبل التركيز إطلاقًا — فالجزيرة تحتفظ بتفاعلها
+         الكامل فوقه. أي نقرة على أزراره لا تسرق التركيز من تطبيق المستخدم. */
+      let bar = WebviewWindowBuilder::new(app, "bar", WebviewUrl::App("bar.html".into()))
+        .title("شريط تَرتيل")
+        .inner_size((area.width as f64) / scale, (BAR_HEIGHT_LOGICAL as f64))
+        .position(origin.x as f64 / scale, origin.y as f64 / scale)
+        .decorations(false)
+        .transparent(true)
+        .background_color(Color(0, 0, 0, 0))
+        .shadow(false)
+        .always_on_top(true)
+        .focused(false)
+        .skip_taskbar(true)
+        .resizable(false)
+        .visible(false)
+        .build()?;
+
+      /* الحجز يتم بعد معرفة المقاس الحقيقي للشاشة، فلا يخرج الشريط رقيقًا
+         على 150% أو سميكًا على 100%. */
+      #[cfg(windows)]
+      appbar::set_reserved_height(bar_height_px(scale));
+
+      #[cfg(windows)]
+      if let Ok(hwnd) = bar.hwnd() {
+        unsafe {
+          /* بدون NOACTIVATE كانت كل نقرة على الشريط تسحب التركيز من
+             التطبيق الأمامي وتُفسد معنى أزرار النافذة. */
+          let style = windows::Win32::UI::WindowsAndMessaging::GetWindowLongW(
+            hwnd,
+            windows::Win32::UI::WindowsAndMessaging::GWL_EXSTYLE,
+          );
+          windows::Win32::UI::WindowsAndMessaging::SetWindowLongW(
+            hwnd,
+            windows::Win32::UI::WindowsAndMessaging::GWL_EXSTYLE,
+            style | windows::Win32::UI::WindowsAndMessaging::WS_EX_NOACTIVATE.0 as i32,
+          );
+          /* فوق كل شيء، بلا تنشيط، وبمقاس الشريط بالضبط. */
+          let _ = windows::Win32::UI::WindowsAndMessaging::SetWindowPos(
+            hwnd,
+            Some(windows::Win32::UI::WindowsAndMessaging::HWND_TOPMOST),
+            origin.x,
+            origin.y,
+            area.width as i32,
+            bar_height_px(scale),
+            windows::Win32::UI::WindowsAndMessaging::SWP_NOACTIVATE,
+          );
+        }
+      }
+      bar.show()?;
+
       /* الحاجز العلوي غير المرئي: يُحجز تلقائيًا مع الإقلاع، فتتوقف
          النوافذ الأخرى عند حدّه من أول لحظة ولا تمرّ خلف الآيلاند. */
       #[cfg(windows)]
@@ -630,6 +794,8 @@ pub fn run() {
       set_alarm_schedule, set_sleep_deadline, sync_windows_tasks, clear_windows_tasks,
       alarm_status, fire_alarm_now,
       header_guard_status, set_header_guard,
+      bar_snapshot, bar_volume, bar_brightness, bar_set_brightness, bar_set_volume,
+      bar_window, bar_set_visible, bar_geometry,
       play_adhan, stop_adhan, set_adhan_volume, set_adhan_muted, adhan_state,
       show_alarm_notification, set_next_prayer_label,
       is_autostart_enabled, set_autostart

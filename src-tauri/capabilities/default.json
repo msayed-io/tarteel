@@ -4,7 +4,8 @@
   "description": "صلاحيات تَرتيل المحلية المحدودة",
   "windows": [
     "main",
-    "island"
+    "island",
+    "bar"
   ],
   "permissions": [
     "core:default",
