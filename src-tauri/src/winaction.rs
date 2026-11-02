@@ -67,7 +67,7 @@ pub fn apply(action: WindowAction) -> Result<(), String> {
     WindowAction::Close => {
       unsafe {
         windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-          hwnd,
+          Some(hwnd),
           windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
           Default::default(),
           Default::default(),

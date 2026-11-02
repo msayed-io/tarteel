@@ -265,7 +265,7 @@ mod win {
     unsafe {
       let mut profiles: HKEY = HKEY::default();
       let path = windows::core::HSTRING::from(r"Software\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles");
-      if RegOpenKeyExW(HKEY_CURRENT_USER, &path, None, KEY_READ, &mut profiles).is_err() {
+      if RegOpenKeyExW(HKEY_CURRENT_USER, windows::core::PCWSTR(path.as_ptr()), None, KEY_READ, &mut profiles).is_err() {
         return None;
       }
       let mut name_buf = vec![0u16; 512];
@@ -281,7 +281,7 @@ mod win {
         let sub = windows::core::HSTRING::from(format!(
           r"Software\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles\{key}"
         ));
-        if let Some(ssid) = read_sz(HKEY_CURRENT_USER, &sub, windows::core::w!("Description")) {
+        if let Some(ssid) = read_sz(HKEY_CURRENT_USER, windows::core::PCWSTR(sub.as_ptr()), windows::core::w!("Description")) {
           if best.as_ref().map(|b| ssid.len() > b.len()).unwrap_or(true) {
             best = Some(ssid);
           }
@@ -467,7 +467,7 @@ mod win {
 
   /// عدد العمليات الظاهرة، وزمن التشغيل.
   pub fn process_count() -> Option<u32> {
-    use windows::Win32::System::Threading::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
+    use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
     unsafe {
       let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
       let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
@@ -496,7 +496,7 @@ mod win {
     unsafe {
       let name = windows::core::HSTRING::from(r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\webcam\NonPackaged");
       let mut key: HKEY = HKEY::default();
-      if RegOpenKeyExW(HKEY_CURRENT_USER, &name, None, KEY_READ, &mut key).is_err() {
+      if RegOpenKeyExW(HKEY_CURRENT_USER, windows::core::PCWSTR(name.as_ptr()), None, KEY_READ, &mut key).is_err() {
         return false;
       }
       let mut in_use = false;
@@ -510,7 +510,7 @@ mod win {
         let sub = windows::core::HSTRING::from(format!(
           r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\webcam\NonPackaged\{sub_name}"
         ));
-        if let Some(stop) = read_dword(HKEY_CURRENT_USER, &sub, windows::core::w!("LastUsedTimeStop")) {
+        if let Some(stop) = read_dword(HKEY_CURRENT_USER, windows::core::PCWSTR(sub.as_ptr()), windows::core::w!("LastUsedTimeStop")) {
           if stop == 0 { in_use = true; break; }
         }
       }
@@ -523,7 +523,7 @@ mod win {
     unsafe {
       let name = windows::core::HSTRING::from(r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone\NonPackaged");
       let mut key: HKEY = HKEY::default();
-      if RegOpenKeyExW(HKEY_CURRENT_USER, &name, None, KEY_READ, &mut key).is_err() {
+      if RegOpenKeyExW(HKEY_CURRENT_USER, windows::core::PCWSTR(name.as_ptr()), None, KEY_READ, &mut key).is_err() {
         return false;
       }
       let mut in_use = false;
@@ -537,7 +537,7 @@ mod win {
         let sub = windows::core::HSTRING::from(format!(
           r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone\NonPackaged\{sub_name}"
         ));
-        if let Some(stop) = read_dword(HKEY_CURRENT_USER, &sub, windows::core::w!("LastUsedTimeStop")) {
+        if let Some(stop) = read_dword(HKEY_CURRENT_USER, windows::core::PCWSTR(sub.as_ptr()), windows::core::w!("LastUsedTimeStop")) {
           if stop == 0 { in_use = true; break; }
         }
       }
@@ -563,7 +563,7 @@ mod win {
     let (has_battery, battery, charging) = battery();
     let (app_name, maximized) = foreground_app();
     let (down, up) = net_rates(sampler).unwrap_or((0.0, 0.0));
-    let ram_percent = if total > 0 { Some(used as f64 / total as f64 * 100.0) as f32 } else { None };
+    let ram_percent = if total > 0 { Some((used as f64 / total as f64 * 100.0) as f32) } else { None };
     Snapshot {
       cpu: cpu_percent(sampler),
       ram: ram_percent,
