@@ -114,7 +114,7 @@ mod tests {
   #[test]
   fn detects_a_125_percent_display_from_the_measured_capsule() {
     /* العرض المقيس 70 والمنطقي 56 => 70/56 = 1.25 */
-    let scale = 70.0 / 56.0;
+    let scale: f64 = 70.0 / 56.0;
     assert_eq!(scale_from_dpi((96.0 * scale).round() as u32), 1.25);
   }
 

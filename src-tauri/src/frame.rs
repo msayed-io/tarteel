@@ -46,12 +46,12 @@ pub fn strip_frame(hwnd: HWND) -> Result<(), String> {
     .map_err(|e| format!("تعذر إزالة الإطار غير المرئي: {e}"))?;
 
     /* إيقاف حركات الإطار: تمنع وميضًا عند تغيير الحجم. */
-    let no_transition = windows::Win32::Foundation::BOOL::from(true);
+    let no_transition = windows_core::BOOL::from(true);
     let _ = DwmSetWindowAttribute(
       hwnd,
       windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE(DWMWA_TRANSITIONS_FORCEDISABLED),
       &no_transition as *const _ as *const core::ffi::c_void,
-      std::mem::size_of::<windows::Win32::Foundation::BOOL>() as u32,
+      std::mem::size_of::<windows_core::BOOL>() as u32,
     );
 
     /* بلا استدارة: الكبسولة هي التي تُستدير، لا النافذة. */

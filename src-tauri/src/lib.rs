@@ -720,64 +720,35 @@ pub fn run() {
 mod island_tests {
   use super::*;
 
-  /// الهامش العلوي كما يعيده المحرّك.
-  fn above(y: i32) -> i32 { y }
-
-  /// الجزيرة يجب أن تكون **داخل** الشريط: هامش متساوٍ فوقها وتحتها.
+  /// الموضع يأتي من الشاشة الحقيقية، والكبسولة تُرسم داخل الشريط.
   ///
-  /// هذا هو الإصلاح الوحيد في هذه النسخة. الاختبار القديم كان يثبّت القيمة
-  /// الخاطئة (10 بكسل) ويسميها «الهامش العلوي»، فمرّ الخطأ من CI إلى الواجهة.
+  /// الاختبار القديم كان يتوقع y = 10 ويسميه «الهامش العلوي»، فكان يؤكد
+  /// الخلل بدل كشفه. الحساب الآن في geometry.rs حيث يُختبر وحده.
   #[test]
-  fn island_is_vertically_centred_inside_the_reserved_band() {
-    let area = (1920u32, 1080u32);
-    let origin = (0i32, 0i32);
-    for (width, height) in [(56u32, 26u32), (126, 26), (384, 210), (444, 188), (480, 424), (440, 92)] {
-      let (x, y) = centered_island_origin(area, origin, (width, height), 1.0);
-      assert!(x >= 0, "التمركز الأفقي لا يخرج عن الشاشة");
-      let band = band_height_px(1.0);
-      let expected = ((band - height as i32) / 2).max(0);
-      assert_eq!(y, expected, "حالة {width}x{height}: يجب أن تتمركز داخل شريط {band}");
-      /* الجزيرة لا تخرج فوق الشاشة أبدًا. */
-      assert!(y >= 0);
+  fn island_bounds_are_derived_from_the_measured_display() {
+    for scale in [1.0, 1.25, 1.5] {
+      let (x, y, w, h) = island_bounds_from_monitor(0, 1920, scale);
+      assert_eq!(y, 0, "أعلى الشريط هو أعلى الشاشة");
+      assert_eq!(w, (56.0 * scale).round() as i32, "العرض المطلوب = 56 منطقية");
+      assert_eq!(h, geometry::bar_height_px(scale), "النافذة بارتفاع الشريط");
+      assert!(x > 0 && x + w < 1920, "متمركزة أفقياً");
+      assert_eq!(1920 - w - x, x, "المسافتان متساويتان");
     }
   }
 
   #[test]
-  fn small_island_has_three_pixels_above_and_below() {
-    /* 26 داخل 32 يترك 3 بكسل فوقها و3 تحتها. */
-    let band = band_height_px(1.0);
-    let (_, y) = centered_island_origin((1920, 1080), (0, 0), (56, 26), 1.0);
-    assert_eq!(band, 32);
-    assert_eq!(y, 3);
-    assert_eq!(band - 26 - y, 3, "الهامش السفلي يساوي العلوي");
-  }
-
-  #[test]
-  fn island_is_not_glued_to_the_top_edge() {
-    /* الخطأ الذي رآه المستخدم: y = 0 أو y = حدّ الشريط => ملتصقة. */
-    for height in [26u32, 34, 92, 188, 210] {
-      let (_, y) = centered_island_origin((1920, 1080), (0, 0), (56, height), 1.0);
-      assert!(y > 0 || height as i32 >= band_height_px(1.0), "الجزيرة ملتصقة بالحافة عند ارتفاع {height}");
+  fn the_island_window_always_fits_the_band_at_every_scale() {
+    for dpi in [96u32, 120, 144, 192] {
+      let scale = geometry::scale_from_dpi(dpi);
+      let (_, _, _, h) = island_bounds_from_monitor(0, 1920, scale);
+      let band = geometry::bar_height_px(scale);
+      assert!(geometry::island_fits_in_bar(h, band), "dpi {dpi}: {h} في {band}");
     }
   }
 
   #[test]
-  fn island_never_starts_below_the_band() {
-    /* التوسعات الأطول من الشريط تبدأ من أعلى الشاشة، لا من أسفل الشريط. */
-    let band = band_height_px(1.0);
-    let (_, y) = centered_island_origin((1920, 1080), (0, 0), (480, (band + 100) as u32), 1.0);
-    assert_eq!(y, 0);
-  }
-
-  #[test]
-  fn centring_is_symmetric_across_display_scales() {
-    /* على 125% و150% يجب أن يبقى الهامش العلوي مساويًا للسفلي. */
-    for scale in [1.0, 1.25, 1.5, 2.0] {
-      let band = band_height_px(scale);
-      let island = (26.0 * scale).round() as u32;
-      let (_, y) = centered_island_origin((1920, 1080), (0, 0), (56, island), scale);
-      let below = band - island as i32 - y;
-      assert!((above(y) - below).abs() <= 1, "مقياس {scale}: فوق {y} وتحت {below}");
-    }
+  fn a_second_monitor_is_centred_on_its_own_origin() {
+    let (x, _, w, _) = island_bounds_from_monitor(1920, 1920, 1.25);
+    assert_eq!(x, 1920 + (1920 - w) / 2);
   }
 }

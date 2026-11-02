@@ -29,12 +29,20 @@ describe('تموضع الجزيرة داخل الشريط', () => {
   });
 
   it('اختبارات Rust تفرض تمركزًا متماثلًا في كل الحالات', () => {
+    /* انتقلت اختبارات الهندسة إلى geometry.rs مع الحساب نفسه. */
+    const geo = readFileSync(resolve(__dirname, '../src-tauri/src/geometry.rs'), 'utf8');
     for (const name of [
-      'island_is_vertically_centred_inside_the_reserved_band',
-      'small_island_has_three_pixels_above_and_below',
-      'island_is_not_glued_to_the_top_edge',
-      'island_never_starts_below_the_band',
-      'centring_is_symmetric_across_display_scales',
+      'island_is_centred_on_the_screen_not_merely_inside_the_bar',
+      'centring_holds_on_a_secondary_monitor',
+      'centring_stays_whole_pixels_with_odd_widths',
+      'bar_and_island_scale_together_so_the_island_fits',
+    ]) {
+      expect(geo, name).toContain(name);
+    }
+    for (const name of [
+      'island_bounds_are_derived_from_the_measured_display',
+      'the_island_window_always_fits_the_band_at_every_scale',
+      'a_second_monitor_is_centred_on_its_own_origin',
     ]) {
       expect(lib, name).toContain(name);
     }
