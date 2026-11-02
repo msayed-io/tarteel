@@ -741,5 +741,4 @@ mod island_tests {
       assert!((above(y) - below).abs() <= 1, "مقياس {scale}: فوق {y} وتحت {below}");
     }
   }
-  }
 }
