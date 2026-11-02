@@ -37,9 +37,16 @@ impl Rect {
 
 /// الإطار العلوي المرئي بوحدات التصميم المنطقية.
 ///
-/// 28 = 20 للجزيرة الصغيرة + 4 فوقها + 4 تحتها. صغير بالقدر الذي طلبه
-/// المستخدم («مش طويل ولا بياخد مساحة كبيرة») وكافٍ لعناصر مقروءة.
-pub const BAR_LOGICAL_HEIGHT: f64 = 28.0;
+/// 34 = 26 للكبسولة الصغيرة + 4 فوقها + 4 تحتها على مقياس 100%.
+///
+/// كان 28 في نسخة أولى، فترك بكسلًا واحدًا فوق الكبسولة وتحتها — وهو ما
+/// يبدو ملتصقًا بالحافة لا متمركزًا. 34 يبقى نحيفًا كما طلب المستخدم
+/// («مش طويل ولا بياخد مساحة كبيرة») مع هامش يظهر للعين.
+pub const BAR_LOGICAL_HEIGHT: f64 = 34.0;
+
+/// ارتفاع الكبسولة في وضعي الخمول والتشغيل، بوحدات التصميم.
+/// يجب أن يطابق `height` في TARGET لحالتَي idle وcompact في island.html.
+pub const CAPSULE_LOGICAL_HEIGHT: f64 = 26.0;
 
 /// أكبر ارتفاع تتوقعه الجزيرة، وهو التوسعة الكاملة (tools = 300).
 pub const ISLAND_MAX_LOGICAL_HEIGHT: f64 = 300.0;
@@ -91,6 +98,16 @@ pub fn island_origin(monitor_left: i32, monitor_width: i32, island_width: i32) -
   (centred as i32, 0)
 }
 
+/// المساحة الفارغة فوق الكبسولة وتحتها بالبكسل الفيزيائي.
+///
+/// هذه هي القيمة التي يراها المستخدم بعينه. يجب أن تبقى موجبة وواضحة.
+pub fn capsule_margin_px(scale: f64) -> i32 {
+  let safe = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+  let band = bar_height_px(safe);
+  let capsule = (CAPSULE_LOGICAL_HEIGHT * safe).round() as i32;
+  ((band - capsule) / 2).max(0)
+}
+
 /// هل تقع النافذة كلها داخل الشريط؟
 ///
 /// تُستخدم كفحص تحقق لا كتخمين: تُشغَّل بعد كل تغيير حجم وتُسجَّل النتيجة.
@@ -126,8 +143,8 @@ mod tests {
       let band = bar_height_px(scale);
       let island = island_floor_height_px(scale);
       assert!(island_fits_in_bar(island, band), "dpi {dpi}: جزيرة {island} في شريط {band}");
-      /* الهامش المطلوب: لا تقل المساحة الفارغة عن 6 بكسل فيزيائية. */
-      assert!(band - island >= 6, "dpi {dpi}: هامش {band}-{island} صغير جدًا");
+      /* الهامش الذي يراه المستخدم: المسافة بين الكبسولة وحدّ الشريط. */
+      assert!(capsule_margin_px(scale) >= 3, "dpi {dpi}: هامش {} بكسل فقط", capsule_margin_px(scale));
     }
   }
 
@@ -136,10 +153,18 @@ mod tests {
     /* طلب المستخدم: شريط نحيف لا يأكل الشاشة. */
     for dpi in [96u32, 120, 144, 192] {
       let band = bar_height_px(scale_from_dpi(dpi));
-      assert!(band <= 56, "dpi {dpi}: الشريط {band} بكسل سميك");
+      assert!(band <= 68, "dpi {dpi}: الشريط {band} بكسل سميك");
     }
-    assert_eq!(bar_height_px(1.0), 28);
-    assert_eq!(bar_height_px(1.25), 35);
+    assert_eq!(bar_height_px(1.0), 34);
+    assert_eq!(bar_height_px(1.25), 43);
+  }
+
+  #[test]
+  fn the_capsule_has_a_visible_gap_on_both_sides() {
+    /* الخلل الذي رأيته في المحاكاة: بكسل واحد هامش يبدو التصاقًا. */
+    assert_eq!(capsule_margin_px(1.0), 4, "100%: 34 شريط - 26 كبسولة");
+    assert_eq!(capsule_margin_px(1.25), 5, "125%: 43 شريط - 33 كبسولة");
+    assert_eq!(capsule_margin_px(1.5), 6, "150%: 51 شريط - 39 كبسولة");
   }
 
   #[test]
