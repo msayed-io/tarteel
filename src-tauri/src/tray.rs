@@ -49,7 +49,17 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     .on_menu_event(|app, event| match event.id().as_ref() {
       SHOW_ID => show_main(app),
       QUIT_ID => {
-        /* خروج صريح: هنا فقط تُقتل العملية. */
+        /* خروج صريح: هنا فقط تُقتل العملية.
+           نُعيد المساحة المحجوزة قبل الخروج، وإلا بقيت الشاشة ناقصة شريطًا
+           لا وجود له بعد إغلاق التطبيق. */
+        if let Some(guard) = app.try_state::<crate::HeaderGuard>() {
+          if let Ok(mut slot) = guard.0.lock() {
+            if let Some(raw) = slot.take() {
+              #[cfg(windows)]
+              crate::appbar::destroy(windows::Win32::Foundation::HWND(raw as *mut core::ffi::c_void));
+            }
+          }
+        }
         app.exit(0);
       }
       ADHAN_TOGGLE_ID => {

@@ -19,6 +19,7 @@ mod alarm;
 mod task_scheduler;
 use audio::AudioEngine;
 mod audio;
+mod appbar;
 mod tray;
 #[cfg(windows)]
 mod toast;
@@ -399,6 +400,49 @@ pub fn emit_to_ui(app: &tauri::AppHandle, event: &str, payload: serde_json::Valu
   let _ = app.emit(event, payload);
 }
 
+/* ------------------------------------------------------------------ *
+ * الحاجز العلوي غير المرئي
+ * ------------------------------------------------------------------ */
+
+/// حالة الحاجز كما تراها الواجهة.
+#[tauri::command]
+fn header_guard_status() -> serde_json::Value {
+  serde_json::json!({
+    "reserved": appbar::is_registered(),
+    "heightPx": appbar::reserved_height(),
+    "windowStopPx": appbar::window_stop_offset(),
+  })
+}
+
+/// يحجز أو يلغي حجز الشريط العلوي.
+#[tauri::command]
+#[cfg(windows)]
+fn set_header_guard(enabled: bool, state: State<HeaderGuard>) -> Result<serde_json::Value, String> {
+  if enabled {
+    let mut handle = state.0.lock().map_err(|_| "قفل الحاجز تالف")?;
+    if handle.is_none() {
+      let hwnd = appbar::reserve_with_new_window()?;
+      *handle = Some(hwnd.0 as isize);
+    }
+  } else {
+    let mut handle = state.0.lock().map_err(|_| "قفل الحاجز تالف")?;
+    if let Some(raw) = handle.take() {
+      appbar::destroy(windows::Win32::Foundation::HWND(raw as *mut core::ffi::c_void));
+    }
+  }
+  Ok(header_guard_status())
+}
+
+#[tauri::command]
+#[cfg(not(windows))]
+fn set_header_guard(enabled: bool) -> Result<serde_json::Value, String> {
+  let _ = enabled;
+  Err("الحاجز العلوي متاح على ويندوز فقط".into())
+}
+
+/// مقبض نافذة الرسائل المحفوظة (خام ليكون Send).
+pub struct HeaderGuard(pub std::sync::Mutex<Option<isize>>);
+
 #[tauri::command]
 fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
   let widths = [64.0, 144.0, 384.0, 440.0, 444.0, 480.0];
@@ -499,6 +543,7 @@ pub fn run() {
   tauri::Builder::default()
     .manage(server)
     .manage(audio::AudioEngine::new())
+    .manage(HeaderGuard(std::sync::Mutex::new(None)))
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_notification::init())
     .plugin(tauri_plugin_autostart::init(
@@ -547,6 +592,18 @@ pub fn run() {
          بعد الإخفاء. */
       tray::build_tray(app.handle())?;
 
+      /* الحاجز العلوي غير المرئي: يُحجز تلقائيًا مع الإقلاع، فتتوقف
+         النوافذ الأخرى عند حدّه من أول لحظة ولا تمرّ خلف الآيلاند. */
+      #[cfg(windows)]
+      match appbar::reserve_with_new_window() {
+        Ok(hwnd) => {
+          if let Ok(mut slot) = app.state::<HeaderGuard>().0.lock() {
+            *slot = Some(hwnd.0 as isize);
+          }
+        }
+        Err(cause) => eprintln!("Tarteel header guard reserve failed: {cause}"),
+      }
+
       /* --hidden يعني إقلاعًا تلقائيًا مع ويندوز: ابدأ في الصينية. */
       if std::env::args().any(|arg| arg == "--hidden") {
         tray::hide_to_tray(app.handle());
@@ -572,6 +629,7 @@ pub fn run() {
       scan_directory, set_audio_root, audio_url, resize_island,
       set_alarm_schedule, set_sleep_deadline, sync_windows_tasks, clear_windows_tasks,
       alarm_status, fire_alarm_now,
+      header_guard_status, set_header_guard,
       play_adhan, stop_adhan, set_adhan_volume, set_adhan_muted, adhan_state,
       show_alarm_notification, set_next_prayer_label,
       is_autostart_enabled, set_autostart

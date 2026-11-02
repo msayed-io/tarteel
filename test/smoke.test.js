@@ -23,8 +23,8 @@ describe('Tarteel production surface', () => {
     const html = await read('island.html');
     const target = html.match(/TARGET=\{idle:\[(\d+),(\d+),(\d+)\],compact:\[(\d+),(\d+),(\d+)\],full:\[(\d+),(\d+),(\d+)\],prayer:\[(\d+),(\d+),(\d+)\],tools:\[(\d+),(\d+),(\d+)\],alert:\[(\d+),(\d+),(\d+)\]\}/);
     expect(target).not.toBeNull();
-    expect(target.slice(1, 4).map(Number)).toEqual([64, 34, 17]);
-    expect(target.slice(4, 7).map(Number)).toEqual([144, 34, 17]);
+    expect(target.slice(1, 4).map(Number)).toEqual([56, 26, 13]);
+    expect(target.slice(4, 7).map(Number)).toEqual([126, 26, 13]);
     expect(target.slice(7, 10).map(Number)).toEqual([384, 210, 37]);
     expect(html).toContain('[data-state=full] .full{transform:scale(.8)}');
     expect(html).toContain('.prayer{width:444px;height:188px');
