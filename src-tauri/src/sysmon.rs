@@ -606,10 +606,18 @@ mod tests {
 
   #[test]
   fn cpu_percentage_accounts_for_idle_inside_kernel_time() {
-    /* نصف الوقت خامل => 50%. */
+    /* خمول 1000 من إجمالي 2000 => 1000 مستغل => 50%. */
     let prev = sample(1_000, 4_000);
     let value = Sampler::cpu_between(prev, 2_000, 6_000).unwrap();
-    assert!((value - 75.0).abs() < 0.01, "خمول 1000 من 2000 => 50% مستغل؛ الناتج {value}");
+    assert!((value - 50.0).abs() < 0.01, "خمول 1000 من 2000 => 50% مستغل؛ الناتج {value}");
+  }
+
+  #[test]
+  fn cpu_percentage_detects_a_fully_busy_window() {
+    /* لا خمول إطلاقًا => 100%. */
+    let prev = sample(500, 1_000);
+    let value = Sampler::cpu_between(prev, 500, 2_000).unwrap();
+    assert!((value - 100.0).abs() < 0.01, "الناتج {value}");
   }
 
   #[test]

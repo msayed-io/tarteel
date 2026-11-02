@@ -809,16 +809,47 @@ mod island_tests {
   use super::*;
 
   #[test]
-  fn island_anchor_keeps_the_corner_integral_and_centred_for_every_state() {
+  fn island_is_centred_vertically_inside_the_reserved_band() {
+    /* الشرط الحقيقي: الجزيرة داخل الشريط، لا تحته، ومتمركزة فيه. */
     let area = (1920u32, 1080u32);
     let origin = (0i32, 0i32);
-    for (width, height) in [(64.0, 34.0), (144.0, 34.0), (384.0, 210.0), (444.0, 188.0), (480.0, 290.0), (440.0, 92.0)] {
-      let (x, y) = centered_island_origin(area, origin, ((width as f64 * 1.0) as u32, (height as f64 * 1.0) as u32), 1.0);
-      assert_eq!(y, 10, "the island top inset must not depend on the state");
+    for (width, height) in [(56.0, 26.0), (126.0, 26.0), (384.0, 210.0), (444.0, 188.0), (480.0, 290.0), (440.0, 92.0)] {
+      let size = ((width as f64 * 1.0) as u32, (height as f64 * 1.0) as u32);
+      let (x, y) = centered_island_origin(area, origin, size, 1.0);
       assert!(x >= 0);
+      /* الهامش أعلى الجزيرة = نصف فرق الارتفاع، فتبقى متمركزة. */
+      let expected = ((bar_height_px(1.0) as i64 - height as i64) / 2).max(0) as i32;
+      assert_eq!(y, expected, "الجزيرة يجب أن تتمركز داخل الشريط لحالة {width}x{height}");
     }
-    // 125% scaling: the width rounds once, so the anchor stays whole and symmetric.
-    let (x, y) = centered_island_origin(area, origin, ((480.0f64 * 1.25).round() as u32, (262.0f64 * 1.25).round() as u32), 1.25);
-    assert_eq!((x, y), ((1920i64 - 600) as i32 / 2, 13));
+  }
+
+  #[test]
+  fn small_island_sits_three_pixels_inside_the_band() {
+    /* 26 داخل 32 => 3 أعلى و3 أسفل. هذا ما يجعلها «داخل الشريط» بالعين. */
+    let (_, y) = centered_island_origin((1920, 1080), (0, 0), (56, 26), 1.0);
+    assert_eq!(y, 3);
+  }
+
+  #[test]
+  fn island_never_starts_below_the_band() {
+    /* القيمة القديمة 10*scale وضعتها عند حدّ الشريط تمامًا. */
+    let (_, y) = centered_island_origin((1920, 1080), (0, 0), (480, 424), 1.0);
+    assert_eq!(y, 0, "التوسعات الأطول من الشريط تبدأ من أعلى الشاشة");
+  }
+
+  #[test]
+  fn band_height_follows_the_display_scale() {
+    assert_eq!(bar_height_px(1.0), 32);
+    assert_eq!(bar_height_px(1.25), 40, "32 منطقية على 125% = 40 فيزيائية");
+    assert_eq!(bar_height_px(1.5), 48);
+    /* قيمة مقياس تالفة لا تُنتج ارتفاعًا مجنونًا. */
+    assert_eq!(bar_height_px(f64::NAN), 32);
+    assert_eq!(bar_height_px(0.0), 32);
+  }
+
+  #[test]
+  fn island_anchor_stays_whole_pixels_at_125_percent() {
+    let (x, y) = centered_island_origin((1920, 1080), (0, 0), ((480.0f64 * 1.25).round() as u32, (262.0f64 * 1.25).round() as u32), 1.25);
+    assert_eq!((x, y), ((1920i64 - 600) as i32 / 2, 0));
   }
 }
