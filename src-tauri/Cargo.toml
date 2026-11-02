@@ -1,6 +1,6 @@
 [package]
 name = "tarteel"
-version = "0.7.0"
+version = "0.7.1"
 description = "تَرتيل - مشغل التلاوات المحلي"
 authors = ["Tarteel"]
 edition = "2021"
@@ -17,6 +17,7 @@ tauri = { version = "2.12.4", features = ["tray-icon"] }
 tauri-plugin-dialog = "2.8.4"
 tauri-plugin-notification = "2.8.0"
 tauri-plugin-autostart = "2.5.1"
+tauri-plugin-single-instance = "2.5.5"
 rodio = { version = "0.20", default-features = false, features = ["symphonia-mp3", "symphonia-wav", "symphonia-flac"] }
 include_dir = "0.7"
 serde = { version = "1", features = ["derive"] }

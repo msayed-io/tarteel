@@ -102,6 +102,15 @@ pub fn hide_to_tray(app: &AppHandle) {
   if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
     let _ = window.hide();
   }
+}
+
+/// إخفاء كل شيء — للخروج الكامل أو للإقلاع في الخلفية.
+///
+/// فصلناهما عن `hide_to_tray` لأن الجمع بينهما كان يخفي الجزيرة عند مجرد
+/// إغلاق نافذة الإعدادات، بينما المطلوب أن تبقى الجزيرة معروضة دائمًا حتى
+/// يخرج المستخدم من الصينية.
+pub fn hide_all(app: &AppHandle) {
+  hide_to_tray(app);
   if let Some(island) = app.get_webview_window(ISLAND_WINDOW) {
     let _ = island.hide();
   }

@@ -475,10 +475,37 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
 /// يعيد إحداثيات فيزيائية صحيحة، ويُبقي الركن عددًا صحيحًا لتجنّب أي إزاحة
 /// بكسر بكسل عند مقاييس العرض 125% و150%.
 fn centered_island_origin(area: (u32, u32), origin: (i32, i32), size: (u32, u32), scale: f64) -> (i32, i32) {
+  let band = band_height_px(scale);
   let x = origin.0 as i64 + ((area.0 as i64 - size.0 as i64) / 2);
-  let y = origin.1 as i64 + (10.0 * scale).round() as i64;
-  (x as i32, y as i32)
+  /* التموضع العمودي: الجزيرة تُركَّز داخل الشريط المحجوز.
+     القيمة القديمة `10 * scale` كانت إزاحة ثابتة من أعلى الشاشة. حين أضفنا
+     حجز 32 بكسل أصبحت الجزيرة تبدأ من حدّ الشريط السفلي تمامًا: ملتصقة
+     بحافته العليا لا داخله. التمركز الحقيقي هو قسمة الفراغ المتبقي نصفين،
+     فيبقى فوقها وتحتها مقدار متساوٍ مهما تغيّر حجمها أو مقياس العرض. */
+  let inset = ((band as i64 - size.1 as i64) / 2).max(0);
+  (x as i32, (origin.1 as i64 + inset) as i32)
 }
+
+/// ارتفاع الشريط العلوي المحجوز بالبكسل الفيزيائي.
+///
+/// الشريط يُحجز بـ 32 وحدة منطقية. ويندوز يضع النوافذ بوحدات فيزيائية، وعلى
+/// شاشة بمقياس 125% تساوي 32 منطقية 40 فيزيائية. تجاهل المقياس يجعل الشريط
+/// أرقّ من الجزيرة على الشاشات الكبيرة، فتبرز خارج حدّه.
+fn band_height_px(scale: f64) -> i32 {
+  let safe = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+  // يجب أن يطابق ارتفاع الحجز الفعلي في appbar، وإلا اختلفت الهندسة.
+  let from_reserved = appbar::reserved_height();
+  let from_scale = (RESERVED_BAND_LOGICAL as f64 * safe).round() as i32;
+  // نأخذ الأكبر كي لا تخرج الجزيرة أبدًا فوق شريط أقل ارتفاعًا مما تظن.
+  from_reserved.max(from_scale).max(size_floor())
+}
+
+fn size_floor() -> i32 {
+  appbar::RESERVED_HEIGHT_PX
+}
+
+/// ارتفاع الشريط بوحدات التصميم المنطقية.
+const RESERVED_BAND_LOGICAL: u32 = 32;
 
 /// `SetWindowPos` changes position and size in a single call, so no frame ever sees one
 /// applied without the other. It has window thread affinity, hence the main-thread hop.
@@ -541,6 +568,19 @@ fn apply_island_bounds_native(island: &tauri::WebviewWindow, left: i32, top: i32
 pub fn run() {
   let server = start_audio_server().expect("error while starting local audio server");
   tauri::Builder::default()
+    /* نسخة واحدة فقط. بلا هذا السطر يفتح المستخدم التطبيق مرتين فيجد
+       نسختين لكل نافذة، وتتضاعف الجزيرة. الترتيب مقصود: يجب أن يُسجَّل
+       القفل قبل أي نافذة. النقر على الاختصار مجددًا يُظهر النافذة القائمة. */
+    .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+      if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+      }
+      if let Some(island) = app.get_webview_window("island") {
+        let _ = island.show();
+      }
+    }))
     .manage(server)
     .manage(audio::AudioEngine::new())
     .manage(HeaderGuard(std::sync::Mutex::new(None)))
@@ -606,10 +646,7 @@ pub fn run() {
 
       /* --hidden يعني إقلاعًا تلقائيًا مع ويندوز: ابدأ في الصينية. */
       if std::env::args().any(|arg| arg == "--hidden") {
-        tray::hide_to_tray(app.handle());
-        if let Some(window) = app.get_webview_window("main") {
-          let _ = window.hide();
-        }
+        tray::hide_all(app.handle());
       }
       Ok(())
     })
@@ -622,6 +659,8 @@ pub fn run() {
          متاح من قائمة الصينية وحدها. */
       if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         api.prevent_close();
+        /* إغلاق نافذة الإعدادات يُخفيها وحدها. الجزيرة نافذة مستقلة تبقى
+           في مكانها، والتطبيق يبقى حيًّا في الصينية حتى الخروج الصريح. */
         tray::hide_to_tray(window.app_handle());
       }
     })
@@ -642,17 +681,65 @@ pub fn run() {
 mod island_tests {
   use super::*;
 
+  /// الهامش العلوي كما يعيده المحرّك.
+  fn above(y: i32) -> i32 { y }
+
+  /// الجزيرة يجب أن تكون **داخل** الشريط: هامش متساوٍ فوقها وتحتها.
+  ///
+  /// هذا هو الإصلاح الوحيد في هذه النسخة. الاختبار القديم كان يثبّت القيمة
+  /// الخاطئة (10 بكسل) ويسميها «الهامش العلوي»، فمرّ الخطأ من CI إلى الواجهة.
   #[test]
-  fn island_anchor_keeps_the_corner_integral_and_centred_for_every_state() {
+  fn island_is_vertically_centred_inside_the_reserved_band() {
     let area = (1920u32, 1080u32);
     let origin = (0i32, 0i32);
-    for (width, height) in [(64.0, 34.0), (144.0, 34.0), (384.0, 210.0), (444.0, 188.0), (480.0, 290.0), (440.0, 92.0)] {
-      let (x, y) = centered_island_origin(area, origin, ((width as f64 * 1.0) as u32, (height as f64 * 1.0) as u32), 1.0);
-      assert_eq!(y, 10, "the island top inset must not depend on the state");
-      assert!(x >= 0);
+    for (width, height) in [(56u32, 26u32), (126, 26), (384, 210), (444, 188), (480, 424), (440, 92)] {
+      let (x, y) = centered_island_origin(area, origin, (width, height), 1.0);
+      assert!(x >= 0, "التمركز الأفقي لا يخرج عن الشاشة");
+      let band = band_height_px(1.0);
+      let expected = ((band - height as i32) / 2).max(0);
+      assert_eq!(y, expected, "حالة {width}x{height}: يجب أن تتمركز داخل شريط {band}");
+      /* الجزيرة لا تخرج فوق الشاشة أبدًا. */
+      assert!(y >= 0);
     }
-    // 125% scaling: the width rounds once, so the anchor stays whole and symmetric.
-    let (x, y) = centered_island_origin(area, origin, ((480.0f64 * 1.25).round() as u32, (262.0f64 * 1.25).round() as u32), 1.25);
-    assert_eq!((x, y), ((1920i64 - 600) as i32 / 2, 13));
+  }
+
+  #[test]
+  fn small_island_has_three_pixels_above_and_below() {
+    /* 26 داخل 32 يترك 3 بكسل فوقها و3 تحتها. */
+    let band = band_height_px(1.0);
+    let (_, y) = centered_island_origin((1920, 1080), (0, 0), (56, 26), 1.0);
+    assert_eq!(band, 32);
+    assert_eq!(y, 3);
+    assert_eq!(band - 26 - y, 3, "الهامش السفلي يساوي العلوي");
+  }
+
+  #[test]
+  fn island_is_not_glued_to_the_top_edge() {
+    /* الخطأ الذي رآه المستخدم: y = 0 أو y = حدّ الشريط => ملتصقة. */
+    for height in [26u32, 34, 92, 188, 210] {
+      let (_, y) = centered_island_origin((1920, 1080), (0, 0), (56, height), 1.0);
+      assert!(y > 0 || height >= band_height_px(1.0), "الجزيرة ملتصقة بالحافة عند ارتفاع {height}");
+    }
+  }
+
+  #[test]
+  fn island_never_starts_below_the_band() {
+    /* التوسعات الأطول من الشريط تبدأ من أعلى الشاشة، لا من أسفل الشريط. */
+    let band = band_height_px(1.0);
+    let (_, y) = centered_island_origin((1920, 1080), (0, 0), (480, (band + 100) as u32), 1.0);
+    assert_eq!(y, 0);
+  }
+
+  #[test]
+  fn centring_is_symmetric_across_display_scales() {
+    /* على 125% و150% يجب أن يبقى الهامش العلوي مساويًا للسفلي. */
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+      let band = band_height_px(scale);
+      let island = (26.0 * scale).round() as u32;
+      let (_, y) = centered_island_origin((1920, 1080), (0, 0), (56, island), scale);
+      let below = band - island as i32 - y;
+      assert!((above(y) - below).abs() <= 1, "مقياس {scale}: فوق {y} وتحت {below}");
+    }
+  }
   }
 }
