@@ -85,6 +85,21 @@ mod imp {
   /// رسالة الإشعار التي يرسلها ويندوز إلى شريطنا عند تغيّر موضع شريط المهام.
   const APPBAR_CALLBACK: u32 = WM_USER + 1;
 
+  /// إجراء النافذة.
+  ///
+  /// لماذا غلاف صريح ولا `DefWindowProcW` مباشرة؟ لأن `WNDPROC` يشترط
+  /// `unsafe extern "system" fn`، و`DefWindowProcW` دالة Rust عادية.
+  /// النافذة لا تعالج شيئًا بنفسها؛ كل ما تحتاجه هو أن توجد ليحجز بها
+  /// `SHAppBarMessage`.
+  unsafe extern "system" fn wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+  ) -> windows::Win32::Foundation::LRESULT {
+    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+  }
+
   /// ينشئ نافذة رسائل غير مرئية تمامًا.
   ///
   /// لماذا نحتاج نافذة أصلًا؟ لأن `SHAppBarMessage` يشترط `hwnd` صالحًا
@@ -97,7 +112,7 @@ mod imp {
       .map_err(|e| format!("تعذر جلب مقبض الوحدة: {e}"))?;
 
     let wc = WNDCLASSW {
-      lpfnWndProc: Some(DefWindowProcW),
+      lpfnWndProc: Some(wnd_proc),
       hInstance: instance.into(),
       lpszClassName: windows::core::PCWSTR(class_name.as_ptr()),
       ..Default::default()
