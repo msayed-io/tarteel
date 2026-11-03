@@ -526,6 +526,17 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
 /// نقطة واحدة تحدد كل شيء: **أعلى الشريط**. يبقى `top = 0` دائمًا، وx في
 /// منتصف الشاشة تمامًا. الأبعاد تأتي من `geometry` المشتقة من مقياس العرض
 /// الفعلي، لا من أرقام ثابتة.
+/// حجم نافذة الجزيرة عند الإقلاع: عرض الكبسولة الصغيرة × ارتفاع الشريط.
+///
+/// **لماذا هذا مهم:** نافذة تُبنى بلا حجم تحصل على 800×600 افتراضية. عند
+/// تصغيرها لاحقًا يحافظ ويندوز على مركزها، فينزلق موضعها للأسفل بمقدار
+/// نصف الفرق. تحديد الحجم الصحيح من البداية يلغي الانزياح من أصله.
+fn island_boot_size_px(scale: f64) -> (f64, f64) {
+  let safe = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+  /* وحدات منطقية: Tauri يضربها في المقياس تلقائيًا. */
+  (56.0, geometry::bar_height_px(safe) as f64 / safe)
+}
+
 fn island_bounds_from_monitor(monitor_left: i32, monitor_width: i32, scale: f64) -> (i32, i32, i32, i32) {
   let width = (56.0 * scale).round() as i32;
   let height = geometry::island_floor_height_px(scale);
@@ -618,10 +629,15 @@ pub fn run() {
       Some(vec!["--hidden"]),
     ))
     .setup(|app| {
+      /* الحجم يُحدد هنا لا في الملف: النافذة كانت تُبنى بلا `inner_size`
+         فتحصل على الحجم الافتراضي (~800×600)، فيصبح مركزها (400, 300) بدل
+         (0, 0). وكل تغيير حجم لاحق يُبقى المركز ثابتًا، فتظهر الجزيرة في
+         وسط الشاشة بدل أعلاها — وهو ما رآه المستخدم بالضبط.
+         الآن تُولد بالحجم النهائي الصحيح منذ اللحظة الأولى. */
+      let boot_width = island_boot_size_px(1.0);
       let island = WebviewWindowBuilder::new(app, "island", WebviewUrl::App("island.html".into()))
         .title("تَرتيل")
-        /* العرض والارتفاع فيزيائيان هنا: النافذة تبدأ بعرض idle الفيزيائي
-           وارتفاع الشريط، ثم تُعاد إلى الشريط في كل تغيير حجم. */
+        .inner_size(boot_width.0, boot_width.1)
         .decorations(false)
         .transparent(true)
         .background_color(Color(0, 0, 0, 0))
@@ -656,8 +672,17 @@ pub fn run() {
       }
 
       let (x, y, w, h) = island_bounds_from_monitor(origin.x, area.width as i32, scale);
-      let _ = (w, h);
+      /* الحجم والموضع في نداء واحد: `SetWindowPos` تُطبّق الاثنين معًا، فلا
+         يُرى إطار واحد بالحجم القديم في الموضع الجديد. */
+      island.set_size(tauri::PhysicalSize::new(w as u32, h as u32))?;
       island.set_position(PhysicalPosition::new(x, y))?;
+      /* تشديد أخير عبر Win32: الموضع الفعلي كما يراه مدير النوافذ، لا كما
+         تظنه Tauri بعد سلسلة تغييرات حجم. */
+      #[cfg(windows)]
+      if let Ok(hwnd) = island.hwnd() {
+        let _ = apply_island_bounds_native(&island, x, y, w as u32, h as u32);
+        let _ = hwnd;
+      }
       island.show()?;
       /* حالة التنبيهات: تُقرأ من القرص عند الإقلاع، فتبقى المعرّفات المُطلقة
          محفوظة عبر إعادة التشغيل ولا يتكرر أي أذان. */

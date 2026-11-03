@@ -33,8 +33,10 @@ describe('الكبسولة تُرسم في منتصف الشريط', () => {
     expect(island).toContain("isl.style.top=top+'px'");
   });
 
-  it('المستطيل التفاعلي يتبع نفس إزاحة الكبسولة', () => {
-    expect(island).toContain("invoke('set_island_hit_rect',{x:left,y:top,width:w,height:h})");
+  it('المستطيل التفاعلي يساوي المستطيل المرئي فعلًا بعد التصغير', () => {
+    /* النقرات تتبع ما تراه العين: العرض بعد التملاء، لا العرض الاسمي. */
+    expect(island).toContain('reportHitRect(visualLeft,top,vw,vh)');
+    expect(island).toContain('const vw=w*f, vh=h*f');
   });
 });
 

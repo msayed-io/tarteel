@@ -7,7 +7,7 @@
 <style>
 :root{--black:#000;--text:#fff;--sub:rgba(235,235,245,.6);--track:rgba(235,235,245,.3);--fill:#9d9da1;--ctl:#dcdce1;--accent:#b88ad8;--chip:rgba(255,255,255,.1);--chip-on:rgba(255,255,255,.22);--green:#30d158;--font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;--ease-out:cubic-bezier(.2,.9,.3,1)}
 *{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}html,body{height:100%;overflow:hidden;background:transparent;color:var(--text);-webkit-font-smoothing:antialiased}body{font-family:var(--font)}button{font-family:inherit}
-.island{position:fixed;top:0;left:50%;translate:-50% 0;width:56px;height:26px;border-radius:13px;background:var(--black);overflow:hidden;cursor:pointer;transform-origin:50% 0;user-select:none;scale:var(--fit,1);will-change:width,height,border-radius;transition:scale .28s var(--ease-out)}
+.island{position:fixed;top:0;left:0;translate:0 0;width:56px;height:26px;border-radius:13px;background:var(--black);overflow:hidden;cursor:pointer;transform-origin:50% 0;user-select:none;scale:var(--fit,1);will-change:width,height,border-radius;transition:scale .28s var(--ease-out)}
 .island.press{scale:calc(var(--fit,1)*.965)}.island:focus-visible{outline:2px solid #5aa9ff;outline-offset:3px}
 .layer{position:absolute;top:0;left:50%;opacity:0;filter:blur(14px);pointer-events:none;transform-origin:50% 0;transition:opacity .14s ease-in,filter .14s ease-in,transform .22s ease-in}
 .idle{left:0;width:100%;height:26px;margin-left:0;transform:scale(.8);display:flex;align-items:center;justify-content:center}
@@ -92,28 +92,59 @@ let raf=0,last=0,state='idle',back='compact',player={playing:false,duration:0,po
    المستخدم على التطبيقات التي تحتها. القيمة تُرسل بالوحدات المنطقية
    والخادم يحوّلها إلى بكسل فيزيائي بمقياس الشاشة. */
 let hitTimer=0,lastHit='';
-function reportHitRect(){
-  const w=Math.round(S.w.x),h=Math.round(Math.max(S.h.x,20));
-  const left=Math.round((window.innerWidth-w)/2);
-  const top=Math.max(0,Math.round((window.innerHeight-h)/2));
-  const key=`${left}:${top}:${w}:${h}`;
+function reportHitRect(l,t,w,h){
+  if(l===undefined){
+    const f=screenFit>0?screenFit:1;
+    const w0=S.w.x, h0=Math.max(S.h.x,20);
+    w=Math.round(w0*f); h=Math.round(h0*f);
+    l=Math.round((window.innerWidth-w0)/2+ (w0-w)/2);
+    t=Math.round((window.innerHeight-h)/2);
+  }
+  const key=`${l}:${t}:${w}:${h}`;
   if(key===lastHit)return;
   lastHit=key;
   clearTimeout(hitTimer);
-  hitTimer=setTimeout(()=>{invoke('set_island_hit_rect',{x:left,y:top,width:w,height:h}).catch(()=>{})},40);
+  hitTimer=setTimeout(()=>{invoke('set_island_hit_rect',{x:l,y:t,width:w,height:h}).catch(()=>{})},40);
 }
 function apply(){
   const w=S.w.x,h=Math.max(S.h.x,20);
   isl.style.width=w+'px';isl.style.height=h+'px';isl.style.borderRadius=Math.max(S.r.x,8)+'px';
-  /* التمركز الرأسي داخل الشريط: النافذة بارتفاع الشريط، والكبسولة أقصر منه،
-     فنضعها في منتصفه بالضبط. `top:0` كانت تلصقها بالحافة العليا. */
-  const top=Math.max(0,Math.round((window.innerHeight-h)/2));
+  /* التمركز — النافذة هي الإطار المرجعي، والتحويل يتمحور حول
+     (50% أفقياً، 0% رأسياً) كما في `.island{transform-origin:50% 0}`.
+     هذا يعني أن التصغير يُبقي مركز العنصر الأفقي ثابتاً ويُبقي حرفه
+     العلوي ثابتاً. لذلك تختلف معادلة المحورين:
+
+       أفقي : المركز لا يتحرك بالتصغير ⇒ left = (عرض النافذة − العرض) / 2
+       رأسي : الحرف العلوي لا يتحرك ⇒ top = (ارتفاع النافذة − الارتفاع×fit) / 2
+
+     استخدام معادلة واحدة للمحورين ينزع المركز بمقدار (1−fit)×الحجم، وهو
+     خطأ بكسل واحد صغير، لكنه يفشل شرط «فارق لا يتجاوز نصف بكسل». */
+  const f=screenFit>0?screenFit:1;
+  const left=Math.round((window.innerWidth-w)/2);
+  const top=Math.round((window.innerHeight-h*f)/2);
+  isl.style.left=left+'px';
   isl.style.top=top+'px';
-  reportHitRect();
+  isl.style.translate='0 0';
+  /* المستطيل المرئي فعلًا بعد التصغير، للنقرات. */
+  const vw=w*f, vh=h*f;
+  const visualLeft=Math.round(left+(w-vw)/2);
+  reportHitRect(visualLeft,top,vw,vh);
 }
 // The island must read as a single floating surface over the desktop: no drop shadow,
 // no border and no second rectangle are ever drawn behind or around it.
-function fitToScreen(){const desired=TARGET[state]?.[0]||480;screenFit=Math.min(1,Math.max(.45,(screen.availWidth-16)/desired));document.documentElement.style.setProperty('--fit',screenFit.toFixed(3))}
+/* التملاء: النافذة تتّسع للحالات الموسّعة فقط.
+   المرجع هو نافذة الجزيرة نفسها، لا `screen.availWidth`:
+   في بعض بيئات العرض ترجع `availWidth` عرض النافذة لا الشاشة، فيتقلّص
+   المقياس إلى 0.714 بلا سبب ويظهر «عدم تمركز» وهمي.
+   عندما تكون النافذة أعرض من الحالة المطلوبة (وضع الخمول: نافذة 56
+   وكبسولة 56) يكون التملاء 1 دائمًا، وهو المطلوب. */
+function fitToScreen(){
+  const desired=TARGET[state]?.[0]||480;
+  const available=Math.max(window.innerWidth,1);
+  /* هامش 2 بكسل يمنع شريط تمرير عرضي عند التطابق التام. */
+  screenFit=Math.min(1,Math.max(.45,(available-2)/desired));
+  document.documentElement.style.setProperty('--fit',screenFit.toFixed(4));
+}
 function syncPassThrough(next){
   /* full/prayer/tools/alert لها محتوى تفاعلي كامل: لا نمرّر شيئًا.
      idle/compact كبسولة صغيرة: نمرّر كل ما حولها. */
