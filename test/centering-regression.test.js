@@ -70,3 +70,19 @@ describe('ضمانات الهندسة عبر كل المقاسات', () => {
     expect(geo).toContain('centring_holds_on_a_secondary_monitor');
   });
 });
+
+describe('تزامن حجم حاوية الجزيرة مع نافذة Tauri الفعلية', () => {
+  it('يبدأ host من قياس WebView بدل الأبعاد الافتراضية القديمة', () => {
+    expect(html).toContain('host={width:Math.max(1,Math.round(window.innerWidth)),height:Math.max(1,Math.round(window.innerHeight))}');
+    expect(html).not.toContain('host={width:480,height:262}');
+  });
+
+  it('يوسّع النافذة قبل بدء الحالة الأكبر ولا يطلب تصغيرها عند الانطواء', () => {
+    const start = html.indexOf('async function go(next){');
+    const end = html.indexOf('/* الإقلاع:', start);
+    const transition = html.slice(start, end);
+    expect(transition).toContain('if(width>host.width||height>host.height)');
+    expect(transition).toContain('await resizeHost(Math.max(width,host.width),Math.max(height,host.height))');
+    expect(transition.indexOf('await resizeHost')).toBeLessThan(transition.indexOf('state=next'));
+  });
+});

@@ -19,10 +19,14 @@
 
 use std::sync::atomic::{AtomicI32, AtomicBool, Ordering};
 
+#[cfg(test)]
+static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// مستطيل المنطقة التفاعلية بالبكسل الفيزيائي داخل النافذة.
 ///
 /// 0 عرض أو 0 ارتفاع تعني «لا شيء تفاعلي»، أي تمرير كل النقرات.
 static INTERACTIVE: AtomicI32 = AtomicI32::new(0);
+static INTERACTIVE_Y: AtomicI32 = AtomicI32::new(0);
 static INTERACTIVE_W: AtomicI32 = AtomicI32::new(0);
 static INTERACTIVE_H: AtomicI32 = AtomicI32::new(0);
 /// هل تُمرَّر النقرات خارج المنطقة التفاعلية؟ مطفأ يعني النافذة تلتقط الكل.
@@ -31,6 +35,7 @@ static PASS_THROUGH: AtomicBool = AtomicBool::new(true);
 /// يضبط المستطيل التفاعلي (الكبسولة المرئية) بالبكسل الفيزيائي.
 pub fn set_interactive_rect(x: i32, y: i32, width: i32, height: i32) {
   INTERACTIVE.store(x.max(0), Ordering::SeqCst);
+  INTERACTIVE_Y.store(y.max(0), Ordering::SeqCst);
   INTERACTIVE_W.store(width.max(0), Ordering::SeqCst);
   INTERACTIVE_H.store(height.max(0), Ordering::SeqCst);
 }
@@ -39,7 +44,7 @@ pub fn set_interactive_rect(x: i32, y: i32, width: i32, height: i32) {
 pub fn interactive_rect() -> (i32, i32, i32, i32) {
   (
     INTERACTIVE.load(Ordering::SeqCst),
-    0,
+    INTERACTIVE_Y.load(Ordering::SeqCst),
     INTERACTIVE_W.load(Ordering::SeqCst),
     INTERACTIVE_H.load(Ordering::SeqCst),
   )
@@ -172,7 +177,10 @@ mod tests {
 
   #[test]
   fn the_whole_window_passes_through_when_no_rect_is_set() {
+    let _guard = TEST_LOCK.lock().unwrap();
     /* قبل أن تُبلّغ الواجهة عن الكبسولة، لا يجوز ابتلاع أي نقرة. */
+    set_interactive_rect(0, 0, 0, 0);
+    set_pass_through(true);
     assert_eq!(decide(10, 10), Hit::Transparent);
   }
 
@@ -184,6 +192,7 @@ mod tests {
 
   #[test]
   fn expanded_states_can_disable_pass_through_entirely() {
+    let _guard = TEST_LOCK.lock().unwrap();
     /* لوحة المشغّل تحتاج كل نقراتها، فلا نمرّر شيئًا. */
     set_pass_through(false);
     assert_eq!(decide(9999, 9999), Hit::Interactive);
@@ -193,9 +202,13 @@ mod tests {
 
   #[test]
   fn interactive_rect_round_trips() {
+    let _guard = TEST_LOCK.lock().unwrap();
     set_interactive_rect(100, 5, 120, 40);
-    let (x, _, w, h) = interactive_rect();
-    assert_eq!((x, w, h), (100, 120, 40));
+    let rect = interactive_rect();
+    assert_eq!(rect, (100, 5, 120, 40));
+    assert!(point_is_interactive(100, 5, rect), "الحافة العليا تبدأ عند y المبلّغ عنه");
+    assert!(!point_is_interactive(100, 4, rect), "لا تلتقط بكسلًا فوق الكبسولة");
+    assert!(!point_is_interactive(100, 45, rect), "لا تلتقط بكسلًا تحت الكبسولة");
     set_interactive_rect(0, 0, 0, 0);
   }
 }

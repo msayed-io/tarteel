@@ -86,7 +86,7 @@ const RM=matchMedia('(prefers-reduced-motion:reduce)').matches,mk=(x,k,c)=>({x,v
  * الارتفاع 34px كان يُهدر 8px فراغًا حول كبسولة ارتفاعها 22px.
  */
 const TARGET={idle:[56,26,13],compact:[126,26,13],full:[384,210,37],prayer:[444,188,44],tools:[480,300,46],alert:[440,92,40]};
-let raf=0,last=0,state='idle',back='compact',player={playing:false,duration:0,position:0,fileName:'',artist:'',cover:null,speed:1,sleepMode:'off',sleepMinutes:0},prayerState={schedule:null,preferences:{showNext:false,pauseAtAdhan:true},alert:null},scrub=false,host={width:480,height:262},transitionId=0,hostSeq=0,alertTimer=0,screenFit=1;
+let raf=0,last=0,state='idle',back='compact',player={playing:false,duration:0,position:0,fileName:'',artist:'',cover:null,speed:1,sleepMode:'off',sleepMinutes:0},prayerState={schedule:null,preferences:{showNext:false,pauseAtAdhan:true},alert:null},scrub=false,host={width:Math.max(1,Math.round(window.innerWidth)),height:Math.max(1,Math.round(window.innerHeight))},transitionId=0,hostSeq=0,alertTimer=0,screenFit=1;
 /* المستطيل التفاعلي = الكبسولة المرئية فقط.
    كل ما حولها داخل النافذة يصبح شفافًا للنقر، فلا تبتلع النافذة نقرات
    المستخدم على التطبيقات التي تحتها. القيمة تُرسل بالوحدات المنطقية
