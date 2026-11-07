@@ -14,9 +14,9 @@ const target = (() => {
 })();
 
 describe('أحجام Dynamic Island الأصلية', () => {
-  it('الحالتان الصغيرتان تحافظان على أبعادهما', () => {
-    expect(target.idle).toEqual([56, 26, 13]);
-    expect(target.compact).toEqual([126, 26, 13]);
+  it('الخمول والموسيقى يستخدمان النسبة الأصغر المطابقة للمرجع', () => {
+    expect(target.idle).toEqual([44, 24, 12]);
+    expect(target.compact).toEqual([112, 24, 12]);
   });
 
   it('التوسعات تحافظ على المقاسات والعناصر الموجودة', () => {
@@ -31,10 +31,18 @@ describe('أحجام Dynamic Island الأصلية', () => {
   });
 
   it('مرحلة الخمول تطابق قياس CSS دون تغيير ارتفاع الكبسولة', () => {
-    expect(geo).toContain('COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 34.0');
-    expect(geo).toContain('CAPSULE_LOGICAL_HEIGHT: f64 = 26.0');
+    expect(geo).toContain('COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 38.0');
+    expect(geo).toContain('CAPSULE_LOGICAL_HEIGHT: f64 = 24.0');
     expect(rust).toContain('geometry::compact_stage_height_px(scale)');
     expect(rust).toContain('geometry::COMPACT_STAGE_LOGICAL_HEIGHT');
+  });
+
+  it('السطح الصغير له وصلة وسطية بلا إطار أو مستطيل خلفي', () => {
+    expect(html).toContain('.island::before');
+    expect(html).toContain('height:8px');
+    expect(html).toContain('.island-surface');
+    expect(html).toContain('const NECK_HEIGHT=8');
+    expect(html).toContain('top:7px;left:0;translate:0 0;width:44px;height:24px');
   });
 
   it('لا يرسم CSS حدًا أو ظلًا أو إطارًا حول الكبسولة', () => {

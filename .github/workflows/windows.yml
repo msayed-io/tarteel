@@ -36,9 +36,9 @@ jobs:
           tagName: tarteel-v__VERSION__
           releaseName: Tarteel v__VERSION__
           releaseBody: |
-            Corrects Dynamic Island vertical alignment on startup and after expand/collapse transitions.
+            Keeps the Dynamic Island capsule anchored during expansion and collapse, with Windows motion-frame verification.
+            Refines only the compact idle/music silhouette and sizing; full, prayer, tools, and alert dimensions remain unchanged.
             Adds measured Windows monitor/work-area diagnostics and an interactive launch/click/collapse smoke test.
-            The existing island artwork and idle/music layouts remain unchanged.
           releaseDraft: true
           prerelease: false
           args: --bundles nsis

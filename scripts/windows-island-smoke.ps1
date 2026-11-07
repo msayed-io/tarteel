@@ -33,7 +33,7 @@ function Wait-ForRow([string]$State, [int]$TimeoutSeconds, [Nullable[long]]$Afte
       if ($_.state -ne $State -or ($null -ne $After -and [long]$_.timestamp_unix_ms -le $After)) { return $false }
       if ($null -eq $_.capsule_rect_client) { return $false }
       $capsuleHeight = [double]$_.capsule_rect_client.bottom - [double]$_.capsule_rect_client.top
-      $compactHeight = 26.0 * [double]$_.scale_factor
+      $compactHeight = 24.0 * [double]$_.scale_factor
       if ($Expanded) { return $capsuleHeight -gt $compactHeight }
       return $capsuleHeight -le $compactHeight
     })
@@ -101,7 +101,7 @@ function Assert-Anchor($Record) {
   $dx = $cx - [double]$anchor.x
   $dy = $cy - [double]$anchor.y
   $expectedX = ([double]$monitor.left + [double]$monitor.right) / 2.0
-  $expectedY = [double]$monitor.top + 17.0 * [double]$Record.scale_factor
+  $expectedY = [double]$monitor.top + 19.0 * [double]$Record.scale_factor
   if ([Math]::Abs([double]$anchor.x - $expectedX) -gt 0.01 -or [Math]::Abs([double]$anchor.y - $expectedY) -gt 0.01) {
     throw "The collapsed anchor is not the monitor-origin stage center. Expected ($expectedX,$expectedY), measured ($($anchor.x),$($anchor.y))."
   }
@@ -142,6 +142,10 @@ try {
   $prayer = Wait-ForRow 'prayer' 15 ([long]$idle.timestamp_unix_ms) -Expanded
   if ($prayer.client_size.width -lt 300 -or $prayer.client_size.height -lt 100) { throw "Prayer state did not expand the native window as expected: $($prayer.client_size.width)x$($prayer.client_size.height)" }
   if ($prayer.aligned_within_half_pixel -ne $true) { throw "Expanded window origin did not align to the monitor origin: $($prayer.aligned_within_half_pixel)" }
+  if ($null -eq $prayer.motion_top_min_screen_css_px -or $null -eq $prayer.motion_top_max_screen_css_px -or [int]$prayer.motion_sample_count -lt 4) { throw 'Expanded state did not include enough measured animation frames.' }
+  $motionSpan = [Math]::Abs([double]$prayer.motion_top_max_screen_css_px - [double]$prayer.motion_top_min_screen_css_px)
+  if ($motionSpan -gt 0.75) { throw "Island top moved $motionSpan CSS px during expansion; expected a fixed capsule anchor." }
+  Write-Host "Verified stable top anchor through $($prayer.motion_sample_count) animation frames; range=$motionSpan CSS px."
   $null = Capture-Top 'prayer-expanded'
 
   Click-RectCenter $prayer
@@ -155,7 +159,7 @@ try {
   $summary = @(
     'PASS: launched the built Tarteel Windows executable.',
     "PASS: measured idle capsule offset before correction=$($idle.pre_alignment.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress); after correction=$($collapsed.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress).",
-    'PASS: physical mouse click opened prayer state and the native window expanded.',
+    "PASS: physical click expanded prayer state; top-anchor range=$motionSpan CSS px across $($prayer.motion_sample_count) frames.",
     'PASS: physical mouse click returned to idle and the measured capsule remained centered.',
     "Display: $($collapsed.monitor_rc_monitor.right - $collapsed.monitor_rc_monitor.left)x$($collapsed.monitor_rc_monitor.bottom - $collapsed.monitor_rc_monitor.top); scale_factor=$($collapsed.scale_factor); native_dpi=$($collapsed.native_dpi)."
   )

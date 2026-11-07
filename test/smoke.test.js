@@ -19,12 +19,12 @@ describe('Tarteel production surface', () => {
     expect(html).toContain('lang="ar" dir="rtl"');
   });
 
-  it('preserves the reference layout geometry and scales only the expanded player to 80%', async () => {
+  it('refines only compact geometry and preserves every expanded-state size', async () => {
     const html = await read('island.html');
     const target = html.match(/TARGET=\{idle:\[(\d+),(\d+),(\d+)\],compact:\[(\d+),(\d+),(\d+)\],full:\[(\d+),(\d+),(\d+)\],prayer:\[(\d+),(\d+),(\d+)\],tools:\[(\d+),(\d+),(\d+)\],alert:\[(\d+),(\d+),(\d+)\]\}/);
     expect(target).not.toBeNull();
-    expect(target.slice(1, 4).map(Number)).toEqual([56, 26, 13]);
-    expect(target.slice(4, 7).map(Number)).toEqual([126, 26, 13]);
+    expect(target.slice(1, 4).map(Number)).toEqual([44, 24, 12]);
+    expect(target.slice(4, 7).map(Number)).toEqual([112, 24, 12]);
     expect(target.slice(7, 10).map(Number)).toEqual([384, 210, 37]);
     expect(html).toContain('[data-state=full] .full{transform:scale(.8)}');
     expect(html).toContain('.prayer{width:444px;height:188px');
@@ -203,10 +203,11 @@ describe('Tarteel production surface', () => {
     const atomic = rustFile.split('fn apply_island_bounds_native')[1].split('\n}')[0];
     expect(atomic).toContain('SetWindowPos');
     expect(atomic).toContain('SWP_NOACTIVATE');
-    // The transition must still complete when the window grows or shrinks.
+    // A failed native resize must not start an animation in a clipped/stale WebView.
     const island = await read('island.html');
     const goBody = island.split('async function go(')[1].split('async function')[0];
-    expect(goBody).not.toContain('reportWindowError(cause);return');
+    expect(goBody).toContain('catch(cause){reportWindowError(cause);return}');
+    expect(island).toContain('async function waitForViewportSize(width,height)');
     expect(island).toContain('const ask=++hostSeq');
     // The native window is a fixed stage that only grows. Shrinking it back after the
     // collapse made the WebView repaint at the old centre for a frame, which is the shake.

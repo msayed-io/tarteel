@@ -7,11 +7,13 @@
 <style>
 :root{--black:#000;--text:#fff;--sub:rgba(235,235,245,.6);--track:rgba(235,235,245,.3);--fill:#9d9da1;--ctl:#dcdce1;--accent:#b88ad8;--chip:rgba(255,255,255,.1);--chip-on:rgba(255,255,255,.22);--green:#30d158;--font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;--ease-out:cubic-bezier(.2,.9,.3,1)}
 *{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}html,body{height:100%;overflow:hidden;background:transparent;color:var(--text);-webkit-font-smoothing:antialiased}body{font-family:var(--font)}button{font-family:inherit}
-.island{position:fixed;top:0;left:0;translate:0 0;width:56px;height:26px;border-radius:13px;background:var(--black);overflow:hidden;cursor:pointer;transform-origin:50% 0;user-select:none;scale:var(--fit,1);will-change:width,height,border-radius;transition:scale .28s var(--ease-out)}
+.island{position:fixed;top:7px;left:0;translate:0 0;width:44px;height:24px;border-radius:12px;background:transparent;overflow:visible;cursor:pointer;transform-origin:50% 0;user-select:none;scale:var(--fit,1);will-change:width,height,border-radius;transition:scale .28s var(--ease-out);z-index:1}
+.island::before{content:"";position:absolute;left:50%;top:var(--neck-top,23px);width:var(--neck-width,8px);height:8px;transform:translateX(-50%);border-radius:0 0 4px 4px;background:var(--black);pointer-events:none;z-index:0}
+.island-surface{position:absolute;inset:0;overflow:hidden;border-radius:inherit;background:var(--black);z-index:1}
 .island.press{scale:calc(var(--fit,1)*.965)}.island:focus-visible{outline:2px solid #5aa9ff;outline-offset:3px}
 .layer{position:absolute;top:0;left:50%;opacity:0;filter:blur(14px);pointer-events:none;transform-origin:50% 0;transition:opacity .14s ease-in,filter .14s ease-in,transform .22s ease-in}
-.idle{left:0;width:100%;height:26px;margin-left:0;transform:scale(.8);display:flex;align-items:center;justify-content:center}
-.compact{left:0;width:100%;height:26px;margin-left:0;transform:scale(.8)}
+.idle{left:0;width:100%;height:24px;margin-left:0;transform:scale(.8);display:flex;align-items:center;justify-content:center}
+.compact{left:0;width:100%;height:24px;margin-left:0;transform:scale(.8)}
 .full{width:480px;height:262px;margin-left:-240px;transform:scale(.72)}
 .prayer{width:444px;height:188px;margin-left:-222px;transform:scale(.9);padding:18px 22px;display:flex;gap:14px}
 .tools{width:480px;height:auto;max-height:var(--tmax,430px);margin-left:-240px;transform:scale(.9);padding:0 24px 24px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
@@ -20,12 +22,12 @@
 [data-state=idle] .idle,[data-state=compact] .compact,[data-state=full] .full,[data-state=prayer] .prayer,[data-state=tools] .tools,[data-state=alert] .alert{opacity:1;filter:blur(0);transform:scale(1);pointer-events:auto;transition:opacity .32s .12s ease-out,filter .32s .12s ease-out,transform .5s .08s var(--ease-out)}
 [data-state=full] .full{transform:scale(.8)}
 .art{position:absolute;border-radius:14px;background:radial-gradient(circle at 70% 28%,#ffd9a0 0 8%,transparent 9%),linear-gradient(180deg,#f2a65a 0%,#d4582f 45%,#6d2a2e 70%,#1d2a52 100%);background-position:center;background-size:cover;box-shadow:inset 0 0 0 .5px rgba(255,255,255,.18)}
-.compact .art{left:7px;top:4px;width:18px;height:18px;border-radius:5px}.full .art{left:18px;top:27px;width:90px;height:90px}
+.compact .art{left:6px;top:4px;width:16px;height:16px;border-radius:4.5px}.full .art{left:18px;top:27px;width:90px;height:90px}
 .wave{position:absolute;display:flex;align-items:center;justify-content:space-between;color:var(--accent)}
 .wave i{display:block;width:3px;height:100%;border-radius:2px;background:currentColor;transform-origin:50% 50%;animation:eq .9s ease-in-out infinite alternate;transition:transform .35s var(--ease-out)}
 .wave i:nth-child(1){animation-duration:.8s;animation-delay:-.2s}.wave i:nth-child(2){animation-duration:.6s;animation-delay:-.5s}.wave i:nth-child(3){animation-duration:1s;animation-delay:-.1s}.wave i:nth-child(4){animation-duration:.7s;animation-delay:-.7s}.wave i:nth-child(5){animation-duration:.9s;animation-delay:-.35s}
-@keyframes eq{from{transform:scaleY(.25)}to{transform:scaleY(1)}}.paused .wave i{animation:none;transform:scaleY(.2)}.compact .wave{right:11px;top:6px;width:17px;height:14px}.full .wave{right:27px;top:64px;width:28px;height:16px}
-.idle-prayer{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0;border:0;background:transparent;color:#fff;font:600 9.5px/1 var(--font);white-space:nowrap;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .2s ease,filter .2s ease}
+@keyframes eq{from{transform:scaleY(.25)}to{transform:scaleY(1)}}.paused .wave i{animation:none;transform:scaleY(.2)}.compact .wave{right:9px;top:5px;width:15px;height:13px}.full .wave{right:27px;top:64px;width:28px;height:16px}
+.idle-prayer{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0;border:0;background:transparent;color:#fff;font:600 8.5px/1 var(--font);white-space:nowrap;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .2s ease,filter .2s ease}
 [data-state=idle] .idle-prayer{opacity:1;pointer-events:auto}#idlePrayerName{display:block;max-width:100%;padding:0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
 .title,.artist{position:absolute;left:124px;right:76px;font-size:22px;line-height:26px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;unicode-bidi:plaintext}
 .title{top:62px;font-weight:600;letter-spacing:-.01em;transition:opacity .15s}.artist{top:90px;font-weight:400;color:var(--sub)}
@@ -47,6 +49,7 @@
 </head>
 <body>
 <div id="isl" class="island" data-state="idle" role="button" tabindex="0" aria-label="Dynamic Island — فتح مواقيت الصلاة" aria-expanded="false">
+  <div class="island-surface">
   <div class="layer idle" data-s="idle" dir="rtl" aria-hidden="false"><button class="idle-prayer" id="idlePrayer" aria-label="فتح مواقيت الصلاة"><span id="idlePrayerName"></span></button></div>
   <div class="layer compact" data-s="compact" aria-hidden="true"><div class="art" id="compactArt"></div><div class="wave"><i></i><i></i><i></i><i></i><i></i></div></div>
   <div class="layer full" data-s="full" aria-hidden="true" inert>
@@ -69,6 +72,7 @@
     <div class="sec"><label>إعدادات الصلاة</label><div class="rows"><button class="sw" id="swCount" role="switch" aria-checked="false"><span>عرض الصلاة القادمة</span><i></i></button><button class="sw" id="swPause" role="switch" aria-checked="true"><span>إيقاف التلاوة عند الأذان</span><i></i></button></div></div>
   </div>
   <div class="layer alert" data-s="alert" dir="rtl" aria-hidden="true" role="alert"><div class="tx"><h3 id="alT"></h3><p id="alS"></p></div><button class="pill" id="alR" hidden>استئناف</button><button class="pill main" id="alD">تم</button></div>
+  </div>
 </div>
 <script type="module">
 import { emit, listen } from '@tauri-apps/api/event';
@@ -78,28 +82,29 @@ const clamp=(v,a,b)=>Math.min(b,Math.max(a,v)),toArabic=v=>String(v).replace(/\d
 const fmt=s=>{s=Math.max(0,Math.floor(Number(s)||0));return toArabic(Math.floor(s/60)+':'+String(s%60).padStart(2,'0'))};
 const countdown=ms=>{const n=Math.max(0,Math.ceil(ms/1000)),h=Math.floor(n/3600),m=Math.floor(n%3600/60),s=n%60;return toArabic(h?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`)};
 const control=(action,extra={})=>emit('island-control',{action,...extra}).catch(cause=>console.error('Tarteel island control event failed',cause));
-const RM=matchMedia('(prefers-reduced-motion:reduce)').matches,mk=(x,k,c)=>({x,v:0,t:x,k,c:RM?2*Math.sqrt(k):c}),S={w:mk(56,300,28),h:mk(26,260,25),r:mk(13,320,30)};
+const RM=matchMedia('(prefers-reduced-motion:reduce)').matches,mk=(x,k,c)=>({x,v:0,t:x,k,c:RM?2*Math.sqrt(k):c}),S={w:mk(44,300,28),h:mk(24,260,25),r:mk(12,320,30)};
 /*
- * idle وcompact هما الوضعان «الصغيران» فقط، وهما ما صُغِّر هنا.
- * full/prayer/tools/alert توسعات ولم تُمس إطلاقًا.
- * القيم: idle 56×26 (كان 64×34) · compact 126×26 (كان 144×34).
- * الارتفاع 34px كان يُهدر 8px فراغًا حول كبسولة ارتفاعها 22px.
+ * صُغّرت الحالتان idle/music فقط، مع شكل كبسولة أعرض وامتداد مركزي قصير.
+ * full/prayer/tools/alert وأبعادها الأصلية لم تتغير.
  */
-const TARGET={idle:[56,26,13],compact:[126,26,13],full:[384,210,37],prayer:[444,188,44],tools:[480,300,46],alert:[440,92,40]};
-let raf=0,last=0,state='idle',back='compact',player={playing:false,duration:0,position:0,fileName:'',artist:'',cover:null,speed:1,sleepMode:'off',sleepMinutes:0},prayerState={schedule:null,preferences:{showNext:false,pauseAtAdhan:true},alert:null},scrub=false,compactStageHeight=Math.max(1,Math.round(window.innerHeight)),host={width:Math.max(1,Math.round(window.innerWidth)),height:compactStageHeight},transitionId=0,hostSeq=0,alertTimer=0,screenFit=1;
+const TARGET={idle:[44,24,12],compact:[112,24,12],full:[384,210,37],prayer:[444,188,44],tools:[480,300,46],alert:[440,92,40]};
+const NECK_HEIGHT=8;
+let raf=0,last=0,state='idle',back='compact',player={playing:false,duration:0,position:0,fileName:'',artist:'',cover:null,speed:1,sleepMode:'off',sleepMinutes:0},prayerState={schedule:null,preferences:{showNext:false,pauseAtAdhan:true},alert:null},scrub=false,compactStageHeight=Math.max(1,Math.round(window.innerHeight)),host={width:Math.max(1,Math.round(window.innerWidth)),height:compactStageHeight},transitionId=0,hostSeq=0,alertTimer=0,screenFit=1,motionTrace=null,lastMotionTrace=null;
 /* المستطيل التفاعلي = الكبسولة المرئية فقط.
    كل ما حولها داخل النافذة يصبح شفافًا للنقر، فلا تبتلع النافذة نقرات
    المستخدم على التطبيقات التي تحتها. القيمة تُرسل بالوحدات المنطقية
    والخادم يحوّلها إلى بكسل فيزيائي بمقياس الشاشة. */
-let hitTimer=0,lastHit='';
+let hitTimer=0,lastHit='',activeHitRect={x:0,y:0,width:0,height:0};
 function reportHitRect(l,t,w,h){
   if(l===undefined){
     const f=screenFit>0?screenFit:1;
     const w0=S.w.x, h0=Math.max(S.h.x,20);
-    w=Math.round(w0*f); h=Math.round(h0*f);
-    l=Math.round((window.innerWidth-w0)/2+ (w0-w)/2);
-    t=(state==='idle'||state==='compact')?Math.max(0,Math.round((compactStageHeight-h)/2)):Math.round((window.innerHeight-h)/2);
+    const neckVisible=clamp(TARGET.idle[1]+NECK_HEIGHT-1-h0,0,NECK_HEIGHT-1);
+    w=w0*f; h=(h0+neckVisible)*f;
+    l=(window.innerWidth-w0)/2+(w0-w)/2;
+    t=Math.max(0,(compactStageHeight-TARGET.idle[1]*f)/2);
   }
+  activeHitRect={x:l,y:t,width:w,height:h};
   const key=`${l}:${t}:${w}:${h}`;
   if(key===lastHit)return;
   lastHit=key;
@@ -109,20 +114,23 @@ function reportHitRect(l,t,w,h){
 function apply(){
   const w=S.w.x,h=Math.max(S.h.x,20);
   isl.style.width=w+'px';isl.style.height=h+'px';isl.style.borderRadius=Math.max(S.r.x,8)+'px';
-  /* يبقى التموضع الأفقي في منتصف نافذة المسرح. أما idle/compact فيستعملان
-     ارتفاع مرحلة الكبسولة المحفوظ عند الإقلاع، لا ارتفاع WebView الذي يكبر؛
-     لذلك يعود الشكل الصغير إلى موضعه الأصلي بعد أي توسعة، بلا شريط أو حجز. */
+  /* يظل مركز الكبسولة الصغيرة هو المرساة الرأسية طوال النابض؛ يزيد التوسع
+     إلى أسفلها بدل نقل الكبسولة إلى منتصف نافذة WebView ثم سحبها لأعلى. */
   const f=screenFit>0?screenFit:1;
-  const left=Math.round((window.innerWidth-w)/2);
-  const compactState=state==='idle'||state==='compact';
-  const top=compactState?Math.max(0,Math.round((compactStageHeight-h*f)/2)):Math.round((window.innerHeight-h*f)/2);
+  const left=(window.innerWidth-w)/2;
+  const top=Math.max(0,(compactStageHeight-TARGET.idle[1]*f)/2);
   isl.style.left=left+'px';
   isl.style.top=top+'px';
   isl.style.translate='0 0';
+  isl.style.setProperty('--neck-top',`${TARGET.idle[1]-1}px`);
+  isl.style.setProperty('--neck-width',`${Math.max(8,Math.min(14,w*.18))}px`);
   /* المستطيل المرئي فعلًا بعد التصغير، للنقرات. */
   const vw=w*f, vh=h*f;
-  const visualLeft=Math.round(left+(w-vw)/2);
-  reportHitRect(visualLeft,top,vw,vh);
+  const visualLeft=left+(w-vw)/2;
+  const neckVisible=clamp(TARGET.idle[1]+NECK_HEIGHT-1-h,0,NECK_HEIGHT-1);
+  const rect=isl.getBoundingClientRect();
+  if(motionTrace){const y=window.screenY+rect.top;motionTrace.minTop=Math.min(motionTrace.minTop,y);motionTrace.maxTop=Math.max(motionTrace.maxTop,y);motionTrace.samples+=1}
+  reportHitRect(visualLeft,top,vw,vh+neckVisible*f);
 }
 // The island must read as a single floating surface over the desktop: no drop shadow,
 // no border and no second rectangle are ever drawn behind or around it.
@@ -135,9 +143,9 @@ function apply(){
 function fitToScreen(){
   const desired=TARGET[state]?.[0]||480;
   const available=Math.max(window.innerWidth,1);
-  /* هامش 2 بكسل يمنع شريط تمرير عرضي عند التطابق التام. */
-  screenFit=Math.min(1,Math.max(.45,(available-2)/desired));
-  document.documentElement.style.setProperty('--fit',screenFit.toFixed(4));
+  /* لا نصغّر الحالة المطابقة تمامًا لنافذة WebView؛ overflow مخفي أصلًا. */
+  screenFit=Math.min(1,Math.max(.45,available/desired));
+  document.documentElement.style.setProperty('--fit',screenFit.toFixed(6));
 }
 function syncPassThrough(next){
   /* full/prayer/tools/alert لها محتوى تفاعلي كامل: لا نمرّر شيئًا.
@@ -147,7 +155,7 @@ function syncPassThrough(next){
 }
 function setLayerAccessibility(next){$$('.layer').forEach(layer=>{const active=layer.dataset.s===next;layer.setAttribute('aria-hidden',String(!active));if(layer.dataset.s==='full')layer.inert=!active})}
 function reportWindowError(cause){console.error('Tarteel island transparent window resize failed',cause);emit('island-error',{message:`تعذر تغيير حجم نافذة الجزيرة: ${String(cause)}`}).catch(()=>{})}
-function recordStableGeometry(){const rect=isl.getBoundingClientRect();invoke('record_island_geometry',{state,x:rect.left,y:rect.top,width:rect.width,height:rect.height,compactAnchorOffset:compactStageHeight/2}).then(result=>{if(result?.aligned_within_half_pixel===false)console.error('Tarteel island did not reach the measured 0.5px alignment target',result)}).catch(cause=>console.error('Tarteel measured island geometry failed',cause))}
+function recordStableGeometry(){const rect=isl.getBoundingClientRect();if(motionTrace){lastMotionTrace=motionTrace;motionTrace=null}const trace=lastMotionTrace;invoke('record_island_geometry',{state,x:rect.left,y:rect.top,width:rect.width,height:rect.height,hitX:activeHitRect.x,hitY:activeHitRect.y,hitWidth:activeHitRect.width,hitHeight:activeHitRect.height,compactAnchorOffset:compactStageHeight/2,motionTopMin:trace?.minTop??null,motionTopMax:trace?.maxTop??null,motionSamples:trace?.samples??0}).then(result=>{if(result?.aligned_within_half_pixel===false)console.error('Tarteel island did not reach the measured 0.5px alignment target',result)}).catch(cause=>console.error('Tarteel measured island geometry failed',cause))}
 let geometrySyncTimer=0;
 function scheduleGeometrySync(){clearTimeout(geometrySyncTimer);geometrySyncTimer=setTimeout(()=>{if(raf){scheduleGeometrySync();return}fitToScreen();apply();recordStableGeometry()},140)}
 // The native window is a fixed stage that only ever grows, exactly as in v0.1.5.
@@ -155,10 +163,11 @@ function scheduleGeometrySync(){clearTimeout(geometrySyncTimer);geometrySyncTime
 // reached the new width a frame before the WebView repainted at the new centre, so
 // the capsule showed half the width delta and snapped back. Growing early is safe
 // because it happens before the spring starts, while the capsule is still small.
-async function resizeHost(width,height){await invoke('resize_island',{width,height});host={width,height};fitToScreen()}
+async function waitForViewportSize(width,height){const deadline=performance.now()+1200;while(window.innerWidth+1<width||window.innerHeight+1<height){if(performance.now()>=deadline)throw new Error(`WebView viewport resize timed out: expected ${width}x${height}, got ${window.innerWidth}x${window.innerHeight}`);await new Promise(resolve=>requestAnimationFrame(resolve))}}
+async function resizeHost(width,height){await invoke('resize_island',{width,height});await waitForViewportSize(width,height);host={width,height};fitToScreen()}
 function tick(now){const dt=Math.min(.032,(now-last)/1000);last=now;let moving=false;for(const p of Object.values(S)){p.v+=(-p.k*(p.x-p.t)-p.c*p.v)*dt;p.x+=p.v*dt;if(Math.abs(p.v)>.05||Math.abs(p.x-p.t)>.05)moving=true}apply();raf=moving?requestAnimationFrame(tick):0;if(!moving){for(const p of Object.values(S)){p.x=p.t;p.v=0}apply();recordStableGeometry()}}
 const kick=()=>{if(!raf){last=performance.now();raf=requestAnimationFrame(tick)}};
-async function go(next){if(!TARGET[next])return;const id=++transitionId;if(next==='tools')fitTools();if(next==='prayer')renderPrayer();const [width,height]=TARGET[next];if(width>host.width||height>host.height){const ask=++hostSeq;try{await resizeHost(Math.max(width,host.width),Math.max(height,host.height))}catch(cause){reportWindowError(cause)}if(ask!==hostSeq)return}if(id!==transitionId)return;if(next==='alert'&&state!=='alert')back=state==='tools'?'compact':state;state=next;isl.dataset.state=next;syncPassThrough(next);isl.setAttribute('aria-expanded',['full','prayer','tools'].includes(next));setLayerAccessibility(next);if(next==='tools')syncTools();[S.w.t,S.h.t,S.r.t]=TARGET[next];fitToScreen();kick();emit('island-state',{state:next}).catch(()=>{})}
+async function go(next){if(!TARGET[next])return;const id=++transitionId;if(next==='tools')fitTools();if(next==='prayer')renderPrayer();const [width,height]=TARGET[next];if(width>host.width||height>host.height){const ask=++hostSeq;try{await resizeHost(Math.max(width,host.width),Math.max(height,host.height))}catch(cause){reportWindowError(cause);return}if(ask!==hostSeq)return}if(id!==transitionId)return;if(next==='alert'&&state!=='alert')back=state==='tools'?'compact':state;motionTrace={minTop:Infinity,maxTop:-Infinity,samples:0};state=next;isl.dataset.state=next;syncPassThrough(next);isl.setAttribute('aria-expanded',['full','prayer','tools'].includes(next));setLayerAccessibility(next);if(next==='tools')syncTools();[S.w.t,S.h.t,S.r.t]=TARGET[next];fitToScreen();kick();emit('island-state',{state:next}).catch(()=>{})}
 /* الإقلاع: idle => تمرير مفعّل، والمستطيل يُبلَّغ بعد أول إطار. */
 syncPassThrough('idle');
 requestAnimationFrame(()=>{apply();reportHitRect();recordStableGeometry()});

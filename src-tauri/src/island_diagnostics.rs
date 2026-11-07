@@ -47,6 +47,9 @@ struct Snapshot {
   pre_alignment: Option<PreAlignment>,
   correction_attempts: u8,
   aligned_within_half_pixel: Option<bool>,
+  motion_top_min_screen_css_px: Option<f64>,
+  motion_top_max_screen_css_px: Option<f64>,
+  motion_sample_count: u32,
 }
 
 fn now_ms() -> u128 {
@@ -99,13 +102,28 @@ pub async fn record_island_geometry(
   y: f64,
   width: f64,
   height: f64,
+  hit_x: f64,
+  hit_y: f64,
+  hit_width: f64,
+  hit_height: f64,
   compact_anchor_offset: f64,
+  motion_top_min: Option<f64>,
+  motion_top_max: Option<f64>,
+  motion_samples: u32,
 ) -> Result<serde_json::Value, String> {
   if !["idle", "compact", "full", "prayer", "tools", "alert"].contains(&state.as_str()) {
     return Err("حالة الجزيرة المرسلة غير معروفة".into());
   }
-  if ![x, y, width, height, compact_anchor_offset].iter().all(|v| v.is_finite()) || x < 0.0 || y < 0.0 || width <= 0.0 || height <= 0.0 || width > 1000.0 || height > 1000.0 || !(1.0..=200.0).contains(&compact_anchor_offset) {
+  if ![x, y, width, height, hit_x, hit_y, hit_width, hit_height, compact_anchor_offset].iter().all(|v| v.is_finite()) || x < 0.0 || y < 0.0 || width <= 0.0 || height <= 0.0 || width > 1000.0 || height > 1000.0 || hit_x < 0.0 || hit_y < 0.0 || hit_width <= 0.0 || hit_height <= 0.0 || hit_width > 1000.0 || hit_height > 1000.0 || !(1.0..=200.0).contains(&compact_anchor_offset) {
     return Err("مستطيل الكبسولة المرسل غير صالح".into());
+  }
+  if motion_samples > 120 || ![motion_top_min, motion_top_max].into_iter().flatten().all(|value| value.is_finite()) {
+    return Err("قياسات حركة الجزيرة غير صالحة".into());
+  }
+  match (motion_top_min, motion_top_max) {
+    (Some(min), Some(max)) if min <= max && motion_samples > 0 => {},
+    (None, None) if motion_samples == 0 => {},
+    _ => return Err("مجال حركة الجزيرة لا يطابق عدد العينات".into()),
   }
 
   #[cfg(windows)]
@@ -114,11 +132,17 @@ pub async fn record_island_geometry(
     let scale = island.scale_factor().map_err(|e| format!("تعذر قراءة مقياس الجزيرة: {e}"))?;
     let left = (x * scale).round() as i32;
     let top = (y * scale).round() as i32;
-    let local = Rect { left, top, right: left + (width * scale).round() as i32, bottom: top + (height * scale).round() as i32 };
+    let local = Rect { left, top, right: ((x + width) * scale).round() as i32, bottom: ((y + height) * scale).round() as i32 };
+    let hit_left = (hit_x * scale).round() as i32;
+    let hit_top = (hit_y * scale).round() as i32;
+    let interactive = Rect { left: hit_left, top: hit_top, right: ((hit_x + hit_width) * scale).round() as i32, bottom: ((hit_y + hit_height) * scale).round() as i32 };
     if local.width() <= 0 || local.height() <= 0 {
       return Err("أصبح مستطيل الكبسولة فارغًا بعد التحويل إلى البكسل الفيزيائي".into());
     }
-    crate::hittest::set_interactive_rect(local.left, local.top, local.width(), local.height());
+    if interactive.width() <= 0 || interactive.height() <= 0 {
+      return Err("أصبح مستطيل النقر فارغًا بعد التحويل إلى البكسل الفيزيائي".into());
+    }
+    crate::hittest::set_interactive_rect(interactive.left, interactive.top, interactive.width(), interactive.height());
 
     let hwnd = island.hwnd().map_err(|e| format!("تعذر قراءة مقبض الجزيرة: {e}"))?;
     let raw_hwnd = hwnd.0 as isize;
@@ -129,9 +153,12 @@ pub async fn record_island_geometry(
       let result = unsafe { align_and_measure(hwnd, scale, compact_anchor_offset * scale, state_for_main, Some(local)) };
       let _ = tx.send(result);
     }).map_err(|e| format!("تعذر جدولة قياس الجزيرة على خيط النافذة: {e}"))?;
-    let snapshot = tauri::async_runtime::spawn_blocking(move || rx.recv())
+    let mut snapshot = tauri::async_runtime::spawn_blocking(move || rx.recv())
       .await.map_err(|e| format!("تعذر انتظار قياس الجزيرة: {e}"))?
       .map_err(|e| format!("انقطع قياس الجزيرة قبل اكتماله: {e}"))??;
+    snapshot.motion_top_min_screen_css_px = motion_top_min;
+    snapshot.motion_top_max_screen_css_px = motion_top_max;
+    snapshot.motion_sample_count = motion_samples;
     append_record(&app, &snapshot)?;
     if snapshot.aligned_within_half_pixel == Some(false) {
       eprintln!("Tarteel island geometry remains outside the 0.5 physical-pixel target after three corrections");
@@ -140,7 +167,7 @@ pub async fn record_island_geometry(
   }
 
   #[cfg(not(windows))]
-  { let _ = (app, state, x, y, width, height, compact_anchor_offset); Ok(serde_json::json!({"supported": false, "reason": "قياس هندسة نافذة Windows غير متاح على هذا النظام"})) }
+  { let _ = (app, state, x, y, width, height, hit_x, hit_y, hit_width, hit_height, compact_anchor_offset, motion_top_min, motion_top_max, motion_samples); Ok(serde_json::json!({"supported": false, "reason": "قياس هندسة نافذة Windows غير متاح على هذا النظام"})) }
 }
 
 #[cfg(windows)]
@@ -190,7 +217,7 @@ unsafe fn measure(
   let origin_error = PointErrorPx { x: origin.x as f64 - target_client_x, y: origin.y as f64 - target_client_y };
   let native_dpi = match unsafe { GetDpiForWindow(hwnd) } { 0 => None, dpi => Some(dpi) };
   Ok(Snapshot {
-    schema: 2,
+    schema: 3,
     timestamp_unix_ms: now_ms(),
     coordinate_unit: "physical virtual-desktop pixels",
     state,
@@ -209,6 +236,9 @@ unsafe fn measure(
     pre_alignment: None,
     correction_attempts: attempts,
     aligned_within_half_pixel: None,
+    motion_top_min_screen_css_px: None,
+    motion_top_max_screen_css_px: None,
+    motion_sample_count: 0,
   })
 }
 

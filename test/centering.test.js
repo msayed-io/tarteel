@@ -16,10 +16,10 @@ describe('تموضع الجزيرة عند أصل الشاشة', () => {
   });
 
   it('يحافظ على مرجع المرحلة الصغيرة بعد تمدد نافذة WebView', () => {
-    expect(geo).toContain('COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 34.0');
+    expect(geo).toContain('COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 38.0');
     expect(geo).toContain('fn compact_stage_height_px(scale: f64) -> i32');
     expect(html).toContain('compactStageHeight');
-    expect(html).toContain('compactState?Math.max(0,Math.round((compactStageHeight-h*f)/2))');
+    expect(html).toContain('const top=Math.max(0,(compactStageHeight-TARGET.idle[1]*f)/2)');
   });
 
   it('يقيس CSS وRust الارتفاع نفسه على مقاييس DPI مختلفة', () => {
@@ -46,7 +46,7 @@ describe('تموضع الجزيرة عند أصل الشاشة', () => {
     const hideToTray = tray.slice(tray.indexOf('pub fn hide_to_tray'), tray.indexOf('pub fn hide_all'));
     expect(hideToTray).toContain('MAIN_WINDOW');
     expect(hideToTray).not.toContain('ISLAND_WINDOW');
-    expect(html).toContain('(window.innerHeight-h)/2');
+    expect(html).not.toContain('(window.innerHeight-h*f)/2');
   });
 });
 

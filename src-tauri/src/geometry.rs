@@ -15,9 +15,9 @@ impl Rect {
 }
 
 /// ارتفاع مساحة الرسم الصغيرة داخل نافذة الجزيرة بوحدات CSS المنطقية.
-/// يطابق ارتفاع مسرح الخمول/الجزيرة المصغرة في island.html.
-pub const COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 34.0;
-pub const CAPSULE_LOGICAL_HEIGHT: f64 = 26.0;
+/// يشمل الكبسولة القصيرة وامتدادها المركزي كما في island.html.
+pub const COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 38.0;
+pub const CAPSULE_LOGICAL_HEIGHT: f64 = 24.0;
 pub const ISLAND_MAX_LOGICAL_HEIGHT: f64 = 430.0;
 
 fn safe_scale(scale: f64) -> f64 {
@@ -35,7 +35,7 @@ pub fn compact_stage_height_px(scale: f64) -> i32 {
 }
 
 /// إزاحة مركز الكبسولة عن أعلى الشاشة بالبكسل الفيزيائي، مع إبقاء الكسر.
-/// CSS يضع الكبسولة في منتصف مرحلة الخمول ذات الارتفاع 34px.
+/// CSS يضع جسم الكبسولة 24px في منتصف مرحلة الرسم ذات الارتفاع 38px.
 pub fn compact_anchor_offset_px(scale: f64) -> f64 {
   (COMPACT_STAGE_LOGICAL_HEIGHT / 2.0) * safe_scale(scale)
 }
@@ -71,18 +71,18 @@ mod tests {
       assert!(compact_capsule_margin_px(scale) >= 3, "dpi {dpi}: margin {}", compact_capsule_margin_px(scale));
       assert!(compact_anchor_offset_px(scale) > 0.0);
     }
-    assert_eq!(compact_stage_height_px(1.0), 34);
-    assert_eq!(compact_stage_height_px(1.25), 43);
-    assert_eq!(compact_anchor_offset_px(1.0), 17.0);
-    assert_eq!(compact_anchor_offset_px(1.25), 21.25);
-    assert_eq!(compact_anchor_offset_px(1.5), 25.5);
+    assert_eq!(compact_stage_height_px(1.0), 38);
+    assert_eq!(compact_stage_height_px(1.25), 48);
+    assert_eq!(compact_anchor_offset_px(1.0), 19.0);
+    assert_eq!(compact_anchor_offset_px(1.25), 23.75);
+    assert_eq!(compact_anchor_offset_px(1.5), 28.5);
   }
 
   #[test]
   fn compact_capsule_keeps_a_visible_gap_at_common_scales() {
-    assert_eq!(compact_capsule_margin_px(1.0), 4);
-    assert_eq!(compact_capsule_margin_px(1.25), 5);
-    assert_eq!(compact_capsule_margin_px(1.5), 6);
+    assert_eq!(compact_capsule_margin_px(1.0), 7);
+    assert_eq!(compact_capsule_margin_px(1.25), 9);
+    assert_eq!(compact_capsule_margin_px(1.5), 11);
   }
 
   #[test]
@@ -101,7 +101,7 @@ mod tests {
 
   #[test]
   fn expanded_states_have_room_without_changing_compact_stage() {
-    assert_eq!(compact_stage_height_px(1.25), 43);
+    assert_eq!(compact_stage_height_px(1.25), 48);
     assert!(island_max_height_px(1.25) >= 537);
   }
 
@@ -110,6 +110,6 @@ mod tests {
     assert_eq!(scale_from_dpi(0), 1.0);
     assert_eq!(scale_from_dpi(20), 1.0);
     assert_eq!(scale_from_dpi(9999), 1.0);
-    assert_eq!(compact_stage_height_px(f64::NAN), 34);
+    assert_eq!(compact_stage_height_px(f64::NAN), 38);
   }
 }

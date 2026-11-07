@@ -411,8 +411,11 @@ pub fn emit_to_ui(app: &tauri::AppHandle, event: &str, payload: serde_json::Valu
 fn set_island_hit_rect(x: f64, y: f64, width: f64, height: f64, app: tauri::AppHandle) -> Result<(), String> {
   let island = app.get_webview_window("island").ok_or_else(|| "نافذة الجزيرة غير متاحة".to_string())?;
   let scale = island.scale_factor().map_err(|e| format!("تعذر قراءة مقياس الشاشة: {e}"))?;
-  let to_px = |v: f64| (v * scale).round() as i32;
-  hittest::set_interactive_rect(to_px(x), to_px(y), to_px(width), to_px(height));
+  let left = (x * scale).round() as i32;
+  let top = (y * scale).round() as i32;
+  let right = ((x + width) * scale).round() as i32;
+  let bottom = ((y + height) * scale).round() as i32;
+  hittest::set_interactive_rect(left, top, (right - left).max(0), (bottom - top).max(0));
   Ok(())
 }
 
@@ -425,8 +428,8 @@ fn set_island_pass_through(enabled: bool) {
 #[tauri::command]
 fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
   /* يجب أن تطابق TARGET في island.html بكسلًا ببكسل. */
-  let widths = [56.0, 64.0, 126.0, 144.0, 384.0, 440.0, 444.0, 480.0];
-  let heights = [26.0, 34.0, 92.0, 188.0, 210.0, 262.0, 424.0];
+  let widths = [44.0, 112.0, 384.0, 440.0, 444.0, 480.0];
+  let heights = [24.0, 38.0, 92.0, 188.0, 210.0, 262.0, 424.0];
   let tools_height = width == 480.0 && (220.0..=430.0).contains(&height) && height.fract() == 0.0;
   if !widths.contains(&width) || (!heights.contains(&height) && !tools_height) {
     return Err("رفضت أبعادًا غير معتمدة لنافذة الجزيرة".into());
@@ -462,11 +465,11 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
 /// حجم نافذة الجزيرة عند الإقلاع: عرض الكبسولة الصغيرة × مسرح الخمول.
 /// تحديده قبل الإظهار يمنع انتقال المركز من حجم WebView الافتراضي.
 fn island_boot_size_logical() -> (f64, f64) {
-  (56.0, geometry::COMPACT_STAGE_LOGICAL_HEIGHT)
+  (44.0, geometry::COMPACT_STAGE_LOGICAL_HEIGHT)
 }
 
 fn island_bounds_from_monitor(monitor_left: i32, monitor_top: i32, monitor_width: i32, scale: f64) -> (i32, i32, i32, i32) {
-  let width = (56.0 * scale).round() as i32;
+  let width = (44.0 * scale).round() as i32;
   let height = geometry::compact_stage_height_px(scale);
   let (x, y) = geometry::island_origin(monitor_left, monitor_top, monitor_width, width);
   (x, y, width, height)
@@ -673,7 +676,7 @@ mod island_tests {
     for scale in [1.0, 1.25, 1.5] {
       let (x, y, w, h) = island_bounds_from_monitor(0, 0, 1920, scale);
       assert_eq!(y, 0, "الجزيرة تبدأ من أصل الشاشة المختارة");
-      assert_eq!(w, (56.0 * scale).round() as i32, "العرض المطلوب = 56 منطقية");
+      assert_eq!(w, (44.0 * scale).round() as i32, "العرض المطلوب = 44 منطقية");
       assert_eq!(h, geometry::compact_stage_height_px(scale), "النافذة تطابق مسرح CSS الصغير");
       assert!(x > 0 && x + w < 1920, "متمركزة أفقياً");
       assert_eq!(1920 - w - x, x, "المسافتان متساويتان");
@@ -682,7 +685,7 @@ mod island_tests {
 
   #[test]
   fn island_boot_size_is_explicit_and_uses_the_compact_stage() {
-    assert_eq!(island_boot_size_logical(), (56.0, 34.0));
+    assert_eq!(island_boot_size_logical(), (44.0, 38.0));
   }
 
   #[test]
@@ -690,7 +693,7 @@ mod island_tests {
     for dpi in [96u32, 120, 144, 192] {
       let scale = geometry::scale_from_dpi(dpi);
       let (_, _, _, h) = island_bounds_from_monitor(0, 0, 1920, scale);
-      assert_eq!(h, (34.0 * scale).round() as i32, "dpi {dpi}");
+      assert_eq!(h, (38.0 * scale).round() as i32, "dpi {dpi}");
     }
   }
 

@@ -45,20 +45,18 @@ describe('التمركز: النافذة هي المرجع', () => {
     expect(html).toContain('Math.max(window.innerWidth,1)');
   });
 
-  it('المعادلة تحترم transform-origin مختلف المحورين', () => {
-    /* أفقي: المركز ثابت. رأسي: الحرف العلوي ثابت. */
-    expect(html).toContain('Math.round((window.innerWidth-w)/2)');
-    expect(html).toContain('Math.round((window.innerHeight-h*f)/2)');
+  it('المعادلة تحافظ على مركز الكبسولة نفسه خلال التوسعة والانطواء', () => {
+    /* أفقيًا ورأسيًا تبقى المرساة الصغيرة ثابتة؛ لا نتبع مركز النافذة الموسعة. */
+    expect(html).toContain('const left=(window.innerWidth-w)/2');
+    expect(html).toContain('const top=Math.max(0,(compactStageHeight-TARGET.idle[1]*f)/2)');
+    expect(html).not.toContain('(window.innerHeight-h*f)/2');
   });
 
-  it('الانطواء يعود إلى مرحلة الإقلاع ولا يتبع ارتفاع المسرح الموسع', () => {
+  it('المرساة ثابتة ولا تعتمد على ارتفاع الجسم أثناء النابض', () => {
     expect(html).toContain('compactStageHeight=Math.max(1,Math.round(window.innerHeight))');
-    expect(html).toContain('compactState?Math.max(0,Math.round((compactStageHeight-h*f)/2))');
-    expect(html).toContain("state==='idle'||state==='compact'");
-    const compactTop=(stage,height,fit)=>Math.max(0,Math.round((stage-height*fit)/2));
-    expect(compactTop(34,26,1)).toBe(4);
-    expect(compactTop(34,210,1)).toBe(0);
-    expect(compactTop(34,26,.96)).toBe(5);
+    const anchoredTop=(stage,smallHeight,fit)=>Math.max(0,(stage-smallHeight*fit)/2);
+    expect(anchoredTop(38,24,1)).toBe(7);
+    expect(anchoredTop(38,24,.96)).toBeCloseTo(7.48,5);
   });
 
   it('لا translate سالب يزحزح المحور الأفقي', () => {
@@ -98,6 +96,19 @@ describe('تزامن حجم حاوية الجزيرة مع نافذة Tauri ال
     expect(transition).toContain('if(width>host.width||height>host.height)');
     expect(transition).toContain('await resizeHost(Math.max(width,host.width),Math.max(height,host.height))');
     expect(transition.indexOf('await resizeHost')).toBeLessThan(transition.indexOf('state=next'));
+    const resizeHost = html.split('async function resizeHost(')[1].split('function tick(now)')[0];
+    expect(resizeHost).toContain("await invoke('resize_island',{width,height})");
+    expect(resizeHost).toContain('await waitForViewportSize(width,height)');
+    expect(resizeHost.indexOf('await waitForViewportSize')).toBeLessThan(resizeHost.indexOf('host={width,height}'));
+  });
+
+  it('يسجل مجال top وعدد العينات الفعلية لكل انتقال ليفشل smoke عند الاهتزاز', () => {
+    expect(html).toContain('motionTopMin:trace?.minTop??null');
+    expect(html).toContain('motionTopMax:trace?.maxTop??null');
+    expect(html).toContain('hitHeight:activeHitRect.height');
+    expect(diagnostics).toContain('motion_top_min_screen_css_px');
+    expect(diagnostics).toContain('motion_sample_count');
+    expect(diagnostics).toContain('set_interactive_rect(interactive.left, interactive.top');
   });
 
   it('يسجل هندسة الشاشة والنافذة الفعلية عند الإقلاع', () => {
