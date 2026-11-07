@@ -69,11 +69,11 @@ mod tests {
       let capsule = (CAPSULE_LOGICAL_HEIGHT * scale).round() as i32;
       assert!(stage >= capsule, "dpi {dpi}: stage {stage}, capsule {capsule}");
       assert!(compact_capsule_margin_px(scale) >= 3, "dpi {dpi}: margin {}", compact_capsule_margin_px(scale));
-      assert!(compact_anchor_offset_px(scale) > 0);
+      assert!(compact_anchor_offset_px(scale) > 0.0);
     }
     assert_eq!(compact_stage_height_px(1.0), 34);
     assert_eq!(compact_stage_height_px(1.25), 43);
-    assert_eq!(compact_anchor_offset_px(1.0), 17);
+    assert_eq!(compact_anchor_offset_px(1.0), 17.0);
     assert_eq!(compact_anchor_offset_px(1.25), 21.25);
     assert_eq!(compact_anchor_offset_px(1.5), 25.5);
   }

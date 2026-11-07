@@ -154,9 +154,9 @@ unsafe fn measure(
 ) -> Result<Snapshot, String> {
   use std::mem::size_of;
   use windows::Win32::Foundation::{POINT, RECT};
-  use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+  use windows::Win32::Graphics::Gdi::{ClientToScreen, GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
   use windows::Win32::UI::HiDpi::GetDpiForWindow;
-  use windows::Win32::UI::WindowsAndMessaging::{ClientToScreen, GetClientRect, GetWindowRect};
+  use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetWindowRect};
 
   let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
   if monitor.0.is_null() { return Err("لم يُرجع Windows شاشة قريبة لنافذة الجزيرة".into()); }
@@ -172,7 +172,9 @@ unsafe fn measure(
   let mut client = RECT::default();
   unsafe { GetClientRect(hwnd, &mut client) }.map_err(|e| format!("تعذر قراءة مساحة عميل الجزيرة: {e}"))?;
   let mut origin = POINT { x: 0, y: 0 };
-  unsafe { ClientToScreen(hwnd, &mut origin) }.map_err(|e| format!("تعذر تحويل أصل WebView إلى إحداثيات الشاشة: {e}"))?;
+  if !unsafe { ClientToScreen(hwnd, &mut origin) }.as_bool() {
+    return Err(format!("تعذر تحويل أصل WebView إلى إحداثيات الشاشة: {}", windows::core::Error::from_thread()));
+  }
   let client_size = SizePx { width: (client.right - client.left).max(0) as u32, height: (client.bottom - client.top).max(0) as u32 };
   let client_origin = PointPx { x: origin.x as f64, y: origin.y as f64 };
   let capsule_screen = capsule_local.map(|r| Rect { left: origin.x + r.left, top: origin.y + r.top, right: origin.x + r.right, bottom: origin.y + r.bottom });
