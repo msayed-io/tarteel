@@ -5,57 +5,53 @@ import { resolve } from 'node:path';
 const lib = readFileSync(resolve(__dirname, '../src-tauri/src/lib.rs'), 'utf8');
 const tray = readFileSync(resolve(__dirname, '../src-tauri/src/tray.rs'), 'utf8');
 const cargo = readFileSync(resolve(__dirname, '../src-tauri/Cargo.toml'), 'utf8');
+const geo = readFileSync(resolve(__dirname, '../src-tauri/src/geometry.rs'), 'utf8');
+const html = readFileSync(resolve(__dirname, '../island.html'), 'utf8');
 
-describe('تموضع الجزيرة داخل الشريط', () => {
-  it('التمركز يُحسب من الشاشة الحقيقية، لا بإزاحة ثابتة', () => {
-    /* الخطأ السابق: 10*scale إزاحة ثابتة، فالجزيرة تبدأ عند حدّ الشريط.
-       الآن المصدر الوحيد للحقيقة هو geometry::island_origin. */
+describe('تموضع الجزيرة عند أصل الشاشة', () => {
+  it('يستخدم أصل الشاشة الحقيقي ولا يضيف إزاحة ثابتة', () => {
     expect(lib).not.toContain('(10.0 * scale)');
-    expect(lib).toContain('geometry::island_origin');
+    expect(lib).toContain('geometry::island_origin(origin.x, origin.y');
+    expect(geo).toContain('fn island_origin(monitor_left: i32, monitor_top: i32');
   });
 
-  it('الكبسولة تُرسم في منتصف الشريط رأسياً', () => {
-    expect(lib).toContain('geometry::island_floor_height_px');
-    const html = readFileSync(resolve(__dirname, '../island.html'), 'utf8');
-    expect(html).toContain('(window.innerHeight-h)/2');
+  it('يحافظ على مرجع المرحلة الصغيرة بعد تمدد نافذة WebView', () => {
+    expect(geo).toContain('COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 34.0');
+    expect(geo).toContain('fn compact_stage_height_px(scale: f64) -> i32');
+    expect(html).toContain('compactStageHeight');
+    expect(html).toContain('compactState?Math.max(0,Math.round((compactStageHeight-h*f)/2))');
   });
 
-  it('ارتفاع الشريط واعٍ بمقياس العرض', () => {
-    /* انتقل المصدر إلى geometry.rs: معامل واحد يشتق الاثنين. */
-    const geo = readFileSync(resolve(__dirname, '../src-tauri/src/geometry.rs'), 'utf8');
-    expect(geo).toContain('fn bar_height_px(scale: f64) -> i32');
+  it('يقيس CSS وRust الارتفاع نفسه على مقاييس DPI مختلفة', () => {
     expect(geo).toContain('fn scale_from_dpi');
-    expect(geo).toContain('BAR_LOGICAL_HEIGHT');
+    expect(geo).toContain('compact_stage_height_px');
+    expect(lib).toContain('geometry::compact_stage_height_px(scale)');
   });
 
-  it('اختبارات Rust تفرض تمركزًا متماثلًا في كل الحالات', () => {
-    /* انتقلت اختبارات الهندسة إلى geometry.rs مع الحساب نفسه. */
-    const geo = readFileSync(resolve(__dirname, '../src-tauri/src/geometry.rs'), 'utf8');
+  it('اختبارات Rust تشمل الشاشة الثانوية والمرحلة المصغرة وموضع الإقلاع', () => {
     for (const name of [
-      'island_is_centred_on_the_screen_not_merely_inside_the_bar',
-      'centring_holds_on_a_secondary_monitor',
-      'centring_stays_whole_pixels_with_odd_widths',
-      'bar_and_island_scale_together_so_the_island_fits',
-    ]) {
-      expect(geo, name).toContain(name);
-    }
+      'compact_stage_and_anchor_scale_with_dpi',
+      'island_is_centered_on_the_selected_monitor_and_uses_its_true_origin',
+      'centering_stays_whole_pixels_with_odd_widths',
+    ]) expect(geo).toContain(name);
     for (const name of [
-      'island_bounds_are_derived_from_the_measured_display',
-      'the_island_window_always_fits_the_band_at_every_scale',
+      'island_bounds_are_derived_from_the_actual_monitor_origin',
+      'island_boot_size_is_explicit_and_uses_the_compact_stage',
+      'compact_stage_height_matches_css_at_every_scale',
       'a_second_monitor_is_centred_on_its_own_origin',
-    ]) {
-      expect(lib, name).toContain(name);
-    }
+    ]) expect(lib).toContain(name);
   });
 
-  it('الاختبار القديم الذي كان يثبّت الإزاحة الخاطئة أُزيل', () => {
-    /* كان يتوقع y=10 ويسمّيه «الهامش العلوي» فيمرّر الخطأ. */
-    expect(lib).not.toContain('assert_eq!(y, 10');
+  it('يظل إغلاق نافذة الإعدادات منفصلًا عن إخفاء الجزيرة', () => {
+    const hideToTray = tray.slice(tray.indexOf('pub fn hide_to_tray'), tray.indexOf('pub fn hide_all'));
+    expect(hideToTray).toContain('MAIN_WINDOW');
+    expect(hideToTray).not.toContain('ISLAND_WINDOW');
+    expect(html).toContain('(window.innerHeight-h)/2');
   });
 });
 
 describe('نسخة واحدة من التطبيق', () => {
-  it('قفل النسخة الواحدة مُسجَّل قبل أي نافذة', () => {
+  it('قفل النسخة الواحدة مسجل قبل إنشاء أي نافذة', () => {
     const builder = lib.indexOf('tauri::Builder::default()');
     const lock = lib.indexOf('single_instance::init');
     const firstWindow = lib.indexOf('WebviewWindowBuilder::new');
@@ -63,7 +59,7 @@ describe('نسخة واحدة من التطبيق', () => {
     expect(lock).toBeLessThan(firstWindow);
   });
 
-  it('النقر على الاختصار مجددًا يُظهر النافذة القائمة', () => {
+  it('النقر على الاختصار مجددًا يظهر النافذة القائمة', () => {
     const cb = lib.slice(lib.indexOf('single_instance::init'), lib.indexOf('manage(server)'));
     expect(cb).toContain('get_webview_window("main")');
     expect(cb).toContain('window.show()');
@@ -75,31 +71,29 @@ describe('نسخة واحدة من التطبيق', () => {
 });
 
 describe('الجزيرة تبقى بعد إغلاق النافذة', () => {
-  it('إغلاق (X) يُخفي النافذة الرئيسية وحدها', () => {
+  it('إغلاق (X) يخفي النافذة الرئيسية وحدها', () => {
     const hideToTray = tray.slice(tray.indexOf('pub fn hide_to_tray'), tray.indexOf('pub fn hide_all'));
     expect(hideToTray).toContain('MAIN_WINDOW');
     expect(hideToTray).not.toContain('ISLAND_WINDOW');
   });
 
-  it('إخفاء الكل دالة منفصلة، تُستخدم للإقلاع في الخلفية فقط', () => {
+  it('الإخفاء الكامل منفصل ويستخدم عند الإقلاع في الخلفية فقط', () => {
     expect(tray).toContain('pub fn hide_all');
     const hideAll = tray.slice(tray.indexOf('pub fn hide_all'));
     expect(hideAll).toContain('ISLAND_WINDOW');
-    /* في lib.rs: hide_all يُستدعى مع --hidden فقط. */
-    const calls = lib.split('tray::hide_all').length - 1;
-    expect(calls).toBe(1);
+    expect(lib.split('tray::hide_all').length - 1).toBe(1);
     expect(lib).toContain('"--hidden"');
   });
 });
 
-describe('لا شيء من العمل الملغى باقٍ', () => {
-  it('ملفات الشريط الملغى محذوفة تمامًا', () => {
-    for (const f of ['bar.html', 'src-tauri/src/sysmon.rs', 'src-tauri/src/winaction.rs', 'test/bar.test.js']) {
-      expect(existsSync(resolve(__dirname, '..', f)), f).toBe(false);
+describe('العمل الملغى غير موجود', () => {
+  it('الملفات القديمة التي أزيلت سابقًا لا تعود', () => {
+    for (const file of ['bar.html', 'src-tauri/src/sysmon.rs', 'src-tauri/src/winaction.rs', 'test/bar.test.js']) {
+      expect(existsSync(resolve(__dirname, '..', file)), file).toBe(false);
     }
   });
 
-  it('لا آثار للأوامر أو الوحدات الملغاة', () => {
+  it('لا آثار لأوامر أو وحدات التطبيق الملغاة الأخرى', () => {
     expect(lib).not.toContain('sysmon');
     expect(lib).not.toContain('bar_snapshot');
     expect(lib).not.toContain('withGlobalTauri');

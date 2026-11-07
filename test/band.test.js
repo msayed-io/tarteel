@@ -7,68 +7,53 @@ const frame = readFileSync(resolve(__dirname, '../src-tauri/src/frame.rs'), 'utf
 const hittest = readFileSync(resolve(__dirname, '../src-tauri/src/hittest.rs'), 'utf8');
 const island = readFileSync(resolve(__dirname, '../island.html'), 'utf8');
 
-describe('القياسات التي كشفت الخلل', () => {
-  it('المقياس المستنتج من الصورة 125%', () => {
-    /* الكبسولة 70 بكسل والعرض المنطقي 56 => 70/56 = 1.25 */
-    expect(70 / 56).toBeCloseTo(1.25, 5);
+describe('المرحلة المصغرة ومركز الشاشة', () => {
+  it('مركز الكبسولة مرجعه منتصف مرحلة CSS الصغيرة', () => {
+    expect(geo).toContain('COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 34.0');
+    expect(geo).toContain('CAPSULE_LOGICAL_HEIGHT: f64 = 26.0');
+    expect(geo).toContain('fn compact_anchor_offset_px(scale: f64) -> f64');
+    expect(geo).toContain('(COMPACT_STAGE_LOGICAL_HEIGHT / 2.0) * safe_scale(scale)');
+    expect(geo).toContain('fn compact_stage_height_px(scale: f64) -> i32');
   });
 
-  it('الجزيرة القديمة كانت أطول من الشريط، فالتموضع داخله مستحيل', () => {
-    /* 26 × 1.25 = 32.5 ≈ 33 مقابل شريط 32 ثابتة */
-    const islandPx = Math.round(26 * 1.25);
-    expect(islandPx).toBe(33);
-    expect(islandPx).toBeGreaterThan(32);
-  });
-
-  it('الشريط والجزيرة يتقاسمان نفس المعامل الآن', () => {
-    expect(geo).toContain('fn bar_height_px(scale: f64)');
-    expect(geo).toContain('fn island_floor_height_px(scale: f64)');
-    expect(geo).toContain('island_height <= bar_height');
-  });
-});
-
-describe('الكبسولة تُرسم في منتصف الشريط', () => {
-  it('التمركز الرأسي محسوب لا مفترض', () => {
-    expect(island).toContain('(window.innerHeight-h)/2');
+  it('المرحلة المحفوظة لا تتغير عندما تكبر نافذة WebView', () => {
+    expect(island).toContain('compactStageHeight');
+    expect(island).toContain('compactState?Math.max(0,Math.round((compactStageHeight-h*f)/2))');
+    expect(island).toContain("state==='idle'||state==='compact'");
     expect(island).toContain("isl.style.top=top+'px'");
   });
 
-  it('المستطيل التفاعلي يساوي المستطيل المرئي فعلًا بعد التصغير', () => {
-    /* النقرات تتبع ما تراه العين: العرض بعد التملاء، لا العرض الاسمي. */
+  it('المستطيل التفاعلي يتبع حدود الكبسولة المرئية بعد القياس', () => {
     expect(island).toContain('reportHitRect(visualLeft,top,vw,vh)');
     expect(island).toContain('const vw=w*f, vh=h*f');
   });
 });
 
-describe('النقرات تصل إلى نوافذ المستخدم', () => {
-  it('النافذة ليست شفافة للنقر افتراضيًا', () => {
-    /* الشفافية البصرية لا تعني الشفافية للنقر — هذا كان أصل «التعطيل». */
+describe('النقرات تصل إلى النوافذ تحت الجزيرة', () => {
+  it('النافذة تستخدم hit testing أصليًا لتمرير النقاط الخارجية', () => {
     expect(hittest).toContain('HTTRANSPARENT');
     expect(hittest).toContain('WM_NCHITTEST');
-  });
-
-  it('كل نقطة خارج الكبسولة تُمرَّر', () => {
     expect(hittest).toContain('fn point_is_interactive');
     expect(hittest).toContain('Hit::Transparent');
   });
 
-  it('قبل الإبلاغ عن الكبسولة تُمرَّر كل النقرات', () => {
+  it('قبل استلام مستطيل الكبسولة تمرر جميع النقرات', () => {
     expect(hittest).toContain('rw <= 0 || rh <= 0');
   });
 
-  it('الحالات الموسّعة تلتقط كل نقراتها', () => {
+  it('الحالات الموسعة تلتقط تفاعلاتها', () => {
     expect(island).toContain('set_island_pass_through');
     expect(island).toContain("['full','prayer','tools','alert']");
   });
 });
 
-describe('الإطار غير المرئي مُزال', () => {
-  it('الصبغة تُطلب بالقيمة الموثقة', () => {
+describe('إزالة إطار النافذة الافتراضي', () => {
+  it('تُعطّل سياسة رسم الإطار الأصلية', () => {
     expect(frame).toContain('DWMNCRP_DISABLED');
     expect(frame).toContain('DWMWA_NCRENDERING_POLICY');
   });
 
-  it('تُطبَّق قبل تحديد الموضع', () => {
+  it('تُزال قبل تحديد موضع نافذة الجزيرة', () => {
     const src = readFileSync(resolve(__dirname, '../src-tauri/src/lib.rs'), 'utf8');
     const strip = src.indexOf('frame::strip_frame(hwnd)');
     const pos = src.indexOf('island.set_position(PhysicalPosition::new(x, y))');
@@ -77,9 +62,10 @@ describe('الإطار غير المرئي مُزال', () => {
   });
 });
 
-describe('التموضع يشمل الشاشات المتعددة', () => {
-  it('يأخذ إحداثي الشاشة لا الصفر', () => {
+describe('التموضع على الشاشات المتعددة', () => {
+  it('يستخدم أصل الشاشة لا افتراض الصفر', () => {
     expect(geo).toContain('monitor_left');
+    expect(geo).toContain('monitor_top');
     expect(geo).toContain('fn island_origin');
   });
 });

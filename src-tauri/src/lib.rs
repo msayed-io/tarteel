@@ -19,10 +19,10 @@ mod alarm;
 mod task_scheduler;
 use audio::AudioEngine;
 mod audio;
-mod appbar;
 mod frame;
 mod geometry;
 mod hittest;
+mod island_diagnostics;
 mod tray;
 #[cfg(windows)]
 mod toast;
@@ -403,50 +403,6 @@ pub fn emit_to_ui(app: &tauri::AppHandle, event: &str, payload: serde_json::Valu
   let _ = app.emit(event, payload);
 }
 
-/* ------------------------------------------------------------------ *
- * الحاجز العلوي غير المرئي
- * ------------------------------------------------------------------ */
-
-/// حالة الحاجز كما تراها الواجهة.
-#[tauri::command]
-fn header_guard_status() -> serde_json::Value {
-  serde_json::json!({
-    "reserved": appbar::is_registered(),
-    "heightPx": appbar::reserved_height(),
-    "windowStopPx": appbar::window_stop_offset(),
-  })
-}
-
-/// يحجز أو يلغي حجز الشريط العلوي.
-#[tauri::command]
-#[cfg(windows)]
-fn set_header_guard(enabled: bool, state: State<HeaderGuard>) -> Result<serde_json::Value, String> {
-  if enabled {
-    let mut handle = state.0.lock().map_err(|_| "قفل الحاجز تالف")?;
-    if handle.is_none() {
-      let hwnd = appbar::reserve_with_new_window()?;
-      *handle = Some(hwnd.0 as isize);
-    }
-  } else {
-    let mut handle = state.0.lock().map_err(|_| "قفل الحاجز تالف")?;
-    if let Some(raw) = handle.take() {
-      appbar::destroy(windows::Win32::Foundation::HWND(raw as *mut core::ffi::c_void));
-    }
-  }
-  Ok(header_guard_status())
-}
-
-#[tauri::command]
-#[cfg(not(windows))]
-fn set_header_guard(enabled: bool) -> Result<serde_json::Value, String> {
-  let _ = enabled;
-  Err("الحاجز العلوي متاح على ويندوز فقط".into())
-}
-
-/// مقبض نافذة الرسائل المحفوظة (خام ليكون Send).
-pub struct HeaderGuard(pub std::sync::Mutex<Option<isize>>);
-
-
 /// تُستدعى من الجزيرة لتحديد المنطقة التفاعلية الفعلية.
 ///
 /// الواجهة تعرف شكل الكبسولة بعد كل انتقال، فتبلّغ به. كل ما هو خارج هذا
@@ -466,19 +422,6 @@ fn set_island_pass_through(enabled: bool) {
   hittest::set_pass_through(enabled);
 }
 
-/// هندسة الشريط كما يراها النظام — للتشخيص والتحقق.
-#[tauri::command]
-fn band_geometry(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
-  let island = app.get_webview_window("island").ok_or_else(|| "نافذة الجزيرة غير متاحة".to_string())?;
-  let scale = island.scale_factor().map_err(|e| e.to_string())?;
-  Ok(serde_json::json!({
-    "scale": scale,
-    "barLogical": geometry::BAR_LOGICAL_HEIGHT,
-    "barPhysical": geometry::bar_height_px(scale),
-    "reservedPhysical": appbar::reserved_height(),
-  }))
-}
-
 #[tauri::command]
 fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
   /* يجب أن تطابق TARGET في island.html بكسلًا ببكسل. */
@@ -496,16 +439,14 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
   let origin = monitor.position();
   let scale = island.scale_factor().map_err(|e| format!("تعذر قراءة مقياس الشاشة: {e}"))?;
 
-  /* القاعدة الوحيدة: ارتفاع النافذة لا يقل عن ارتفاع الشريط.
-     النافذة أكبر من الجزيرة المرئية، والمحتوى داخلها يُرسم من أعلى الشريط،
-     فتظهر الكبسولة في منتصفه بالضبط. لو سمحنا بالنافذة الصغيرة وحدها
-     لعادت المشكلة: نافذة أقصر من الشريط تُوضع عند حدّه لا داخله. */
+  /* أبقِ نافذة WebView على الأقل بارتفاع مسرح الخمول الصغير، ثم وسّعها
+     قبل انتقال الحالة. هذه مساحة رسم للجزيرة فقط ولا تُحجز من Windows. */
   let target_width = (width * scale).round() as u32;
-  let floor = geometry::island_floor_height_px(scale).max(1) as u32;
+  let floor = geometry::compact_stage_height_px(scale).max(1) as u32;
   let desired = (height * scale).round() as u32;
   let target_height = desired.max(floor);
 
-  let (left, top) = geometry::island_origin(origin.x, area.width as i32, target_width as i32);
+  let (left, top) = geometry::island_origin(origin.x, origin.y, area.width as i32, target_width as i32);
   let _ = (target_width, target_height, &area);
 
   let target = island.clone();
@@ -518,29 +459,16 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
   Ok(())
 }
 
-/// يحسب موضع الركن الأعلى الأيسر لنافذة متمركزة أفقيًا أعلى الشاشة.
-/// يعيد إحداثيات فيزيائية صحيحة، ويُبقي الركن عددًا صحيحًا لتجنّب أي إزاحة
-/// بكسر بكسل عند مقاييس العرض 125% و150%.
-/// يحسب موضع الجزيرة من الشاشة الحقيقية.
-///
-/// نقطة واحدة تحدد كل شيء: **أعلى الشريط**. يبقى `top = 0` دائمًا، وx في
-/// منتصف الشاشة تمامًا. الأبعاد تأتي من `geometry` المشتقة من مقياس العرض
-/// الفعلي، لا من أرقام ثابتة.
-/// حجم نافذة الجزيرة عند الإقلاع: عرض الكبسولة الصغيرة × ارتفاع الشريط.
-///
-/// **لماذا هذا مهم:** نافذة تُبنى بلا حجم تحصل على 800×600 افتراضية. عند
-/// تصغيرها لاحقًا يحافظ ويندوز على مركزها، فينزلق موضعها للأسفل بمقدار
-/// نصف الفرق. تحديد الحجم الصحيح من البداية يلغي الانزياح من أصله.
-fn island_boot_size_px(scale: f64) -> (f64, f64) {
-  let safe = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
-  /* وحدات منطقية: Tauri يضربها في المقياس تلقائيًا. */
-  (56.0, geometry::bar_height_px(safe) as f64 / safe)
+/// حجم نافذة الجزيرة عند الإقلاع: عرض الكبسولة الصغيرة × مسرح الخمول.
+/// تحديده قبل الإظهار يمنع انتقال المركز من حجم WebView الافتراضي.
+fn island_boot_size_logical() -> (f64, f64) {
+  (56.0, geometry::COMPACT_STAGE_LOGICAL_HEIGHT)
 }
 
-fn island_bounds_from_monitor(monitor_left: i32, monitor_width: i32, scale: f64) -> (i32, i32, i32, i32) {
+fn island_bounds_from_monitor(monitor_left: i32, monitor_top: i32, monitor_width: i32, scale: f64) -> (i32, i32, i32, i32) {
   let width = (56.0 * scale).round() as i32;
-  let height = geometry::island_floor_height_px(scale);
-  let (x, y) = geometry::island_origin(monitor_left, monitor_width, width);
+  let height = geometry::compact_stage_height_px(scale);
+  let (x, y) = geometry::island_origin(monitor_left, monitor_top, monitor_width, width);
   (x, y, width, height)
 }
 
@@ -620,7 +548,6 @@ pub fn run() {
     }))
     .manage(server)
     .manage(audio::AudioEngine::new())
-    .manage(HeaderGuard(std::sync::Mutex::new(None)))
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_notification::init())
     .plugin(tauri_plugin_autostart::init(
@@ -634,10 +561,10 @@ pub fn run() {
          (0, 0). وكل تغيير حجم لاحق يُبقى المركز ثابتًا، فتظهر الجزيرة في
          وسط الشاشة بدل أعلاها — وهو ما رآه المستخدم بالضبط.
          الآن تُولد بالحجم النهائي الصحيح منذ اللحظة الأولى. */
-      let boot_width = island_boot_size_px(1.0);
+      let boot_size = island_boot_size_logical();
       let island = WebviewWindowBuilder::new(app, "island", WebviewUrl::App("island.html".into()))
         .title("تَرتيل")
-        .inner_size(boot_width.0, boot_width.1)
+        .inner_size(boot_size.0, boot_size.1)
         .decorations(false)
         .transparent(true)
         .background_color(Color(0, 0, 0, 0))
@@ -655,9 +582,8 @@ pub fn run() {
       let origin = monitor.position();
       let scale = island.scale_factor()?;
 
-      /* الصبغة أولًا: إزالة الإطار غير المرئي تجعل مستطيل النافذة المرئي
-         مطابقًا للإحداثيات التي نطلبها. بدونها ينزاح المحتوى بضعة بكسلات
-         للأسفل واليمين، وهي إزاحة كافية لإخراج الجزيرة من الشريط. */
+      /* إزالة إطار Windows غير المرئي قبل ضبط الموضع حتى تطابق حدود النافذة
+         المرئية الإحداثيات الفيزيائية التي سنطبقها. */
       #[cfg(windows)]
       if let Ok(hwnd) = island.hwnd() {
         if let Err(cause) = frame::strip_frame(hwnd) {
@@ -668,10 +594,10 @@ pub fn run() {
         if let Err(cause) = hittest::attach(hwnd) {
           eprintln!("Tarteel island hit-test attach failed: {cause}");
         }
-        let _ = appbar::set_reserved_height(geometry::bar_height_px(scale));
       }
 
-      let (x, y, w, h) = island_bounds_from_monitor(origin.x, area.width as i32, scale);
+      /* الجزيرة نافذة شفافة مستقلة؛ لا تنشئ شريطًا ولا تعدّل مساحة عمل Windows. */
+      let (x, y, w, h) = island_bounds_from_monitor(origin.x, origin.y, area.width as i32, scale);
       /* الحجم والموضع في نداء واحد: `SetWindowPos` تُطبّق الاثنين معًا، فلا
          يُرى إطار واحد بالحجم القديم في الموضع الجديد. */
       island.set_size(tauri::PhysicalSize::new(w as u32, h as u32))?;
@@ -684,6 +610,9 @@ pub fn run() {
         let _ = hwnd;
       }
       island.show()?;
+      if let Err(cause) = island_diagnostics::record_startup(app.handle()) {
+        eprintln!("Tarteel startup geometry record failed: {cause}");
+      }
       /* حالة التنبيهات: تُقرأ من القرص عند الإقلاع، فتبقى المعرّفات المُطلقة
          محفوظة عبر إعادة التشغيل ولا يتكرر أي أذان. */
       let alarm_path = alarm::state_path(&app.path().app_config_dir()?);
@@ -695,18 +624,6 @@ pub fn run() {
          بعد الإخفاء. */
       tray::build_tray(app.handle())?;
 
-      /* الحاجز العلوي غير المرئي: يُحجز تلقائيًا مع الإقلاع، فتتوقف
-         النوافذ الأخرى عند حدّه من أول لحظة ولا تمرّ خلف الآيلاند. */
-      #[cfg(windows)]
-      match appbar::reserve_with_new_window() {
-        Ok(hwnd) => {
-          if let Ok(mut slot) = app.state::<HeaderGuard>().0.lock() {
-            *slot = Some(hwnd.0 as isize);
-          }
-        }
-        Err(cause) => eprintln!("Tarteel header guard reserve failed: {cause}"),
-      }
-
       /* --hidden يعني إقلاعًا تلقائيًا مع ويندوز: ابدأ في الصينية. */
       if std::env::args().any(|arg| arg == "--hidden") {
         tray::hide_all(app.handle());
@@ -714,6 +631,12 @@ pub fn run() {
       Ok(())
     })
     .on_window_event(|window, event| {
+      if window.label() == "island" {
+        if matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } | tauri::WindowEvent::Focused(true)) {
+          let _ = window.emit("island-geometry-recheck", serde_json::json!({}));
+        }
+        return;
+      }
       if window.label() != "main" {
         return;
       }
@@ -731,8 +654,8 @@ pub fn run() {
       scan_directory, set_audio_root, audio_url, resize_island,
       set_alarm_schedule, set_sleep_deadline, sync_windows_tasks, clear_windows_tasks,
       alarm_status, fire_alarm_now,
-      header_guard_status, set_header_guard,
-      set_island_hit_rect, set_island_pass_through, band_geometry,
+      set_island_hit_rect, set_island_pass_through,
+      island_diagnostics::record_island_geometry,
       play_adhan, stop_adhan, set_adhan_volume, set_adhan_muted, adhan_state,
       show_alarm_notification, set_next_prayer_label,
       is_autostart_enabled, set_autostart
@@ -745,35 +668,36 @@ pub fn run() {
 mod island_tests {
   use super::*;
 
-  /// الموضع يأتي من الشاشة الحقيقية، والكبسولة تُرسم داخل الشريط.
-  ///
-  /// الاختبار القديم كان يتوقع y = 10 ويسميه «الهامش العلوي»، فكان يؤكد
-  /// الخلل بدل كشفه. الحساب الآن في geometry.rs حيث يُختبر وحده.
   #[test]
-  fn island_bounds_are_derived_from_the_measured_display() {
+  fn island_bounds_are_derived_from_the_actual_monitor_origin() {
     for scale in [1.0, 1.25, 1.5] {
-      let (x, y, w, h) = island_bounds_from_monitor(0, 1920, scale);
-      assert_eq!(y, 0, "أعلى الشريط هو أعلى الشاشة");
+      let (x, y, w, h) = island_bounds_from_monitor(0, 0, 1920, scale);
+      assert_eq!(y, 0, "الجزيرة تبدأ من أصل الشاشة المختارة");
       assert_eq!(w, (56.0 * scale).round() as i32, "العرض المطلوب = 56 منطقية");
-      assert_eq!(h, geometry::bar_height_px(scale), "النافذة بارتفاع الشريط");
+      assert_eq!(h, geometry::compact_stage_height_px(scale), "النافذة تطابق مسرح CSS الصغير");
       assert!(x > 0 && x + w < 1920, "متمركزة أفقياً");
       assert_eq!(1920 - w - x, x, "المسافتان متساويتان");
     }
   }
 
   #[test]
-  fn the_island_window_always_fits_the_band_at_every_scale() {
+  fn island_boot_size_is_explicit_and_uses_the_compact_stage() {
+    assert_eq!(island_boot_size_logical(), (56.0, 34.0));
+  }
+
+  #[test]
+  fn compact_stage_height_matches_css_at_every_scale() {
     for dpi in [96u32, 120, 144, 192] {
       let scale = geometry::scale_from_dpi(dpi);
-      let (_, _, _, h) = island_bounds_from_monitor(0, 1920, scale);
-      let band = geometry::bar_height_px(scale);
-      assert!(geometry::island_fits_in_bar(h, band), "dpi {dpi}: {h} في {band}");
+      let (_, _, _, h) = island_bounds_from_monitor(0, 0, 1920, scale);
+      assert_eq!(h, (34.0 * scale).round() as i32, "dpi {dpi}");
     }
   }
 
   #[test]
   fn a_second_monitor_is_centred_on_its_own_origin() {
-    let (x, _, w, _) = island_bounds_from_monitor(1920, 1920, 1.25);
+    let (x, y, w, _) = island_bounds_from_monitor(1920, -1080, 1920, 1.25);
     assert_eq!(x, 1920 + (1920 - w) / 2);
+    assert_eq!(y, -1080);
   }
 }

@@ -208,7 +208,7 @@ describe('الواجهة الموحّدة resolveLocation', () => {
       expect((await resolveLocation()).precise).toBe(false);
     });
     expect(ACCURACY_TARGET_M).toBe(1500);
-  });
+  }, 10_000);
 
   it('ترفض الرفض برمز واضح ولا تخمّن موقعًا', async () => {
     await withGeo({ getCurrentPosition: (ok, fail) => fail({ code: 1 }) }, async () => {

@@ -35,10 +35,23 @@ jobs:
         with:
           tagName: tarteel-v__VERSION__
           releaseName: Tarteel v__VERSION__
-          releaseBody: Windows installer built by GitHub Actions.
+          releaseBody: |
+            Corrects Dynamic Island vertical alignment on startup and after expand/collapse transitions.
+            Adds measured Windows monitor/work-area diagnostics and an interactive launch/click/collapse smoke test.
+            The existing island artwork and idle/music layouts remain unchanged.
           releaseDraft: true
           prerelease: false
           args: --bundles nsis
+      - name: Interactive island geometry smoke test
+        shell: pwsh
+        run: ./scripts/windows-island-smoke.ps1 -ExePath ./src-tauri/target/release/tarteel.exe
+      - name: Upload island screenshots and geometry log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarteel-island-ui-smoke
+          path: artifacts/island-ui-smoke/*
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: tarteel-windows-installers

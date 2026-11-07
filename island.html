@@ -86,7 +86,7 @@ const RM=matchMedia('(prefers-reduced-motion:reduce)').matches,mk=(x,k,c)=>({x,v
  * الارتفاع 34px كان يُهدر 8px فراغًا حول كبسولة ارتفاعها 22px.
  */
 const TARGET={idle:[56,26,13],compact:[126,26,13],full:[384,210,37],prayer:[444,188,44],tools:[480,300,46],alert:[440,92,40]};
-let raf=0,last=0,state='idle',back='compact',player={playing:false,duration:0,position:0,fileName:'',artist:'',cover:null,speed:1,sleepMode:'off',sleepMinutes:0},prayerState={schedule:null,preferences:{showNext:false,pauseAtAdhan:true},alert:null},scrub=false,host={width:Math.max(1,Math.round(window.innerWidth)),height:Math.max(1,Math.round(window.innerHeight))},transitionId=0,hostSeq=0,alertTimer=0,screenFit=1;
+let raf=0,last=0,state='idle',back='compact',player={playing:false,duration:0,position:0,fileName:'',artist:'',cover:null,speed:1,sleepMode:'off',sleepMinutes:0},prayerState={schedule:null,preferences:{showNext:false,pauseAtAdhan:true},alert:null},scrub=false,compactStageHeight=Math.max(1,Math.round(window.innerHeight)),host={width:Math.max(1,Math.round(window.innerWidth)),height:compactStageHeight},transitionId=0,hostSeq=0,alertTimer=0,screenFit=1;
 /* المستطيل التفاعلي = الكبسولة المرئية فقط.
    كل ما حولها داخل النافذة يصبح شفافًا للنقر، فلا تبتلع النافذة نقرات
    المستخدم على التطبيقات التي تحتها. القيمة تُرسل بالوحدات المنطقية
@@ -98,7 +98,7 @@ function reportHitRect(l,t,w,h){
     const w0=S.w.x, h0=Math.max(S.h.x,20);
     w=Math.round(w0*f); h=Math.round(h0*f);
     l=Math.round((window.innerWidth-w0)/2+ (w0-w)/2);
-    t=Math.round((window.innerHeight-h)/2);
+    t=(state==='idle'||state==='compact')?Math.max(0,Math.round((compactStageHeight-h)/2)):Math.round((window.innerHeight-h)/2);
   }
   const key=`${l}:${t}:${w}:${h}`;
   if(key===lastHit)return;
@@ -109,19 +109,13 @@ function reportHitRect(l,t,w,h){
 function apply(){
   const w=S.w.x,h=Math.max(S.h.x,20);
   isl.style.width=w+'px';isl.style.height=h+'px';isl.style.borderRadius=Math.max(S.r.x,8)+'px';
-  /* التمركز — النافذة هي الإطار المرجعي، والتحويل يتمحور حول
-     (50% أفقياً، 0% رأسياً) كما في `.island{transform-origin:50% 0}`.
-     هذا يعني أن التصغير يُبقي مركز العنصر الأفقي ثابتاً ويُبقي حرفه
-     العلوي ثابتاً. لذلك تختلف معادلة المحورين:
-
-       أفقي : المركز لا يتحرك بالتصغير ⇒ left = (عرض النافذة − العرض) / 2
-       رأسي : الحرف العلوي لا يتحرك ⇒ top = (ارتفاع النافذة − الارتفاع×fit) / 2
-
-     استخدام معادلة واحدة للمحورين ينزع المركز بمقدار (1−fit)×الحجم، وهو
-     خطأ بكسل واحد صغير، لكنه يفشل شرط «فارق لا يتجاوز نصف بكسل». */
+  /* يبقى التموضع الأفقي في منتصف نافذة المسرح. أما idle/compact فيستعملان
+     ارتفاع مرحلة الكبسولة المحفوظ عند الإقلاع، لا ارتفاع WebView الذي يكبر؛
+     لذلك يعود الشكل الصغير إلى موضعه الأصلي بعد أي توسعة، بلا شريط أو حجز. */
   const f=screenFit>0?screenFit:1;
   const left=Math.round((window.innerWidth-w)/2);
-  const top=Math.round((window.innerHeight-h*f)/2);
+  const compactState=state==='idle'||state==='compact';
+  const top=compactState?Math.max(0,Math.round((compactStageHeight-h*f)/2)):Math.round((window.innerHeight-h*f)/2);
   isl.style.left=left+'px';
   isl.style.top=top+'px';
   isl.style.translate='0 0';
@@ -153,18 +147,21 @@ function syncPassThrough(next){
 }
 function setLayerAccessibility(next){$$('.layer').forEach(layer=>{const active=layer.dataset.s===next;layer.setAttribute('aria-hidden',String(!active));if(layer.dataset.s==='full')layer.inert=!active})}
 function reportWindowError(cause){console.error('Tarteel island transparent window resize failed',cause);emit('island-error',{message:`تعذر تغيير حجم نافذة الجزيرة: ${String(cause)}`}).catch(()=>{})}
+function recordStableGeometry(){const rect=isl.getBoundingClientRect();invoke('record_island_geometry',{state,x:rect.left,y:rect.top,width:rect.width,height:rect.height,compactAnchorOffset:compactStageHeight/2}).then(result=>{if(result?.aligned_within_half_pixel===false)console.error('Tarteel island did not reach the measured 0.5px alignment target',result)}).catch(cause=>console.error('Tarteel measured island geometry failed',cause))}
+let geometrySyncTimer=0;
+function scheduleGeometrySync(){clearTimeout(geometrySyncTimer);geometrySyncTimer=setTimeout(()=>{if(raf){scheduleGeometrySync();return}fitToScreen();apply();recordStableGeometry()},140)}
 // The native window is a fixed stage that only ever grows, exactly as in v0.1.5.
 // Resizing it back down after the collapse is what produced the shake: the window
 // reached the new width a frame before the WebView repainted at the new centre, so
 // the capsule showed half the width delta and snapped back. Growing early is safe
 // because it happens before the spring starts, while the capsule is still small.
 async function resizeHost(width,height){await invoke('resize_island',{width,height});host={width,height};fitToScreen()}
-function tick(now){const dt=Math.min(.032,(now-last)/1000);last=now;let moving=false;for(const p of Object.values(S)){p.v+=(-p.k*(p.x-p.t)-p.c*p.v)*dt;p.x+=p.v*dt;if(Math.abs(p.v)>.05||Math.abs(p.x-p.t)>.05)moving=true}apply();raf=moving?requestAnimationFrame(tick):0;if(!moving){for(const p of Object.values(S)){p.x=p.t;p.v=0}apply()}}
+function tick(now){const dt=Math.min(.032,(now-last)/1000);last=now;let moving=false;for(const p of Object.values(S)){p.v+=(-p.k*(p.x-p.t)-p.c*p.v)*dt;p.x+=p.v*dt;if(Math.abs(p.v)>.05||Math.abs(p.x-p.t)>.05)moving=true}apply();raf=moving?requestAnimationFrame(tick):0;if(!moving){for(const p of Object.values(S)){p.x=p.t;p.v=0}apply();recordStableGeometry()}}
 const kick=()=>{if(!raf){last=performance.now();raf=requestAnimationFrame(tick)}};
 async function go(next){if(!TARGET[next])return;const id=++transitionId;if(next==='tools')fitTools();if(next==='prayer')renderPrayer();const [width,height]=TARGET[next];if(width>host.width||height>host.height){const ask=++hostSeq;try{await resizeHost(Math.max(width,host.width),Math.max(height,host.height))}catch(cause){reportWindowError(cause)}if(ask!==hostSeq)return}if(id!==transitionId)return;if(next==='alert'&&state!=='alert')back=state==='tools'?'compact':state;state=next;isl.dataset.state=next;syncPassThrough(next);isl.setAttribute('aria-expanded',['full','prayer','tools'].includes(next));setLayerAccessibility(next);if(next==='tools')syncTools();[S.w.t,S.h.t,S.r.t]=TARGET[next];fitToScreen();kick();emit('island-state',{state:next}).catch(()=>{})}
 /* الإقلاع: idle => تمرير مفعّل، والمستطيل يُبلَّغ بعد أول إطار. */
 syncPassThrough('idle');
-requestAnimationFrame(reportHitRect);
+requestAnimationFrame(()=>{apply();reportHitRect();recordStableGeometry()});
 function localDateKey(epoch,timeZone){const parts=new Intl.DateTimeFormat('en-CA',{timeZone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(epoch));const v=Object.fromEntries(parts.map(x=>[x.type,x.value]));return `${v.year}-${v.month}-${v.day}`}
 function formatPrayerTime(epoch,timeZone){return new Intl.DateTimeFormat('ar-EG',{timeZone,hour:'numeric',minute:'2-digit',hourCycle:'h12'}).format(new Date(epoch))}
 function findNext(schedule,now=Date.now()){return Array.isArray(schedule?.events)?schedule.events.find(event=>Number.isFinite(event.at)&&event.at>now)||null:null}
@@ -196,7 +193,10 @@ $('#chSpeed').addEventListener('click',event=>{const button=event.target.closest
 $('#swCount').addEventListener('click',()=>control('set-prayer-preference',{key:'showNext',value:!prayerState.preferences.showNext}));$('#swPause').addEventListener('click',()=>control('set-prayer-preference',{key:'pauseAtAdhan',value:!prayerState.preferences.pauseAtAdhan}));
 $('#alD').addEventListener('click',()=>dismissAlert(true));$('#alR').addEventListener('click',()=>control('resume-after-adhan'));
 function fitTools(){const available=Math.max(220,Math.min(430,(screen.availHeight||900)-96));toolsEl.style.setProperty('--tmax',`${available}px`);TARGET.tools[1]=Math.max(220,Math.min(430,Math.ceil(toolsEl.offsetHeight||available)));if(state==='tools'){S.h.t=TARGET.tools[1];kick()}}
-addEventListener('resize',()=>{fitToScreen();fitTools()});
+addEventListener('resize',()=>{fitToScreen();fitTools();scheduleGeometrySync()});
+addEventListener('focus',scheduleGeometrySync);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')scheduleGeometrySync()});
+listen('island-geometry-recheck',scheduleGeometrySync).catch(cause=>console.error('Tarteel geometry-recheck listener failed',cause));
 
 listen('player-state',event=>{const data=event.payload||{};player={...player,...data,position:Math.max(0,Number(data.position)||0),duration:Math.max(0,Number(data.duration)||0),speed:Number(data.speed)||1,sleepMode:data.sleepMode||'off'};renderPlayer();if(!data.fileName&&state==='compact')go('idle');else if(data.fileName&&state==='idle')go('compact')}).catch(cause=>console.error('Tarteel island player-state listener failed',cause));
 listen('prayer-data',event=>setPrayerData(event.payload||{})).catch(cause=>console.error('Tarteel island prayer-data listener failed',cause));

@@ -1,0 +1,24 @@
+# قياس وتمركز Dynamic Island على Windows
+
+## قاعدة الإحداثيات
+
+تُقاس مواضع الجزيرة ومستطيلات الشاشة بالبكسل الفيزيائي. عند الإقلاع وبعد كل انتقال مستقر ترسل صفحة الجزيرة مستطيل الكبسولة وارتفاع مرحلة الخمول الصغيرة. يقرأ Rust مستطيل النافذة ومساحة عميل WebView والشاشة الأقرب عبر `MonitorFromWindow` و`GetMonitorInfoW`، ويسجل `rcMonitor` و`rcWork` ومقياس Tauri وDPI الخاص بالنافذة.
+
+في `idle` و`compact` يكون مركز الكبسولة هدفًا أفقيًا في منتصف الشاشة ورأسيًا على ارتفاع نصف مرحلة CSS الصغيرة من `rcMonitor.top`؛ المرحلة 34 CSS px والكبسولة 26 CSS px. يحاذي كل من `SetWindowPos` والقياس اللاحق إحداثيات العرض الفعلية ضمن سماحية 0.5 بكسل فيزيائي. عند التوسيع، يكون أصل مساحة عميل النافذة عند أصل الشاشة الرأسي وتبقى النافذة متمركزة أفقيًا. يُنفذ التصحيح على خيط النافذة وبحد أقصى ثلاث محاولات، من دون تغيير HTML أو CSS أو ترتيب عناصر الجزيرة.
+
+نافذة الجزيرة نافذة شفافة مستقلة فقط؛ لا تُنشأ نافذة نظامية إضافية ولا تتغير مساحة العمل أو مواضع نوافذ التطبيقات الأخرى.
+
+## سجل التشخيص
+
+تُكتب القياسات بصيغة JSON Lines إلى `app_config_dir()/island-geometry.jsonl`. يحتفظ السجل بإحداثيات `rcMonitor` و`rcWork`، ومركز الارتكاز المحسوب من أصل الشاشة، ومركز الكبسولة قبل التصحيح وبعده، وعدد محاولات التصحيح. يدوّر السجل بعد تجاوزه 4 MiB. ينسخ خيار صينية النظام السجل إلى مجلد التنزيلات ليمكن إرفاقه عند ظهور اختلاف على جهاز المستخدم.
+
+## تحقق Windows
+
+يشغّل CI النسخة التنفيذية الناتجة على Windows، ينتظر قياس حالة الخمول، ويتحقق من تطابق مركز الكبسولة مع أصل الشاشة ضمن نصف بكسل. يلتقط صورة للجزيرة ويرسل نقرة فعلية إلى مركزها، ثم يتحقق من فتح حالة الصلاة ومن توسع نافذة Tauri. يرسل نقرة ثانية للتحقق من العودة إلى الخمول وبقاء التمركز، ثم يرفع الصور وسجل JSONL وملخص النتيجة كـartifact. غياب سطح عرض تفاعلي أو تعذر أي خطوة يجعل الاختبار يفشل؛ لا يُعامل التخطي على أنه نجاح.
+
+## مراجع الواجهات
+
+- [Microsoft: MonitorFromWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-monitorfromwindow)
+- [Microsoft: GetMonitorInfoW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getmonitorinfow)
+- [Microsoft: GetDpiForWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getdpiforwindow)
+- [Windows-rs 0.62: GDI bindings](https://microsoft.github.io/windows-docs-rs/doc/windows/Win32/Graphics/Gdi/index.html)

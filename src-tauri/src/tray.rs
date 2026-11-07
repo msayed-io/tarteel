@@ -17,6 +17,7 @@ use tauri::{
 
 /// مفاتيح عناصر القائمة، تُستخدم لتحديث النصوص لاحقًا.
 pub const NEXT_PRAYER_ID: &str = "tray-next-prayer";
+pub const GEOMETRY_LOG_ID: &str = "tray-geometry-log";
 pub const ADHAN_TOGGLE_ID: &str = "tray-adhan-toggle";
 pub const SHOW_ID: &str = "tray-show";
 pub const QUIT_ID: &str = "tray-quit";
@@ -31,6 +32,7 @@ const ISLAND_WINDOW: &str = "island";
 /// لأن الحساب في الواجهة لا في Rust؛ الصينية تبدأ بحالة محايدة.
 pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
   let next_prayer = MenuItem::with_id(app, NEXT_PRAYER_ID, "جارٍ حساب المواقيت…", false, None::<&str>)?;
+  let geometry_log = MenuItem::with_id(app, GEOMETRY_LOG_ID, "حفظ قياسات الجزيرة في التنزيلات", true, None::<&str>)?;
   let adhan_toggle = MenuItem::with_id(app, ADHAN_TOGGLE_ID, "كتم الأذان", true, None::<&str>)?;
   let show = MenuItem::with_id(app, SHOW_ID, "فتح تَرتيل", true, None::<&str>)?;
   let quit = MenuItem::with_id(app, QUIT_ID, "خروج نهائي", true, None::<&str>)?;
@@ -38,7 +40,7 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 
   let menu = Menu::with_items(
     app,
-    &[&next_prayer, &separator, &adhan_toggle, &show, &quit],
+    &[&next_prayer, &separator, &geometry_log, &adhan_toggle, &show, &quit],
   )?;
 
   let mut builder = TrayIconBuilder::with_id("tarteel-tray")
@@ -48,20 +50,8 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     .show_menu_on_left_click(false)
     .on_menu_event(|app, event| match event.id().as_ref() {
       SHOW_ID => show_main(app),
-      QUIT_ID => {
-        /* خروج صريح: هنا فقط تُقتل العملية.
-           نُعيد المساحة المحجوزة قبل الخروج، وإلا بقيت الشاشة ناقصة شريطًا
-           لا وجود له بعد إغلاق التطبيق. */
-        if let Some(guard) = app.try_state::<crate::HeaderGuard>() {
-          if let Ok(mut slot) = guard.0.lock() {
-            if let Some(raw) = slot.take() {
-              #[cfg(windows)]
-              crate::appbar::destroy(windows::Win32::Foundation::HWND(raw as *mut core::ffi::c_void));
-            }
-          }
-        }
-        app.exit(0);
-      }
+      GEOMETRY_LOG_ID => crate::island_diagnostics::export_from_tray(app),
+      QUIT_ID => app.exit(0),
       ADHAN_TOGGLE_ID => {
         /* تُبلّغ الواجهة بالتبديل، وهي مصدر الحقيقة لحالة الكتم. */
         crate::emit_to_ui(app, "tray-toggle-adhan", serde_json::json!({}));
@@ -96,8 +86,8 @@ pub fn show_main(app: &AppHandle) {
 
 /// يُخفي النافذة الرئيسية والجزيرة معًا ويُبقي العملية حيّة.
 ///
-/// الجزيرة تُخفى أيضًا لأنها نافذة عائمة دائمة الظهور؛ إبقاؤها بعد إغلاق
-/// التطبيق يترك شريطًا أسود فوق سطح المكتب بلا سبب.
+/// الجزيرة تُخفى أيضًا لأنها نافذة عائمة؛ إبقاؤها بعد إغلاق التطبيق
+/// يترك نافذة غير مرغوبة فوق سطح المكتب.
 pub fn hide_to_tray(app: &AppHandle) {
   if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
     let _ = window.hide();

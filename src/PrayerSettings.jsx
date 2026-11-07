@@ -34,7 +34,6 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
   const [adhanVolume, setAdhanVolume] = useState(config.adhanVolume ?? 80);
   const [adhanMuted, setAdhanMuted] = useState(Boolean(config.adhanMuted ?? false));
   const [autostart, setAutostart] = useState(false);
-  const [headerGuard, setHeaderGuard] = useState(null);
   const [methodId, setMethodId] = useState(config.methodId || 'auto');
   const [school, setSchool] = useState(config.school ?? 'auto');
   const [adjust, setAdjust] = useState(config.adjust || {});
@@ -117,11 +116,6 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
   /* حالة البدء مع ويندوز تُقرأ من النظام لا من التخزين المحلي. */
   useEffect(() => {
     invoke('is_autostart_enabled').then(value => setAutostart(Boolean(value))).catch(() => {});
-  }, []);
-
-  /* حالة الحاجز العلوي غير المرئي — للعرض التشخيصي فقط. */
-  useEffect(() => {
-    invoke('header_guard_status').then(setHeaderGuard).catch(() => setHeaderGuard(null));
   }, []);
 
   const toggleAutostart = async enabled => {
@@ -242,11 +236,6 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
             <label htmlFor="ps-autostart">البدء مع تشغيل ويندوز (مصغّرًا في الصينية)</label>
             <input id="ps-autostart" type="checkbox" checked={autostart} onChange={e => toggleAutostart(e.target.checked)} />
           </div>
-          <p className="ps-hint">
-            {headerGuard?.reserved
-              ? `المنطقة العلوية محجوزة (${headerGuard.heightPx} بكسل): نوافذ التطبيقات تتوقف عند الحد ولا تمرّ خلف الجزيرة. الحاجز غير مرئي تمامًا.`
-              : 'المنطقة العلوية غير محجوزة الآن.'}
-          </p>
         </div>
 
         {/* ---------- الضبط الدقيق (اختياري، مطوي) ---------- */}
