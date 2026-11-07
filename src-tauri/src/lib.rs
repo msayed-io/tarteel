@@ -679,7 +679,10 @@ mod island_tests {
       assert_eq!(w, (44.0 * scale).round() as i32, "العرض المطلوب = 44 منطقية");
       assert_eq!(h, geometry::compact_stage_height_px(scale), "النافذة تطابق مسرح CSS الصغير");
       assert!(x > 0 && x + w < 1920, "متمركزة أفقياً");
-      assert_eq!(1920 - w - x, x, "المسافتان متساويتان");
+      let right_margin = 1920 - w - x;
+      assert!((right_margin - x).abs() <= 1, "النافذتان متساويتان إلى أقرب بكسل فيزيائي");
+      let center_error = (x as f64 + w as f64 / 2.0 - 960.0).abs();
+      assert!(center_error <= 0.5, "خطأ مركز النافذة لا يتجاوز نصف بكسل: {center_error}");
     }
   }
 
