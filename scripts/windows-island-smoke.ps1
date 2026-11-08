@@ -10,6 +10,12 @@ $statusPath = Join-Path $outDir 'status.txt'
 $logPath = Join-Path $env:APPDATA 'com.tarteel.desktop/island-geometry.jsonl'
 $process = $null
 $previousWebViewArgs = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+$webViewRegistryPath = 'Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+$webViewRegistryValueName = [System.IO.Path]::GetFileName($ExePath)
+$webViewRegistryValueExisted = $false
+$webViewRegistryPreviousValue = $null
+$webViewRegistryPreviousKind = $null
+$webViewRegistryCreatedKeys = @()
 
 function Set-Status([string]$Value) {
   Set-Content -Path $statusPath -Value $Value -Encoding UTF8
@@ -222,19 +228,24 @@ public static class TarteelUiSmokeNative {
 
 function Wait-ForWebViewCdpTarget([int]$Port, [int]$TimeoutSeconds) {
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $lastError = 'No page target was returned.'
+  $endpoints = @("http://127.0.0.1:$Port/json/list", "http://localhost:$Port/json/list", "http://127.0.0.1:$Port/json", "http://localhost:$Port/json")
   do {
-    try {
-      $targets = @(Invoke-RestMethod -Uri "http://127.0.0.1:$Port/json/list" -TimeoutSec 2)
-      $pages = @($targets | Where-Object { $_.type -eq 'page' -and -not [string]::IsNullOrWhiteSpace($_.webSocketDebuggerUrl) })
-      if ($pages.Count -gt 0) {
-        $main = @($pages | Where-Object { $_.url -notmatch 'island\.html' })
-        if ($main.Count -gt 0) { return $main[0] }
-        return $pages[0]
-      }
-    } catch { }
+    foreach ($endpoint in $endpoints) {
+      try {
+        $targets = @(Invoke-RestMethod -Uri $endpoint -TimeoutSec 1 -ErrorAction Stop)
+        $pages = @($targets | Where-Object { $_.type -eq 'page' -and -not [string]::IsNullOrWhiteSpace($_.webSocketDebuggerUrl) })
+        if ($pages.Count -gt 0) {
+          $main = @($pages | Where-Object { $_.url -notmatch 'island\.html' })
+          if ($main.Count -gt 0) { return $main[0] }
+          return $pages[0]
+        }
+        $lastError = "Endpoint $endpoint returned no debuggable page targets."
+      } catch { $lastError = "$endpoint : $($_.Exception.Message)" }
+    }
     Start-Sleep -Milliseconds 250
   } while ((Get-Date) -lt $deadline)
-  throw "Timed out waiting for the local WebView2 CDP target on port $Port."
+  throw "Timed out waiting for the local WebView2 CDP target on port $Port. Last probe: $lastError"
 }
 
 function Invoke-WebViewCdpExpression($Target, [string]$Expression) {
@@ -301,6 +312,22 @@ try {
   if (Test-Path $logPath) { Remove-Item -Force $logPath }
   $portProbe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
   try { $portProbe.Start(); $cdpPort = [int]$portProbe.LocalEndpoint.Port } finally { $portProbe.Stop() }
+  $registryRoot = [Microsoft.Win32.Registry]::CurrentUser
+  $registryCandidates = @('Software\Policies', 'Software\Policies\Microsoft', 'Software\Policies\Microsoft\Edge', 'Software\Policies\Microsoft\Edge\WebView2', $webViewRegistryPath)
+  foreach ($candidatePath in $registryCandidates) {
+    $existingKey = $registryRoot.OpenSubKey($candidatePath)
+    if ($null -eq $existingKey) { $webViewRegistryCreatedKeys += $candidatePath }
+    else { $existingKey.Close() }
+  }
+  $policyKey = $registryRoot.CreateSubKey($webViewRegistryPath)
+  if ($null -eq $policyKey) { throw 'Could not create the temporary per-app WebView2 debugging policy on the CI runner.' }
+  $webViewRegistryValueExisted = $policyKey.GetValueNames() -contains $webViewRegistryValueName
+  if ($webViewRegistryValueExisted) {
+    $webViewRegistryPreviousValue = $policyKey.GetValue($webViewRegistryValueName)
+    $webViewRegistryPreviousKind = $policyKey.GetValueKind($webViewRegistryValueName)
+  }
+  $policyKey.SetValue($webViewRegistryValueName, "--remote-debugging-port=$cdpPort", [Microsoft.Win32.RegistryValueKind]::String)
+  $policyKey.Close()
   $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$cdpPort"
   try {
     $process = Start-Process -FilePath (Resolve-Path $ExePath) -WorkingDirectory (Split-Path (Resolve-Path $ExePath)) -PassThru
@@ -400,5 +427,24 @@ try {
   if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
   if ($null -eq $previousWebViewArgs) { Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue }
   else { $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousWebViewArgs }
+  $registryCleanupError = $null
+  try {
+    $registryRoot = [Microsoft.Win32.Registry]::CurrentUser
+    $policyKey = $registryRoot.OpenSubKey($webViewRegistryPath, $true)
+    if ($policyKey) {
+      if ($webViewRegistryValueExisted) { $policyKey.SetValue($webViewRegistryValueName, $webViewRegistryPreviousValue, $webViewRegistryPreviousKind) }
+      else { $policyKey.DeleteValue($webViewRegistryValueName, $false) }
+      $policyKey.Close()
+    }
+    foreach ($candidatePath in @($webViewRegistryCreatedKeys | Sort-Object { $_.Length } -Descending)) {
+      $candidateKey = $registryRoot.OpenSubKey($candidatePath, $true)
+      if ($candidateKey) {
+        $isEmpty = $candidateKey.GetValueNames().Length -eq 0 -and $candidateKey.GetSubKeyNames().Length -eq 0
+        $candidateKey.Close()
+        if ($isEmpty) { $registryRoot.DeleteSubKey($candidatePath, $false) }
+      }
+    }
+  } catch { $registryCleanupError = $_.Exception.Message; Set-Status 'FAIL' }
   if (Test-Path $logPath) { Copy-Item -Force $logPath (Join-Path $outDir 'geometry-final.jsonl') }
+  if ($registryCleanupError) { throw "Could not restore the temporary WebView2 registry policy: $registryCleanupError" }
 }
