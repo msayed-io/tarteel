@@ -40,7 +40,7 @@ describe('أحجام Dynamic Island', () => {
   it('مرحلة الخمول تطابق قياس CSS دون تغيير ارتفاع الكبسولة', () => {
     expect(geo).toContain('COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 38.0');
     expect(geo).toContain('CAPSULE_LOGICAL_HEIGHT: f64 = 24.0');
-    expect(geo).toContain('WINDOW_ANTIALIAS_GUTTER_LOGICAL: f64 = 1.0');
+    expect(geo).toContain('WINDOW_ANTIALIAS_GUTTER_LOGICAL: f64 = 2.0');
     expect(rust).toContain('geometry::compact_window_height_px(scale)');
     expect(rust).toContain('geometry::compact_window_width_px(scale)');
     expect(html).toContain('contentViewportSize(window.innerWidth,window.innerHeight)');

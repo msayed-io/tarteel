@@ -1,4 +1,4 @@
-export const WINDOW_ANTIALIAS_GUTTER_CSS = 1;
+export const WINDOW_ANTIALIAS_GUTTER_CSS = 2;
 
 const nativeGutter = 2 * WINDOW_ANTIALIAS_GUTTER_CSS;
 

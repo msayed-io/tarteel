@@ -150,9 +150,9 @@ mod imp {
 #[cfg(windows)]
 pub use imp::{attach, detach};
 
-/// يوسّع منطقة القص بكسلًا فيزيائيًا كي تمر الحافة الملساء كاملة بلا قصّ.
+/// يوسّع منطقة القص بكسلين فيزيائيين كي تمر الحافة الملساء كاملة بلا قصّ.
 pub fn expand_for_antialias_fringe(x: i32, y: i32, width: i32, height: i32, radius: i32) -> (i32, i32, i32, i32, i32) {
-  let fringe = 1;
+  let fringe = 2;
   (
     x.saturating_sub(fringe),
     y.saturating_sub(fringe),
@@ -219,14 +219,14 @@ mod tests {
   fn native_rounding_matches_idle_and_music_shapes() {
     assert_eq!(rounded_region_ellipse_diameter(44, 24, 12), 24);
     assert_eq!(rounded_region_ellipse_diameter(112, 24, 11), 22);
-    assert_eq!(rounded_region_ellipse_diameter(46, 26, 13), 26);
-    assert_eq!(rounded_region_ellipse_diameter(114, 26, 12), 24);
+    assert_eq!(rounded_region_ellipse_diameter(48, 28, 14), 28);
+    assert_eq!(rounded_region_ellipse_diameter(116, 28, 13), 26);
   }
 
   #[test]
-  fn native_region_leaves_a_one_pixel_fringe_around_the_css_edge() {
-    assert_eq!(expand_for_antialias_fringe(1, 7, 44, 24, 12), (0, 6, 46, 26, 13));
-    assert_eq!(expand_for_antialias_fringe(1, 7, 112, 24, 11), (0, 6, 114, 26, 12));
+  fn native_region_leaves_a_two_pixel_fringe_around_the_css_edge() {
+    assert_eq!(expand_for_antialias_fringe(2, 7, 44, 24, 12), (0, 5, 48, 28, 14));
+    assert_eq!(expand_for_antialias_fringe(2, 7, 112, 24, 11), (0, 5, 116, 28, 13));
   }
 
   #[test]

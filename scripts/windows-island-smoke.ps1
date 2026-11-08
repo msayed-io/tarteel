@@ -126,10 +126,11 @@ function Assert-RenderGutter($Record) {
   $top = [double]$rect.top
   $rightGap = [double]$size.width - [double]$rect.right
   $bottomGap = [double]$size.height - [double]$rect.bottom
-  if ($left -lt 1.0 -or $top -lt 1.0 -or $rightGap -lt 1.0 -or $bottomGap -lt 1.0) {
-    throw "The visible capsule has no full physical-pixel render gutter: left=$left, top=$top, right=$rightGap, bottom=$bottomGap."
+  $minimumGutter = 2.0 * $scale
+  if ($left -lt $minimumGutter -or $top -lt $minimumGutter -or $rightGap -lt $minimumGutter -or $bottomGap -lt $minimumGutter) {
+    throw "The visible capsule has less than a 2 CSS-pixel render gutter: left=$left, top=$top, right=$rightGap, bottom=$bottomGap."
   }
-  Write-Host "Verified 44x24 CSS-pixel visible capsule with a >=1 physical-pixel transparent gutter; margins=($left,$top,$rightGap,$bottomGap)."
+  Write-Host "Verified 44x24 CSS-pixel visible capsule with a >=2 CSS-pixel transparent render gutter; margins=($left,$top,$rightGap,$bottomGap)."
 }
 
 function Assert-ExpandedBoundsContained($Record) {
@@ -146,18 +147,27 @@ function Assert-ExpandedBoundsContained($Record) {
   $scale = [double]$Record.scale_factor
   if ($scale -le 0) { throw "Expanded '$($Record.state)' geometry has an invalid scale factor." }
   $bottomGap = ([double]$size.height - $bottom) / $scale
-  if ($bottomGap -lt 1.0) { throw "Expanded '$($Record.state)' surface has only $bottomGap CSS px of lower viewport gutter; at least 1 CSS px is required." }
+  if ($bottomGap -lt 2.0) { throw "Expanded '$($Record.state)' surface has only $bottomGap CSS px of lower viewport gutter; at least 2 CSS px are required." }
   Write-Host "Verified expanded '$($Record.state)' bounds stay inside the WebView client with $bottomGap CSS px of lower viewport gutter."
 }
 
 function Assert-MusicCompactBounds($Record) {
   $rect = $Record.capsule_rect_client
+  $size = $Record.client_size
   $scale = [double]$Record.scale_factor
-  if ($null -eq $rect -or $scale -le 0) { throw 'Music compact geometry is missing a capsule rectangle or valid scale factor.' }
+  if ($null -eq $rect -or $null -eq $size -or $scale -le 0) { throw 'Music compact geometry is missing a capsule rectangle, client size, or valid scale factor.' }
   $width = ([double]$rect.right - [double]$rect.left) / $scale
   $height = ([double]$rect.bottom - [double]$rect.top) / $scale
   if ([Math]::Abs($width - 112.0) -gt 0.75 -or [Math]::Abs($height - 24.0) -gt 0.75) {
     throw "The visible music compact capsule changed size: $width x $height CSS px; expected 112 x 24."
+  }
+  $minimumGutter = 2.0 * $scale
+  $leftGap = [double]$rect.left
+  $topGap = [double]$rect.top
+  $rightGap = [double]$size.width - [double]$rect.right
+  $bottomGap = [double]$size.height - [double]$rect.bottom
+  if ($leftGap -lt $minimumGutter -or $topGap -lt $minimumGutter -or $rightGap -lt $minimumGutter -or $bottomGap -lt $minimumGutter) {
+    throw "The music capsule has less than a 2 CSS-pixel render gutter: left=$leftGap, top=$topGap, right=$rightGap, bottom=$bottomGap."
   }
   Write-Host "Verified visible music compact rounded rectangle remains 112x24 CSS px."
 }
@@ -259,7 +269,7 @@ function Assert-ClickThroughOutsideCapsule($Record) {
 function Assert-ClickThroughRoundedCorner($Record) {
   $capsule = $Record.capsule_rect_screen
   if ($null -eq $capsule -or $null -eq $Record.window_handle) { throw 'Collapsed geometry row is missing the island bounds or HWND.' }
-  $offset = [int][Math]::Round(2.0 * [double]$Record.scale_factor)
+  $offset = [int][Math]::Round(1.0 * [double]$Record.scale_factor)
   $x = [int][Math]::Round([double]$capsule.left) + $offset
   $y = [int][Math]::Round([double]$capsule.top) + $offset
   $underlying = [TarteelUiSmokeNative]::WindowFromPoint([TarteelScreenPoint]@{ X = $x; Y = $y })

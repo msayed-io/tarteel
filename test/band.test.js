@@ -16,7 +16,7 @@ describe('المرحلة المصغرة ومركز الشاشة', () => {
     expect(geo).toContain('fn compact_anchor_offset_px(scale: f64) -> f64');
     expect(geo).toContain('(COMPACT_STAGE_LOGICAL_HEIGHT / 2.0) * safe_scale(scale)');
     expect(geo).toContain('fn compact_stage_height_px(scale: f64) -> i32');
-    expect(geo).toContain('WINDOW_ANTIALIAS_GUTTER_LOGICAL: f64 = 1.0');
+    expect(geo).toContain('WINDOW_ANTIALIAS_GUTTER_LOGICAL: f64 = 2.0');
     expect(hittest).toContain('expand_for_antialias_fringe');
   });
 

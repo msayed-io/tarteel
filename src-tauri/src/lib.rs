@@ -771,7 +771,7 @@ mod island_tests {
 
   #[test]
   fn island_boot_size_includes_the_transparent_gutter() {
-    assert_eq!(island_boot_size_logical(), (46.0, 40.0));
+    assert_eq!(island_boot_size_logical(), (48.0, 42.0));
   }
 
   #[test]
@@ -779,7 +779,7 @@ mod island_tests {
     for dpi in [96u32, 120, 144, 192] {
       let scale = geometry::scale_from_dpi(dpi);
       let (_, _, _, h) = island_bounds_from_monitor(0, 0, 1920, scale);
-      assert_eq!(h, (40.0 * scale).round() as i32, "dpi {dpi}");
+      assert_eq!(h, (42.0 * scale).round() as i32, "dpi {dpi}");
     }
   }
 

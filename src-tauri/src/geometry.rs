@@ -19,7 +19,7 @@ impl Rect {
 pub const COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 38.0;
 pub const COLLAPSED_CAPSULE_LOGICAL_WIDTH: f64 = 44.0;
 pub const CAPSULE_LOGICAL_HEIGHT: f64 = 24.0;
-pub const WINDOW_ANTIALIAS_GUTTER_LOGICAL: f64 = 1.0;
+pub const WINDOW_ANTIALIAS_GUTTER_LOGICAL: f64 = 2.0;
 pub const ISLAND_MAX_LOGICAL_HEIGHT: f64 = 430.0;
 
 pub fn compact_window_width_logical() -> f64 {
@@ -36,14 +36,14 @@ pub fn is_supported_island_resize(width: f64, height: f64) -> bool {
   if !width.is_finite() || !height.is_finite() || width.fract() != 0.0 || height.fract() != 0.0 { return false; }
   let window_width = width as i32;
   let minimum_height = match window_width {
-    46 | 114 => compact_window_height_logical(),
-    386 => 210.0 + 1.0 + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL,
-    398 => 83.0 + 1.0 + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL,
-    402 => 170.0 + 1.0 + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL,
-    434 => 220.0 + 1.0 + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL,
+    48 | 116 => compact_window_height_logical(),
+    388 => 210.0 + 1.0 + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL,
+    400 => 83.0 + 1.0 + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL,
+    404 => 170.0 + 1.0 + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL,
+    436 => 220.0 + 1.0 + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL,
     _ => return false,
   };
-  let maximum_height = if window_width <= 114 {
+  let maximum_height = if window_width <= 116 {
     160.0
   } else {
     ISLAND_MAX_LOGICAL_HEIGHT + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL
@@ -113,10 +113,10 @@ mod tests {
     }
     assert_eq!(compact_stage_height_px(1.0), 38);
     assert_eq!(compact_stage_height_px(1.25), 48);
-    assert_eq!(compact_window_width_px(1.0), 46);
-    assert_eq!(compact_window_height_px(1.0), 40);
-    assert_eq!(compact_window_width_px(1.25), 58);
-    assert_eq!(compact_window_height_px(1.25), 50);
+    assert_eq!(compact_window_width_px(1.0), 48);
+    assert_eq!(compact_window_height_px(1.0), 42);
+    assert_eq!(compact_window_width_px(1.25), 60);
+    assert_eq!(compact_window_height_px(1.25), 53);
     assert_eq!(compact_anchor_offset_px(1.0), 19.0);
     assert_eq!(compact_anchor_offset_px(1.25), 23.75);
     assert_eq!(compact_anchor_offset_px(1.5), 28.5);
@@ -132,18 +132,18 @@ mod tests {
   #[test]
   fn resize_contract_accepts_only_restored_and_safety_padded_sizes() {
     for (width, height) in [
-      (46.0, 40.0), (114.0, 40.0), (114.0, 41.0),
-      (386.0, 213.0), (386.0, 220.0), (386.0, 227.0),
-      (398.0, 86.0), (398.0, 220.0),
-      (402.0, 173.0), (402.0, 185.0),
-      (434.0, 223.0), (434.0, 280.0), (434.0, 404.0), (434.0, 432.0),
+      (48.0, 42.0), (116.0, 42.0), (116.0, 43.0),
+      (388.0, 215.0), (388.0, 220.0), (388.0, 227.0),
+      (400.0, 88.0), (400.0, 220.0),
+      (404.0, 175.0), (404.0, 185.0),
+      (436.0, 225.0), (436.0, 280.0), (436.0, 404.0), (436.0, 434.0),
     ] {
       assert!(is_supported_island_resize(width, height), "unexpected rejection: {width}x{height}");
     }
     for (width, height) in [
       (40.0, 38.0), (100.0, 38.0), (384.0, 220.0),
-      (386.0, 212.0), (398.0, 85.0), (402.0, 172.0),
-      (434.0, 222.0), (434.0, 433.0), (114.0, 161.0), (434.0, 432.5),
+      (388.0, 214.0), (400.0, 87.0), (404.0, 174.0),
+      (436.0, 224.0), (436.0, 435.0), (116.0, 161.0), (436.0, 434.5),
     ] {
       assert!(!is_supported_island_resize(width, height), "unexpected acceptance: {width}x{height}");
     }
@@ -166,7 +166,7 @@ mod tests {
   #[test]
   fn expanded_states_have_room_without_changing_compact_stage() {
     assert_eq!(compact_stage_height_px(1.25), 48);
-    assert_eq!(compact_window_height_px(1.25), 50);
+    assert_eq!(compact_window_height_px(1.25), 53);
     assert!(island_max_height_px(1.25) >= 537);
   }
 

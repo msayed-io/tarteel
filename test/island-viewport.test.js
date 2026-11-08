@@ -15,18 +15,18 @@ describe('مساحة نافذة Dynamic Island الموسعة', () => {
   });
 
   it('تحافظ على مساحة الرسم المرئية داخل حاشية شفافة لا تصغّر الكبسولة', () => {
-    expect(contentViewportSize(46, 40)).toEqual({ width: 44, height: 38 });
-    expect(nativeWindowSize(44, 38)).toEqual({ width: 46, height: 40 });
-    expect(nativeWindowSize(400, requiredViewportHeight(170, 38, 24))).toEqual({ width: 402, height: 180 });
+    expect(contentViewportSize(48, 42)).toEqual({ width: 44, height: 38 });
+    expect(nativeWindowSize(44, 38)).toEqual({ width: 48, height: 42 });
+    expect(nativeWindowSize(400, requiredViewportHeight(170, 38, 24))).toEqual({ width: 404, height: 182 });
   });
 
   it('تحوّل ارتفاعات الحالات المتغيرة مع fit إلى أبعاد نافذة فعلية محدودة', () => {
     for (const fit of [1, 0.95, 0.9, 0.8, 0.45]) {
       const viewportHeight = requiredViewportHeight(170, 38, 24, fit);
       const windowSize = nativeWindowSize(400, viewportHeight);
-      expect(windowSize.width).toBe(402);
-      expect(windowSize.height).toBe(viewportHeight + 2);
-      expect(windowSize.height).toBeGreaterThanOrEqual(180);
+      expect(windowSize.width).toBe(404);
+      expect(windowSize.height).toBe(viewportHeight + 4);
+      expect(windowSize.height).toBeGreaterThanOrEqual(182);
     }
   });
 
