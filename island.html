@@ -7,26 +7,26 @@
 <style>
 :root{--black:#000;--text:#fff;--sub:rgba(235,235,245,.6);--track:rgba(235,235,245,.3);--fill:#9d9da1;--ctl:#dcdce1;--accent:#b88ad8;--chip:rgba(255,255,255,.1);--chip-on:rgba(255,255,255,.22);--green:#30d158;--font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;--ease-out:cubic-bezier(.2,.9,.3,1)}
 *{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}html,body{height:100%;overflow:hidden;background:transparent;color:var(--text);-webkit-font-smoothing:antialiased}body{font-family:var(--font)}button{font-family:inherit}
-.island{position:fixed;top:8px;left:0;translate:0 0;width:40px;height:22px;border-radius:11px;background:transparent;overflow:visible;cursor:pointer;transform-origin:50% 0;user-select:none;scale:var(--fit,1);will-change:width,height,border-radius;transition:scale .28s var(--ease-out);z-index:1}
+.island{position:fixed;top:7px;left:0;translate:0 0;width:44px;height:24px;border-radius:12px;background:transparent;overflow:visible;cursor:pointer;transform-origin:50% 0;user-select:none;scale:var(--fit,1);will-change:width,height,border-radius;transition:scale .28s var(--ease-out);z-index:1}
 .island-surface{position:absolute;inset:0;overflow:hidden;border-radius:inherit;background:var(--black);z-index:1}
 .island.press{scale:calc(var(--fit,1)*.965)}.island:focus-visible{outline:2px solid #5aa9ff;outline-offset:3px}
 .layer{position:absolute;top:0;left:50%;opacity:0;filter:blur(14px);pointer-events:none;transform-origin:50% 0;transition:opacity .14s ease-in,filter .14s ease-in,transform .22s ease-in}
-.idle{left:0;width:100%;height:22px;margin-left:0;transform:scale(.8);display:flex;align-items:center;justify-content:center}
-.compact{left:0;width:100%;height:22px;margin-left:0;transform:scale(.8)}
+.idle{left:0;width:100%;height:24px;margin-left:0;transform:scale(.8);display:flex;align-items:center;justify-content:center}
+.compact{left:0;width:100%;height:24px;margin-left:0;transform:scale(.8)}
 .full{width:480px;height:262px;margin-left:-240px;transform:scale(.72)}
 .prayer{width:444px;height:188px;margin-left:-222px;transform:scale(.9);padding:18px 22px;display:flex;gap:14px}
 .tools{width:480px;height:auto;max-height:var(--tmax,430px);margin-left:-240px;transform:scale(.9);padding:0 24px 24px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
 .tools::-webkit-scrollbar{display:none}
 .alert{width:440px;height:92px;margin-left:-220px;transform:scale(.9);padding:0 22px;display:flex;align-items:center;gap:14px}
 [data-state=idle] .idle,[data-state=compact] .compact,[data-state=full] .full,[data-state=prayer] .prayer,[data-state=tools] .tools,[data-state=alert] .alert{opacity:1;filter:blur(0);transform:scale(1);pointer-events:auto;transition:opacity .32s .12s ease-out,filter .32s .12s ease-out,transform .5s .08s var(--ease-out)}
-[data-state=full] .full{transform:scale(.72)}
+[data-state=full] .full{transform:scale(.8)}
 [data-state=prayer] .prayer,[data-state=tools] .tools,[data-state=alert] .alert{transform:scale(.9)}
 .art{position:absolute;border-radius:14px;background:radial-gradient(circle at 70% 28%,#ffd9a0 0 8%,transparent 9%),linear-gradient(180deg,#f2a65a 0%,#d4582f 45%,#6d2a2e 70%,#1d2a52 100%);background-position:center;background-size:cover;box-shadow:inset 0 0 0 .5px rgba(255,255,255,.18)}
-.compact .art{left:5px;top:3px;width:16px;height:16px;border-radius:4.5px}.full .art{left:18px;top:27px;width:90px;height:90px}
+.compact .art{left:6px;top:4px;width:16px;height:16px;border-radius:4.5px}.full .art{left:18px;top:27px;width:90px;height:90px}
 .wave{position:absolute;display:flex;align-items:center;justify-content:space-between;color:var(--accent)}
 .wave i{display:block;width:3px;height:100%;border-radius:2px;background:currentColor;transform-origin:50% 50%;animation:eq .9s ease-in-out infinite alternate;transition:transform .35s var(--ease-out)}
 .wave i:nth-child(1){animation-duration:.8s;animation-delay:-.2s}.wave i:nth-child(2){animation-duration:.6s;animation-delay:-.5s}.wave i:nth-child(3){animation-duration:1s;animation-delay:-.1s}.wave i:nth-child(4){animation-duration:.7s;animation-delay:-.7s}.wave i:nth-child(5){animation-duration:.9s;animation-delay:-.35s}
-@keyframes eq{from{transform:scaleY(.25)}to{transform:scaleY(1)}}.paused .wave i{animation:none;transform:scaleY(.2)}.compact .wave{right:8px;top:4px;width:15px;height:13px}.full .wave{right:27px;top:64px;width:28px;height:16px}
+@keyframes eq{from{transform:scaleY(.25)}to{transform:scaleY(1)}}.paused .wave i{animation:none;transform:scaleY(.2)}.compact .wave{right:9px;top:5px;width:15px;height:13px}.full .wave{right:27px;top:64px;width:28px;height:16px}
 .idle-prayer{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0;border:0;background:transparent;color:#fff;font:600 8.5px/1 var(--font);white-space:nowrap;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .2s ease,filter .2s ease}
 [data-state=idle] .idle-prayer{opacity:1;pointer-events:auto}#idlePrayerName{display:block;max-width:100%;padding:0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
 .title,.artist{position:absolute;left:124px;right:76px;font-size:22px;line-height:26px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;unicode-bidi:plaintext}
@@ -77,55 +77,59 @@
 <script type="module">
 import { emit, listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import { compactTopInset, requiredViewportHeight } from './src/engine/island-geometry.js';
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)],isl=$('#isl'),fill=$('#fill'),tc=$('#tc'),rem=$('#tr'),bar=$('#bar'),pp=$('#pp'),toolsEl=$('.layer.tools');
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v)),toArabic=v=>String(v).replace(/\d/g,d=>'٠١٢٣٤٥٦٧٨٩'[d]);
 const fmt=s=>{s=Math.max(0,Math.floor(Number(s)||0));return toArabic(Math.floor(s/60)+':'+String(s%60).padStart(2,'0'))};
 const countdown=ms=>{const n=Math.max(0,Math.ceil(ms/1000)),h=Math.floor(n/3600),m=Math.floor(n%3600/60),s=n%60;return toArabic(h?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`)};
 const control=(action,extra={})=>emit('island-control',{action,...extra}).catch(cause=>console.error('Tarteel island control event failed',cause));
-const RM=matchMedia('(prefers-reduced-motion:reduce)').matches,mk=(x,k,c)=>({x,v:0,t:x,k,c:RM?2*Math.sqrt(k):c}),S={w:mk(40,300,28),h:mk(22,260,25),r:mk(11,320,30)};
+const RM=matchMedia('(prefers-reduced-motion:reduce)').matches,mk=(x,k,c)=>({x,v:0,t:x,k,c:RM?2*Math.sqrt(k):c}),S={w:mk(44,300,28),h:mk(24,260,25),r:mk(12,320,30)};
 /*
  * صُغّرت الحالتان المدمجتان، وأُزيل الامتداد السفلي المنفصل.
  * الحالات الموسعة أصغر بصريًا بنسبة 10% مع الاحتفاظ بتوزيع عناصرها.
  */
-const TARGET={idle:[40,22,11],compact:[100,22,11],full:[346,189,33],prayer:[400,169,40],tools:[432,270,41],alert:[396,83,36]};
+const TARGET={idle:[44,24,12],compact:[112,24,9],full:[384,210,37],prayer:[400,170,40],tools:[432,270,41],alert:[396,83,36]};
 let raf=0,last=0,state='idle',back='compact',player={playing:false,duration:0,position:0,fileName:'',artist:'',cover:null,speed:1,sleepMode:'off',sleepMinutes:0},prayerState={schedule:null,preferences:{showNext:false,pauseAtAdhan:true},alert:null},scrub=false,compactStageHeight=Math.max(1,Math.round(window.innerHeight)),host={width:Math.max(1,Math.round(window.innerWidth)),height:compactStageHeight},transitionId=0,hostSeq=0,alertTimer=0,screenFit=1,motionTrace=null,lastMotionTrace=null;
-/* المستطيل التفاعلي = الكبسولة المرئية فقط.
+/* المستطيل التفاعلي = حدود الجزيرة المرئية فقط.
    كل ما حولها داخل النافذة يصبح شفافًا للنقر، فلا تبتلع النافذة نقرات
    المستخدم على التطبيقات التي تحتها. القيمة تُرسل بالوحدات المنطقية
    والخادم يحوّلها إلى بكسل فيزيائي بمقياس الشاشة. */
-let hitTimer=0,lastHit='',activeHitRect={x:0,y:0,width:0,height:0};
-function reportHitRect(l,t,w,h){
+let hitTimer=0,lastHit='',activeHitRect={x:0,y:0,width:0,height:0,radius:0};
+function reportHitRect(l,t,w,h,radius){
   if(l===undefined){
     const f=screenFit>0?screenFit:1;
     const w0=S.w.x, h0=Math.max(S.h.x,20);
     w=w0*f; h=h0*f;
     l=(window.innerWidth-w0)/2+(w0-w)/2;
-    t=Math.max(0,(compactStageHeight-TARGET.idle[1]*f)/2);
+    t=compactTopInset(compactStageHeight,TARGET.idle[1],f);
+    radius=Math.min(Math.max(S.r.x,8),Math.min(w0,h0)/2)*f;
   }
-  activeHitRect={x:l,y:t,width:w,height:h};
-  const key=`${l}:${t}:${w}:${h}`;
+  radius=Math.max(0,Math.min(Number.isFinite(radius)?radius:0,Math.min(w,h)/2));
+  activeHitRect={x:l,y:t,width:w,height:h,radius};
+  const key=`${l}:${t}:${w}:${h}:${radius}`;
   if(key===lastHit)return;
   lastHit=key;
   clearTimeout(hitTimer);
-  hitTimer=setTimeout(()=>{invoke('set_island_hit_rect',{x:l,y:t,width:w,height:h}).catch(cause=>console.error('Tarteel native capsule hit-region update failed',cause))},40);
+  hitTimer=setTimeout(()=>{invoke('set_island_hit_rect',{x:l,y:t,width:w,height:h,radius}).catch(cause=>console.error('Tarteel native island hit-region update failed',cause))},40);
 }
 function apply(){
   const w=S.w.x,h=Math.max(S.h.x,20);
   isl.style.width=w+'px';isl.style.height=h+'px';isl.style.borderRadius=Math.max(S.r.x,8)+'px';
-  /* يظل مركز الكبسولة الصغيرة هو المرساة الرأسية طوال النابض؛ يزيد التوسع
+  /* يظل مركز جزيرة الخمول الصغيرة هو المرساة الرأسية طوال النابض؛ يزيد التوسع
      إلى أسفلها بدل نقل الكبسولة إلى منتصف نافذة WebView ثم سحبها لأعلى. */
   const f=screenFit>0?screenFit:1;
   const left=(window.innerWidth-w)/2;
-  const top=Math.max(0,(compactStageHeight-TARGET.idle[1]*f)/2);
+  const top=compactTopInset(compactStageHeight,TARGET.idle[1],f);
   isl.style.left=left+'px';
   isl.style.top=top+'px';
   isl.style.translate='0 0';
   /* المستطيل المرئي فعلًا بعد التصغير، للنقرات. */
   const vw=w*f, vh=h*f;
   const visualLeft=left+(w-vw)/2;
+  const visualRadius=Math.min(Math.max(S.r.x,8),Math.min(w,h)/2)*f;
   const rect=isl.getBoundingClientRect();
   if(motionTrace){const y=window.screenY+rect.top;motionTrace.minTop=Math.min(motionTrace.minTop,y);motionTrace.maxTop=Math.max(motionTrace.maxTop,y);motionTrace.samples+=1}
-  reportHitRect(visualLeft,top,vw,vh);
+  reportHitRect(visualLeft,top,vw,vh,visualRadius);
 }
 // The island must read as a single floating surface over the desktop: no drop shadow,
 // no border and no second rectangle are ever drawn behind or around it.
@@ -150,7 +154,16 @@ function syncPassThrough(next){
 }
 function setLayerAccessibility(next){$$('.layer').forEach(layer=>{const active=layer.dataset.s===next;layer.setAttribute('aria-hidden',String(!active));if(layer.dataset.s==='full')layer.inert=!active})}
 function reportWindowError(cause){console.error('Tarteel island transparent window resize failed',cause);emit('island-error',{message:`تعذر تغيير حجم نافذة الجزيرة: ${String(cause)}`}).catch(()=>{})}
-async function recordStableGeometry(){const rect=isl.getBoundingClientRect();if(motionTrace){lastMotionTrace=motionTrace;motionTrace=null}const trace=lastMotionTrace;try{await invoke('set_island_hit_rect',{x:activeHitRect.x,y:activeHitRect.y,width:activeHitRect.width,height:activeHitRect.height});const result=await invoke('record_island_geometry',{state,x:rect.left,y:rect.top,width:rect.width,height:rect.height,hitX:activeHitRect.x,hitY:activeHitRect.y,hitWidth:activeHitRect.width,hitHeight:activeHitRect.height,compactAnchorOffset:compactStageHeight/2,motionTopMin:trace?.minTop??null,motionTopMax:trace?.maxTop??null,motionSamples:trace?.samples??0});if(result?.aligned_within_half_pixel===false)console.error('Tarteel island did not reach the measured 0.5px alignment target',result)}catch(cause){console.error('Tarteel stable geometry/hit-region update failed',cause)}}
+async function recordStableGeometry(){
+  const rect=isl.getBoundingClientRect();
+  if(motionTrace){lastMotionTrace=motionTrace;motionTrace=null}
+  const trace=lastMotionTrace;
+  try{
+    await invoke('set_island_hit_rect',{x:activeHitRect.x,y:activeHitRect.y,width:activeHitRect.width,height:activeHitRect.height,radius:activeHitRect.radius});
+    const result=await invoke('record_island_geometry',{state,x:rect.left,y:rect.top,width:rect.width,height:rect.height,hitX:activeHitRect.x,hitY:activeHitRect.y,hitWidth:activeHitRect.width,hitHeight:activeHitRect.height,compactAnchorOffset:compactStageHeight/2,motionTopMin:trace?.minTop??null,motionTopMax:trace?.maxTop??null,motionSamples:trace?.samples??0});
+    if(result?.aligned_within_half_pixel===false)console.error('Tarteel island did not reach the measured 0.5px alignment target',result);
+  }catch(cause){console.error('Tarteel stable geometry/hit-region update failed',cause)}
+}
 let geometrySyncTimer=0;
 function scheduleGeometrySync(){clearTimeout(geometrySyncTimer);geometrySyncTimer=setTimeout(()=>{if(raf){scheduleGeometrySync();return}fitToScreen();apply();recordStableGeometry()},140)}
 // The native window is a fixed stage that only ever grows, exactly as in v0.1.5.
@@ -162,7 +175,7 @@ async function waitForViewportSize(width,height){const deadline=performance.now(
 async function resizeHost(width,height){await invoke('resize_island',{width,height});await waitForViewportSize(width,height);host={width,height};fitToScreen()}
 function tick(now){const dt=Math.min(.032,(now-last)/1000);last=now;let moving=false;for(const p of Object.values(S)){p.v+=(-p.k*(p.x-p.t)-p.c*p.v)*dt;p.x+=p.v*dt;if(Math.abs(p.v)>.05||Math.abs(p.x-p.t)>.05)moving=true}apply();raf=moving?requestAnimationFrame(tick):0;if(!moving){for(const p of Object.values(S)){p.x=p.t;p.v=0}apply();recordStableGeometry()}}
 const kick=()=>{if(!raf){last=performance.now();raf=requestAnimationFrame(tick)}};
-async function go(next){if(!TARGET[next])return;const id=++transitionId;if(next==='tools')fitTools();if(next==='prayer')renderPrayer();const [width,height]=TARGET[next];if(width>host.width||height>host.height){const ask=++hostSeq;try{await resizeHost(Math.max(width,host.width),Math.max(height,host.height))}catch(cause){reportWindowError(cause);return}if(ask!==hostSeq)return}if(id!==transitionId)return;if(next==='alert'&&state!=='alert')back=state==='tools'?'compact':state;motionTrace={minTop:Infinity,maxTop:-Infinity,samples:0};state=next;isl.dataset.state=next;syncPassThrough(next);isl.setAttribute('aria-expanded',['full','prayer','tools'].includes(next));setLayerAccessibility(next);if(next==='tools')syncTools();[S.w.t,S.h.t,S.r.t]=TARGET[next];fitToScreen();kick();emit('island-state',{state:next}).catch(()=>{})}
+async function go(next){if(!TARGET[next])return;const id=++transitionId;if(next==='tools')fitTools();if(next==='prayer')renderPrayer();const [width,height]=TARGET[next];const requiredHeight=requiredViewportHeight(height,compactStageHeight,TARGET.idle[1],screenFit);if(width>host.width||requiredHeight>host.height){const ask=++hostSeq;try{await resizeHost(Math.max(width,host.width),Math.max(requiredHeight,host.height))}catch(cause){reportWindowError(cause);return}if(ask!==hostSeq)return}if(id!==transitionId)return;if(next==='alert'&&state!=='alert')back=state==='tools'?'compact':state;motionTrace={minTop:Infinity,maxTop:-Infinity,samples:0};state=next;isl.dataset.state=next;syncPassThrough(next);isl.setAttribute('aria-expanded',['full','prayer','tools'].includes(next));setLayerAccessibility(next);if(next==='tools')syncTools();[S.w.t,S.h.t,S.r.t]=TARGET[next];fitToScreen();kick();emit('island-state',{state:next}).catch(()=>{})}
 /* الإقلاع: idle => تمرير مفعّل، والمستطيل يُبلَّغ بعد أول إطار. */
 syncPassThrough('idle');
 requestAnimationFrame(()=>{apply();reportHitRect();recordStableGeometry()});

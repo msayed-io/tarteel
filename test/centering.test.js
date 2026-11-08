@@ -19,7 +19,7 @@ describe('تموضع الجزيرة عند أصل الشاشة', () => {
     expect(geo).toContain('COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 38.0');
     expect(geo).toContain('fn compact_stage_height_px(scale: f64) -> i32');
     expect(html).toContain('compactStageHeight');
-    expect(html).toContain('const top=Math.max(0,(compactStageHeight-TARGET.idle[1]*f)/2)');
+    expect(html).toContain('const top=compactTopInset(compactStageHeight,TARGET.idle[1],f)');
   });
 
   it('يقيس CSS وRust الارتفاع نفسه على مقاييس DPI مختلفة', () => {

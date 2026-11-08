@@ -33,7 +33,7 @@ function Wait-ForRow([string]$State, [int]$TimeoutSeconds, [Nullable[long]]$Afte
       if ($_.state -ne $State -or ($null -ne $After -and [long]$_.timestamp_unix_ms -le $After)) { return $false }
       if ($null -eq $_.capsule_rect_client) { return $false }
       $capsuleHeight = [double]$_.capsule_rect_client.bottom - [double]$_.capsule_rect_client.top
-      $compactHeight = 22.0 * [double]$_.scale_factor
+      $compactHeight = 24.0 * [double]$_.scale_factor
       if ($Expanded) { return $capsuleHeight -gt $compactHeight }
       return $capsuleHeight -le $compactHeight
     })
@@ -111,6 +111,20 @@ function Assert-Anchor($Record) {
   Write-Host "Verified capsule center against monitor-origin anchor ($($anchor.x),$($anchor.y)): dx=$dx, dy=$dy."
 }
 
+function Assert-ExpandedBoundsContained($Record) {
+  $rect = $Record.capsule_rect_client
+  $size = $Record.client_size
+  if ($null -eq $rect -or $null -eq $size) { throw "Expanded state '$($Record.state)' has no client-space capsule bounds or client size." }
+  $left = [double]$rect.left
+  $top = [double]$rect.top
+  $right = [double]$rect.right
+  $bottom = [double]$rect.bottom
+  if ($left -lt 0 -or $top -lt 0 -or $right -gt [double]$size.width -or $bottom -gt [double]$size.height) {
+    throw "Expanded '$($Record.state)' surface is clipped by the WebView client: capsule=($left,$top)-($right,$bottom), client=$($size.width)x$($size.height)."
+  }
+  Write-Host "Verified expanded '$($Record.state)' bounds stay inside the WebView client, including the bottom edge."
+}
+
 function Assert-ClickThroughOutsideCapsule($Record) {
   $window = $Record.window_rect_outer
   $capsule = $Record.capsule_rect_screen
@@ -128,6 +142,20 @@ function Assert-ClickThroughOutsideCapsule($Record) {
     throw "The collapsed island HWND still wins native hit-testing outside its capsule at ($x,$y)."
   }
   Write-Host "Verified native WindowFromPoint resolves outside the collapsed capsule to HWND $underlying, not the island."
+}
+
+function Assert-ClickThroughRoundedCorner($Record) {
+  $capsule = $Record.capsule_rect_screen
+  if ($null -eq $capsule -or $null -eq $Record.window_handle) { throw 'Collapsed geometry row is missing the island bounds or HWND.' }
+  $offset = [int][Math]::Round(5.0 * [double]$Record.scale_factor)
+  $x = [int][Math]::Round([double]$capsule.left) + $offset
+  $y = [int][Math]::Round([double]$capsule.top) + $offset
+  $underlying = [TarteelUiSmokeNative]::WindowFromPoint([TarteelScreenPoint]@{ X = $x; Y = $y })
+  if ($underlying -eq [IntPtr]::Zero) { throw "WindowFromPoint returned no target at rounded-corner point ($x,$y)." }
+  if ($underlying.ToInt64() -eq [long]$Record.window_handle) {
+    throw "The collapsed island HWND still captures a point outside its rounded corner at ($x,$y)."
+  }
+  Write-Host "Verified native hit-testing passes through the rounded corner at ($x,$y) to HWND $underlying."
 }
 
 Add-Type -AssemblyName System.Drawing
@@ -162,6 +190,7 @@ try {
   Click-RectCenter $idle
   $prayer = Wait-ForRow 'prayer' 15 ([long]$idle.timestamp_unix_ms) -Expanded
   if ($prayer.client_size.width -lt 300 -or $prayer.client_size.height -lt 100) { throw "Prayer state did not expand the native window as expected: $($prayer.client_size.width)x$($prayer.client_size.height)" }
+  Assert-ExpandedBoundsContained $prayer
   if ($prayer.aligned_within_half_pixel -ne $true) { throw "Expanded window origin did not align to the monitor origin: $($prayer.aligned_within_half_pixel)" }
   if ($null -eq $prayer.motion_top_min_screen_css_px -or $null -eq $prayer.motion_top_max_screen_css_px -or [int]$prayer.motion_sample_count -lt 4) { throw 'Expanded state did not include enough measured animation frames.' }
   $motionSpan = [Math]::Abs([double]$prayer.motion_top_max_screen_css_px - [double]$prayer.motion_top_min_screen_css_px)
@@ -174,6 +203,7 @@ try {
   if ($collapsed.aligned_within_half_pixel -ne $true) { throw "Collapsed capsule is outside the 0.5px monitor-anchor tolerance: $($collapsed.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress)" }
   Assert-Anchor $collapsed
   Assert-ClickThroughOutsideCapsule $collapsed
+  Assert-ClickThroughRoundedCorner $collapsed
   $collapsedShot = Capture-Top 'idle-after-collapse'
   Assert-BlackCapsuleCenter $collapsed $collapsedShot
   Copy-Item -Force $logPath (Join-Path $outDir 'geometry-final.jsonl')
@@ -181,8 +211,8 @@ try {
   $summary = @(
     'PASS: launched the built Tarteel Windows executable.',
     "PASS: measured idle capsule offset before correction=$($idle.pre_alignment.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress); after correction=$($collapsed.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress).",
-    "PASS: physical click expanded prayer state; top-anchor range=$motionSpan CSS px across $($prayer.motion_sample_count) frames.",
-    'PASS: physical mouse click returned to idle, the capsule remained centered, and native hit-testing passed through outside it.',
+    "PASS: physical click expanded prayer state without clipping its bottom edge; top-anchor range=$motionSpan CSS px across $($prayer.motion_sample_count) frames.",
+    'PASS: physical mouse click returned to idle, the island remained centered, and native hit-testing passed through outside its rounded corner and edge.',
     "Display: $($collapsed.monitor_rc_monitor.right - $collapsed.monitor_rc_monitor.left)x$($collapsed.monitor_rc_monitor.bottom - $collapsed.monitor_rc_monitor.top); scale_factor=$($collapsed.scale_factor); native_dpi=$($collapsed.native_dpi)."
   )
   Set-Content -Path (Join-Path $outDir 'summary.txt') -Value $summary -Encoding UTF8

@@ -153,6 +153,13 @@ pub use imp::{attach, detach};
 /// Applies a rounded native window region while the island is collapsed.
 /// Unlike `HTTRANSPARENT`, the window manager excludes points outside this
 /// region before choosing a target, including windows owned by other threads.
+fn rounded_region_ellipse_diameter(width: i32, height: i32, radius: i32) -> i32 {
+  if width <= 0 || height <= 0 {
+    return 0;
+  }
+  radius.max(0).min(width.min(height) / 2).saturating_mul(2)
+}
+
 #[cfg(windows)]
 pub fn set_collapsed_window_region(
   hwnd: windows::Win32::Foundation::HWND,
@@ -160,20 +167,22 @@ pub fn set_collapsed_window_region(
   y: i32,
   width: i32,
   height: i32,
+  radius: i32,
 ) -> Result<(), String> {
   use windows::Win32::Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn};
 
   if width <= 0 || height <= 0 {
     return clear_window_region(hwnd);
   }
-  let region = unsafe { CreateRoundRectRgn(x, y, x + width, y + height, height, height) };
+  let ellipse = rounded_region_ellipse_diameter(width, height, radius);
+  let region = unsafe { CreateRoundRectRgn(x, y, x + width, y + height, ellipse, ellipse) };
   if region.is_invalid() {
-    return Err("تعذر إنشاء منطقة النقر المطابقة لكبسولة الجزيرة".into());
+    return Err("تعذر إنشاء منطقة النقر المطابقة لشكل الجزيرة".into());
   }
   let applied = unsafe { SetWindowRgn(hwnd, Some(region), true) };
   if applied == 0 {
     let _ = unsafe { DeleteObject(HGDIOBJ(region.0)) };
-    return Err("تعذر تطبيق منطقة النقر المطابقة لكبسولة الجزيرة".into());
+    return Err("تعذر تطبيق منطقة النقر المطابقة لشكل الجزيرة".into());
   }
   Ok(())
 }
@@ -193,6 +202,18 @@ pub fn clear_window_region(hwnd: windows::Win32::Foundation::HWND) -> Result<(),
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn native_rounding_matches_idle_and_music_shapes() {
+    assert_eq!(rounded_region_ellipse_diameter(44, 24, 12), 24);
+    assert_eq!(rounded_region_ellipse_diameter(112, 24, 9), 18);
+  }
+
+  #[test]
+  fn native_rounding_is_clamped_to_the_shorter_edge() {
+    assert_eq!(rounded_region_ellipse_diameter(30, 20, 18), 20);
+    assert_eq!(rounded_region_ellipse_diameter(0, 20, 9), 0);
+  }
 
   #[test]
   fn a_point_inside_the_capsule_is_interactive() {

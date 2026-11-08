@@ -19,17 +19,17 @@ describe('Tarteel production surface', () => {
     expect(html).toContain('lang="ar" dir="rtl"');
   });
 
-  it('shrinks all states coherently while preserving the expanded-state internal layout', async () => {
+  it('restores the accepted 0.7.7 sizes and preserves the expanded-state internal layout', async () => {
     const html = await read('island.html');
     const target = html.match(/TARGET=\{idle:\[(\d+),(\d+),(\d+)\],compact:\[(\d+),(\d+),(\d+)\],full:\[(\d+),(\d+),(\d+)\],prayer:\[(\d+),(\d+),(\d+)\],tools:\[(\d+),(\d+),(\d+)\],alert:\[(\d+),(\d+),(\d+)\]\}/);
     expect(target).not.toBeNull();
-    expect(target.slice(1, 4).map(Number)).toEqual([40, 22, 11]);
-    expect(target.slice(4, 7).map(Number)).toEqual([100, 22, 11]);
-    expect(target.slice(7, 10).map(Number)).toEqual([346, 189, 33]);
-    expect(target.slice(10, 13).map(Number)).toEqual([400, 169, 40]);
+    expect(target.slice(1, 4).map(Number)).toEqual([44, 24, 12]);
+    expect(target.slice(4, 7).map(Number)).toEqual([112, 24, 9]);
+    expect(target.slice(7, 10).map(Number)).toEqual([384, 210, 37]);
+    expect(target.slice(10, 13).map(Number)).toEqual([400, 170, 40]);
     expect(target.slice(13, 16).map(Number)).toEqual([432, 270, 41]);
     expect(target.slice(16, 19).map(Number)).toEqual([396, 83, 36]);
-    expect(html).toContain('[data-state=full] .full{transform:scale(.72)}');
+    expect(html).toContain('[data-state=full] .full{transform:scale(.8)}');
     expect(html).toContain('[data-state=prayer] .prayer,[data-state=tools] .tools,[data-state=alert] .alert{transform:scale(.9)}');
     expect(html).toContain('.prayer{width:444px;height:188px');
     expect(html).toContain('.plist{flex:none;width:216px');

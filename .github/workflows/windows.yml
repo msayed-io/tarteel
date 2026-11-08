@@ -9,8 +9,8 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: {node-version: 22, cache: npm}
       - run: npm ci
       - run: npm run test
@@ -20,25 +20,25 @@ jobs:
     runs-on: windows-2025
     permissions:
       contents: write
-      actions: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: {node-version: 22, cache: npm}
       - run: npm ci
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
         with: {toolchain: 1.90.0-x86_64-pc-windows-msvc}
       - run: cargo test --manifest-path src-tauri/Cargo.toml --lib
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: tarteel-v__VERSION__
           releaseName: Tarteel v__VERSION__
           releaseBody: |
-            Keeps the Dynamic Island capsule anchored during expansion and collapse, with Windows motion-frame verification.
-            Refines the compact idle/music silhouette and reduces expanded states by 10% while preserving their internal layout.
-            Constrains the native input region to the capsule while collapsed; includes measured geometry and click-through smoke verification.
+            يطابق وضع الخمول نسبة الصورة المرجعية (44×24px، نصف قطر 12px)، ويعرض الموسيقى كمستطيل بحواف مدوّرة لا كبسولة طويلة (112×24px، نصف قطر 9px).
+            لا يضيف أي ساق أو امتداد أسفل الجزيرة؛ الخط العمودي في صورة المرجع جزء من الخلفية.
+            يعيد مساحة التشغيل الكامل إلى 384×210px وبطاقة الصلاة إلى 400×170px، ويضيف مساحة WebView تعوّض إزاحة الارتكاز وهامش التقريب كي لا تُقص الحافة السفلية.
+            يطابق نصف قطر hit-test الأصلي شكل الجزيرة كي تصل النقرات خارجها، بما فيها الزوايا المستديرة، إلى النوافذ تحتها.
           releaseDraft: true
           prerelease: false
           args: --bundles nsis
@@ -47,12 +47,12 @@ jobs:
         run: ./scripts/windows-island-smoke.ps1 -ExePath ./src-tauri/target/release/tarteel.exe
       - name: Upload island screenshots and geometry log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: tarteel-island-ui-smoke
           path: artifacts/island-ui-smoke/*
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: tarteel-windows-installers
           path: |

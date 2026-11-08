@@ -12,7 +12,7 @@ const windowsSmoke = readFileSync(resolve(__dirname, '../scripts/windows-island-
 describe('المرحلة المصغرة ومركز الشاشة', () => {
   it('مركز الكبسولة مرجعه منتصف مرحلة CSS الصغيرة', () => {
     expect(geo).toContain('COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 38.0');
-    expect(geo).toContain('CAPSULE_LOGICAL_HEIGHT: f64 = 22.0');
+    expect(geo).toContain('CAPSULE_LOGICAL_HEIGHT: f64 = 24.0');
     expect(geo).toContain('fn compact_anchor_offset_px(scale: f64) -> f64');
     expect(geo).toContain('(COMPACT_STAGE_LOGICAL_HEIGHT / 2.0) * safe_scale(scale)');
     expect(geo).toContain('fn compact_stage_height_px(scale: f64) -> i32');
@@ -20,13 +20,14 @@ describe('المرحلة المصغرة ومركز الشاشة', () => {
 
   it('المرحلة المحفوظة لا تتغير عندما تكبر نافذة WebView', () => {
     expect(island).toContain('compactStageHeight');
-    expect(island).toContain('const top=Math.max(0,(compactStageHeight-TARGET.idle[1]*f)/2)');
+    expect(island).toContain('const top=compactTopInset(compactStageHeight,TARGET.idle[1],f)');
     expect(island).not.toContain('(window.innerHeight-h*f)/2');
     expect(island).toContain("isl.style.top=top+'px'");
   });
 
-  it('المستطيل التفاعلي يتبع حدود الكبسولة المرئية بعد القياس', () => {
-    expect(island).toContain('reportHitRect(visualLeft,top,vw,vh)');
+  it('منطقة النقر تتبع حدود الجزيرة ونصف قطرها بعد القياس', () => {
+    expect(island).toContain('reportHitRect(visualLeft,top,vw,vh,visualRadius)');
+    expect(island).toContain('radius:activeHitRect.radius');
     expect(island).toContain('const vw=w*f, vh=h*f');
   });
 });

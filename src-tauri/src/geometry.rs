@@ -17,8 +17,18 @@ impl Rect {
 /// ارتفاع مساحة الرسم الصغيرة داخل نافذة الجزيرة بوحدات CSS المنطقية.
 /// يتضمن خلوصًا حول جسم الكبسولة فقط، بلا امتداد أو عنصر إضافي.
 pub const COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 38.0;
-pub const CAPSULE_LOGICAL_HEIGHT: f64 = 22.0;
+pub const CAPSULE_LOGICAL_HEIGHT: f64 = 24.0;
 pub const ISLAND_MAX_LOGICAL_HEIGHT: f64 = 430.0;
+
+/// يتحقق من أبعاد حاوية الجزيرة المنطقية التي يسمح بها أمر تغيير الحجم.
+/// ارتفاعات اللوحات تشمل إزاحة الارتكاز وبكسل أمان للتقريب؛ الأدوات متغيرة الارتفاع.
+pub fn is_supported_island_resize(width: f64, height: f64) -> bool {
+  if !width.is_finite() || !height.is_finite() || height.fract() != 0.0 { return false; }
+  let widths = [44.0, 112.0, 384.0, 396.0, 400.0, 432.0];
+  let fixed_heights = [24.0, 38.0, 91.0, 178.0, 218.0];
+  let tools_height = width == 432.0 && (228.0..=395.0).contains(&height);
+  widths.contains(&width) && (fixed_heights.contains(&height) || tools_height)
+}
 
 fn safe_scale(scale: f64) -> f64 {
   if scale.is_finite() && (0.5..=4.0).contains(&scale) { scale } else { 1.0 }
@@ -35,7 +45,7 @@ pub fn compact_stage_height_px(scale: f64) -> i32 {
 }
 
 /// إزاحة مركز الكبسولة عن أعلى الشاشة بالبكسل الفيزيائي، مع إبقاء الكسر.
-/// CSS يضع جسم الكبسولة 22px في منتصف مرحلة الرسم ذات الارتفاع 38px.
+/// المركز يطابق منتصف مرحلة CSS الصغيرة؛ يُحافظ على كسور DPI قبل تقريب النافذة.
 pub fn compact_anchor_offset_px(scale: f64) -> f64 {
   (COMPACT_STAGE_LOGICAL_HEIGHT / 2.0) * safe_scale(scale)
 }
@@ -80,9 +90,19 @@ mod tests {
 
   #[test]
   fn compact_capsule_keeps_a_visible_gap_at_common_scales() {
-    assert_eq!(compact_capsule_margin_px(1.0), 8);
-    assert_eq!(compact_capsule_margin_px(1.25), 10);
-    assert_eq!(compact_capsule_margin_px(1.5), 12);
+    assert_eq!(compact_capsule_margin_px(1.0), 7);
+    assert_eq!(compact_capsule_margin_px(1.25), 9);
+    assert_eq!(compact_capsule_margin_px(1.5), 11);
+  }
+
+  #[test]
+  fn resize_contract_accepts_only_restored_and_safety_padded_sizes() {
+    for (width, height) in [(112.0, 38.0), (384.0, 218.0), (400.0, 178.0), (400.0, 218.0), (396.0, 91.0), (432.0, 228.0), (432.0, 395.0)] {
+      assert!(is_supported_island_resize(width, height), "unexpected rejection: {width}x{height}");
+    }
+    for (width, height) in [(40.0, 38.0), (100.0, 38.0), (346.0, 218.0), (384.0, 210.0), (400.0, 169.0), (432.0, 227.0), (432.0, 396.0), (432.0, 278.5)] {
+      assert!(!is_supported_island_resize(width, height), "unexpected acceptance: {width}x{height}");
+    }
   }
 
   #[test]

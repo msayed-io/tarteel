@@ -48,15 +48,15 @@ describe('التمركز: النافذة هي المرجع', () => {
   it('المعادلة تحافظ على مركز الكبسولة نفسه خلال التوسعة والانطواء', () => {
     /* أفقيًا ورأسيًا تبقى المرساة الصغيرة ثابتة؛ لا نتبع مركز النافذة الموسعة. */
     expect(html).toContain('const left=(window.innerWidth-w)/2');
-    expect(html).toContain('const top=Math.max(0,(compactStageHeight-TARGET.idle[1]*f)/2)');
+    expect(html).toContain('const top=compactTopInset(compactStageHeight,TARGET.idle[1],f)');
     expect(html).not.toContain('(window.innerHeight-h*f)/2');
   });
 
   it('المرساة ثابتة ولا تعتمد على ارتفاع الجسم أثناء النابض', () => {
     expect(html).toContain('compactStageHeight=Math.max(1,Math.round(window.innerHeight))');
     const anchoredTop=(stage,smallHeight,fit)=>Math.max(0,(stage-smallHeight*fit)/2);
-    expect(anchoredTop(38,22,1)).toBe(8);
-    expect(anchoredTop(38,22,.96)).toBeCloseTo(8.44,5);
+    expect(anchoredTop(38,24,1)).toBe(7);
+    expect(anchoredTop(38,24,.96)).toBeCloseTo(7.48,5);
   });
 
   it('لا translate سالب يزحزح المحور الأفقي', () => {
@@ -93,8 +93,8 @@ describe('تزامن حجم حاوية الجزيرة مع نافذة Tauri ال
     const start = html.indexOf('async function go(next){');
     const end = html.indexOf('/* الإقلاع:', start);
     const transition = html.slice(start, end);
-    expect(transition).toContain('if(width>host.width||height>host.height)');
-    expect(transition).toContain('await resizeHost(Math.max(width,host.width),Math.max(height,host.height))');
+    expect(transition).toContain('if(width>host.width||requiredHeight>host.height)');
+    expect(transition).toContain('await resizeHost(Math.max(width,host.width),Math.max(requiredHeight,host.height))');
     expect(transition.indexOf('await resizeHost')).toBeLessThan(transition.indexOf('state=next'));
     const resizeHost = html.split('async function resizeHost(')[1].split('function tick(now)')[0];
     expect(resizeHost).toContain("await invoke('resize_island',{width,height})");
