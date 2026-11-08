@@ -14,27 +14,30 @@ const target = (() => {
 })();
 
 describe('أحجام Dynamic Island', () => {
-  it('الخمول والموسيقى أصغر من المقاس السابق مع بقاء الكبسولة متناسبة', () => {
-    expect(target.idle).toEqual([40, 22, 11]);
-    expect(target.compact).toEqual([100, 22, 11]);
+  it('الخمول يطابق نسبة الصورة المرجعية والموسيقى مستطيل بزوايا هادئة', () => {
+    expect(target.idle).toEqual([44, 24, 12]);
+    expect(target.compact).toEqual([112, 24, 9]);
+    expect(target.idle[0] / target.idle[1]).toBeCloseTo(69 / 38, 1);
+    expect(target.compact[2]).toBeLessThan(target.compact[1] / 2);
   });
 
   it('الأوضاع الموسعة أصغر بصريًا 10% وتحتفظ بأبعاد عناصرها الداخلية', () => {
-    expect(target.full).toEqual([346, 189, 33]);
-    expect(target.prayer).toEqual([400, 169, 40]);
+    expect(target.full).toEqual([384, 210, 37]);
+    expect(target.prayer).toEqual([400, 170, 40]);
     expect(target.tools).toEqual([432, 270, 41]);
     expect(target.alert).toEqual([396, 83, 36]);
-    expect(html).toContain('[data-state=full] .full{transform:scale(.72)}');
+    expect(html).toContain('[data-state=full] .full{transform:scale(.8)}');
     expect(html).toContain('[data-state=prayer] .prayer,[data-state=tools] .tools,[data-state=alert] .alert{transform:scale(.9)}');
   });
 
-  it('أنصاف الأقطار تطابق أنصاف ارتفاع الكبسولة في الحالات الصغيرة', () => {
-    for (const key of ['idle', 'compact']) expect(target[key][2], key).toBe(target[key][1] / 2);
+  it('الخمول يحتفظ بنصف قطر كامل بينما الموسيقى ليست كبسولة', () => {
+    expect(target.idle[2]).toBe(target.idle[1] / 2);
+    expect(target.compact[2]).toBeLessThan(target.compact[1] / 2);
   });
 
   it('مرحلة الخمول تطابق قياس CSS دون تغيير ارتفاع الكبسولة', () => {
     expect(geo).toContain('COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 38.0');
-    expect(geo).toContain('CAPSULE_LOGICAL_HEIGHT: f64 = 22.0');
+    expect(geo).toContain('CAPSULE_LOGICAL_HEIGHT: f64 = 24.0');
     expect(rust).toContain('geometry::compact_stage_height_px(scale)');
     expect(rust).toContain('geometry::COMPACT_STAGE_LOGICAL_HEIGHT');
   });
@@ -44,8 +47,9 @@ describe('أحجام Dynamic Island', () => {
     expect(html).not.toContain('NECK_HEIGHT');
     expect(html).not.toContain('neckVisible');
     expect(html).toContain('.island-surface');
-    expect(html).toContain('top:8px;left:0;translate:0 0;width:40px;height:22px');
-    expect(html).toContain('reportHitRect(visualLeft,top,vw,vh)');
+    expect(html).toContain('top:7px;left:0;translate:0 0;width:44px;height:24px');
+    expect(html).toContain('reportHitRect(visualLeft,top,vw,vh,visualRadius)');
+    expect(html).toContain('radius:activeHitRect.radius');
   });
 
   it('لا يرسم CSS حدًا أو ظلًا أو إطارًا حول الكبسولة', () => {
