@@ -14,11 +14,12 @@ const target = (() => {
 })();
 
 describe('أحجام Dynamic Island', () => {
-  it('الخمول يطابق نسبة الصورة المرجعية والموسيقى مستطيل بزوايا هادئة', () => {
+  it('الخمول كبسولة والموسيقى مستطيل بحواف ناعمة وامتداد جانبي قصير', () => {
     expect(target.idle).toEqual([44, 24, 12]);
-    expect(target.compact).toEqual([112, 24, 9]);
+    expect(target.compact).toEqual([112, 24, 11]);
     expect(target.idle[0] / target.idle[1]).toBeCloseTo(69 / 38, 1);
     expect(target.compact[2]).toBeLessThan(target.compact[1] / 2);
+    expect(target.compact[1] - 2 * target.compact[2]).toBe(2);
   });
 
   it('الأوضاع الموسعة أصغر بصريًا 10% وتحتفظ بأبعاد عناصرها الداخلية', () => {
@@ -30,9 +31,10 @@ describe('أحجام Dynamic Island', () => {
     expect(html).toContain('[data-state=prayer] .prayer,[data-state=tools] .tools,[data-state=alert] .alert{transform:scale(.9)}');
   });
 
-  it('الخمول يحتفظ بنصف قطر كامل بينما الموسيقى ليست كبسولة', () => {
+  it('الخمول كامل الاستدارة بينما يبقى للموسيقى ضلع مستقيم قصير', () => {
     expect(target.idle[2]).toBe(target.idle[1] / 2);
-    expect(target.compact[2]).toBeLessThan(target.compact[1] / 2);
+    expect(target.compact[2]).toBe(11);
+    expect(target.compact[1] - 2 * target.compact[2]).toBe(2);
   });
 
   it('مرحلة الخمول تطابق قياس CSS دون تغيير ارتفاع الكبسولة', () => {

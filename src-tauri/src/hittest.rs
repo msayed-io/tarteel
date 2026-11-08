@@ -218,15 +218,15 @@ mod tests {
   #[test]
   fn native_rounding_matches_idle_and_music_shapes() {
     assert_eq!(rounded_region_ellipse_diameter(44, 24, 12), 24);
-    assert_eq!(rounded_region_ellipse_diameter(112, 24, 9), 18);
+    assert_eq!(rounded_region_ellipse_diameter(112, 24, 11), 22);
     assert_eq!(rounded_region_ellipse_diameter(46, 26, 13), 26);
-    assert_eq!(rounded_region_ellipse_diameter(114, 26, 10), 20);
+    assert_eq!(rounded_region_ellipse_diameter(114, 26, 12), 24);
   }
 
   #[test]
   fn native_region_leaves_a_one_pixel_fringe_around_the_css_edge() {
     assert_eq!(expand_for_antialias_fringe(1, 7, 44, 24, 12), (0, 6, 46, 26, 13));
-    assert_eq!(expand_for_antialias_fringe(1, 7, 112, 24, 9), (0, 6, 114, 26, 10));
+    assert_eq!(expand_for_antialias_fringe(1, 7, 112, 24, 11), (0, 6, 114, 26, 12));
   }
 
   #[test]

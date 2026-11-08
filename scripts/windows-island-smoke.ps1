@@ -9,13 +9,7 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $statusPath = Join-Path $outDir 'status.txt'
 $logPath = Join-Path $env:APPDATA 'com.tarteel.desktop/island-geometry.jsonl'
 $process = $null
-$previousWebViewArgs = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
-$webViewRegistryPath = 'Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
-$webViewRegistryValueName = [System.IO.Path]::GetFileName($ExePath)
-$webViewRegistryValueExisted = $false
-$webViewRegistryPreviousValue = $null
-$webViewRegistryPreviousKind = $null
-$webViewRegistryCreatedKeys = @()
+$previousSmokeFlag = $env:TARTEEL_WINDOWS_SMOKE_TEST
 
 function Set-Status([string]$Value) {
   Set-Content -Path $statusPath -Value $Value -Encoding UTF8
@@ -165,7 +159,70 @@ function Assert-MusicCompactBounds($Record) {
   if ([Math]::Abs($width - 112.0) -gt 0.75 -or [Math]::Abs($height - 24.0) -gt 0.75) {
     throw "The visible music compact capsule changed size: $width x $height CSS px; expected 112 x 24."
   }
-  Write-Host "Verified visible music compact capsule remains 112x24 CSS px."
+  Write-Host "Verified visible music compact rounded rectangle remains 112x24 CSS px."
+}
+
+function Get-PixelLuma($Color) {
+  return (0.2126 * [double]$Color.R + 0.7152 * [double]$Color.G + 0.0722 * [double]$Color.B)
+}
+
+function Assert-MusicRoundedCorners($Record, [string]$ScreenshotPath) {
+  $rect = $Record.capsule_rect_screen
+  $scale = [double]$Record.scale_factor
+  if ($null -eq $rect -or $scale -le 0) { throw 'Music pixel check is missing screen bounds or a valid DPI scale.' }
+  $left = [int][Math]::Round([double]$rect.left)
+  $top = [int][Math]::Round([double]$rect.top)
+  $right = [int][Math]::Round([double]$rect.right)
+  $bottom = [int][Math]::Round([double]$rect.bottom)
+  $radius = [int][Math]::Round(11.0 * $scale)
+  $bitmap = [System.Drawing.Bitmap]::FromFile($ScreenshotPath)
+  try {
+    if ($left -lt 3 -or $top -lt 2 -or $right + 2 -ge $bitmap.Width -or $bottom + 2 -ge $bitmap.Height) {
+      throw "Music capsule ($left,$top)-($right,$bottom) is outside screenshot $($bitmap.Width)x$($bitmap.Height)."
+    }
+    $midY = [int][Math]::Round(($top + $bottom) / 2.0)
+    $inset = [int][Math]::Round(4.0 * $scale)
+    $insideLeftColor = $bitmap.GetPixel($left + $inset, $midY)
+    $insideRightColor = $bitmap.GetPixel($right - $inset - 1, $midY)
+    $insideLeft = Get-PixelLuma $insideLeftColor
+    $insideRight = Get-PixelLuma $insideRightColor
+    if ($insideLeft -gt 80 -or $insideRight -gt 80) {
+      throw "Music surface interior is not dark at both edges: left=$insideLeft, right=$insideRight."
+    }
+
+    $corners = @(
+      [pscustomobject]@{ Name = 'top-left'; X = $left; Y = $top; SX = 1; SY = 1 },
+      [pscustomobject]@{ Name = 'top-right'; X = $right - 1; Y = $top; SX = -1; SY = 1 },
+      [pscustomobject]@{ Name = 'bottom-left'; X = $left; Y = $bottom - 1; SX = 1; SY = -1 },
+      [pscustomobject]@{ Name = 'bottom-right'; X = $right - 1; Y = $bottom - 1; SX = -1; SY = -1 }
+    )
+    foreach ($corner in $corners) {
+      $cornerColor = $bitmap.GetPixel($corner.X + $corner.SX, $corner.Y + $corner.SY)
+      $backgroundColor = $bitmap.GetPixel($corner.X - 3 * $corner.SX, $corner.Y + $corner.SY)
+      $cornerLuma = Get-PixelLuma $cornerColor
+      $backgroundLuma = Get-PixelLuma $backgroundColor
+      if ($backgroundLuma -lt 140) { throw "The Windows title-bar backdrop behind the $($corner.Name) corner is not high-contrast enough to validate the rendered curve (luma=$backgroundLuma)." }
+      if ([Math]::Abs($cornerLuma - $backgroundLuma) -gt 25) {
+        throw "The $($corner.Name) pixel is dark instead of following the background outside the rounded rectangle: corner=$cornerLuma, background=$backgroundLuma."
+      }
+
+      $antialiasedPixels = 0
+      for ($depth = 0; $depth -le 2; $depth++) {
+        for ($offset = 1; $offset -le $radius + 2; $offset++) {
+          $sampleX = $corner.X + $corner.SX * $offset
+          $sampleY = $corner.Y + $corner.SY * $depth
+          $sampleColor = $bitmap.GetPixel($sampleX, $sampleY)
+          $sampleLuma = Get-PixelLuma $sampleColor
+          if ($sampleLuma -gt 3 -and $sampleLuma -lt ($backgroundLuma - 3)) { $antialiasedPixels++ }
+        }
+      }
+      if ($antialiasedPixels -lt 1) { throw "No partially blended edge pixel was found along the $($corner.Name) curve; the edge may be hard-clipped." }
+      Write-Host "Verified $($corner.Name) rendered corner: outside luma=$backgroundLuma, corner luma=$cornerLuma, antialiased edge pixels=$antialiasedPixels."
+    }
+    Write-Host "Verified music rounded-rectangle pixels at radius $radius physical px; both interior edge probes remain dark."
+  } finally {
+    $bitmap.Dispose()
+  }
 }
 
 function Assert-FullStateBounds($Record) {
@@ -202,7 +259,7 @@ function Assert-ClickThroughOutsideCapsule($Record) {
 function Assert-ClickThroughRoundedCorner($Record) {
   $capsule = $Record.capsule_rect_screen
   if ($null -eq $capsule -or $null -eq $Record.window_handle) { throw 'Collapsed geometry row is missing the island bounds or HWND.' }
-  $offset = [int][Math]::Round(5.0 * [double]$Record.scale_factor)
+  $offset = [int][Math]::Round(2.0 * [double]$Record.scale_factor)
   $x = [int][Math]::Round([double]$capsule.left) + $offset
   $y = [int][Math]::Round([double]$capsule.top) + $offset
   $underlying = [TarteelUiSmokeNative]::WindowFromPoint([TarteelScreenPoint]@{ X = $x; Y = $y })
@@ -226,125 +283,19 @@ public static class TarteelUiSmokeNative {
 }
 '@
 
-function Wait-ForWebViewCdpTarget([int]$Port, [int]$TimeoutSeconds) {
-  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-  $lastError = 'No page target was returned.'
-  $endpoints = @("http://127.0.0.1:$Port/json/list", "http://localhost:$Port/json/list", "http://127.0.0.1:$Port/json", "http://localhost:$Port/json")
-  do {
-    foreach ($endpoint in $endpoints) {
-      try {
-        $targets = @(Invoke-RestMethod -Uri $endpoint -TimeoutSec 1 -ErrorAction Stop)
-        $pages = @($targets | Where-Object { $_.type -eq 'page' -and -not [string]::IsNullOrWhiteSpace($_.webSocketDebuggerUrl) })
-        if ($pages.Count -gt 0) {
-          $main = @($pages | Where-Object { $_.url -notmatch 'island\.html' })
-          if ($main.Count -gt 0) { return $main[0] }
-          return $pages[0]
-        }
-        $lastError = "Endpoint $endpoint returned no debuggable page targets."
-      } catch { $lastError = "$endpoint : $($_.Exception.Message)" }
-    }
-    Start-Sleep -Milliseconds 250
-  } while ((Get-Date) -lt $deadline)
-  throw "Timed out waiting for the local WebView2 CDP target on port $Port. Last probe: $lastError"
-}
-
-function Invoke-WebViewCdpExpression($Target, [string]$Expression) {
-  $socket = [System.Net.WebSockets.ClientWebSocket]::new()
-  $receiveTimeout = $null
-  try {
-    $socket.ConnectAsync([Uri]$Target.webSocketDebuggerUrl, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
-    $message = @{ id = 1; method = 'Runtime.evaluate'; params = @{ expression = $Expression; awaitPromise = $true; returnByValue = $true } } | ConvertTo-Json -Compress -Depth 8
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($message)
-    $sendSegment = [System.ArraySegment[byte]]::new($bytes)
-    $socket.SendAsync($sendSegment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
-    $receiveTimeout = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(12))
-    $buffer = [byte[]]::new(8192)
-    $builder = [System.Text.StringBuilder]::new()
-    $deadline = [DateTime]::UtcNow.AddSeconds(12)
-    while ([DateTime]::UtcNow -lt $deadline) {
-      $receiveSegment = [System.ArraySegment[byte]]::new($buffer)
-      $received = $socket.ReceiveAsync($receiveSegment, $receiveTimeout.Token).GetAwaiter().GetResult()
-      if ($received.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) { throw 'WebView2 CDP closed the connection before returning the evaluation result.' }
-      $null = $builder.Append([System.Text.Encoding]::UTF8.GetString($buffer, 0, $received.Count))
-      if (-not $received.EndOfMessage) { continue }
-      $response = $builder.ToString() | ConvertFrom-Json
-      $builder.Clear() | Out-Null
-      if ($response.id -ne 1) { continue }
-      if ($response.error) { throw "WebView2 CDP evaluation failed: $($response.error.message)" }
-      if ($response.result.exceptionDetails) { throw "WebView2 JavaScript evaluation failed: $($response.result.exceptionDetails.text)" }
-      return $response.result.result.value
-    }
-    throw 'Timed out receiving the WebView2 CDP evaluation result.'
-  } finally {
-    if ($receiveTimeout) { $receiveTimeout.Dispose() }
-    if ($socket.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-      try { $socket.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, 'smoke complete', [System.Threading.CancellationToken]::None).GetAwaiter().GetResult() } catch { }
-    }
-    $socket.Dispose()
-  }
-}
-
-function Set-SmokePlayerState($Target, [string]$FileName) {
-  $payload = @{
-    state = if ([string]::IsNullOrWhiteSpace($FileName)) { 'idle' } else { 'compact' }
-    playing = $false
-    fileName = $FileName
-    artist = 'Windows smoke'
-    cover = $null
-    duration = 60
-    position = 0
-    speed = 1
-    sleepMode = 'off'
-    sleepMinutes = 0
-    prayerAlert = ''
-  } | ConvertTo-Json -Compress -Depth 5
-  $expression = "if(typeof window.__TAURI_INTERNALS__==='undefined'){'tauri-missing'}else{window.__TAURI_INTERNALS__.invoke('plugin:event|emit',{event:'player-state',payload:$payload}).then(()=> 'emitted')}"
-  $result = Invoke-WebViewCdpExpression $Target $expression
-  if ($result -ne 'emitted') { throw "Could not emit the smoke-only player-state event through Tauri IPC: $result" }
-  Write-Host "Emitted smoke-only player-state event for '$FileName' through the local WebView2 CDP connection."
-}
-
 try {
   if (-not (Test-Path $ExePath)) { throw "Tarteel executable not found: $ExePath" }
   if ([TarteelUiSmokeNative]::GetSystemMetrics(0) -le 0 -or [TarteelUiSmokeNative]::GetSystemMetrics(1) -le 0) {
     throw 'Windows runner exposes no interactive display; refusing to mark native geometry verification as passed.'
   }
   if (Test-Path $logPath) { Remove-Item -Force $logPath }
-  $portProbe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
-  try { $portProbe.Start(); $cdpPort = [int]$portProbe.LocalEndpoint.Port } finally { $portProbe.Stop() }
-  $registryRoot = [Microsoft.Win32.Registry]::CurrentUser
-  $registryCandidates = @('Software\Policies', 'Software\Policies\Microsoft', 'Software\Policies\Microsoft\Edge', 'Software\Policies\Microsoft\Edge\WebView2', $webViewRegistryPath)
-  foreach ($candidatePath in $registryCandidates) {
-    $existingKey = $registryRoot.OpenSubKey($candidatePath)
-    if ($null -eq $existingKey) { $webViewRegistryCreatedKeys += $candidatePath }
-    else { $existingKey.Close() }
-  }
-  $policyKey = $registryRoot.CreateSubKey($webViewRegistryPath)
-  if ($null -eq $policyKey) { throw 'Could not create the temporary per-app WebView2 debugging policy on the CI runner.' }
-  $webViewRegistryValueExisted = $policyKey.GetValueNames() -contains $webViewRegistryValueName
-  if ($webViewRegistryValueExisted) {
-    $webViewRegistryPreviousValue = $policyKey.GetValue($webViewRegistryValueName)
-    $webViewRegistryPreviousKind = $policyKey.GetValueKind($webViewRegistryValueName)
-  }
-  $policyKey.SetValue($webViewRegistryValueName, "--remote-debugging-port=$cdpPort", [Microsoft.Win32.RegistryValueKind]::String)
-  $policyKey.Close()
-  $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$cdpPort"
+  $env:TARTEEL_WINDOWS_SMOKE_TEST = '1'
   try {
     $process = Start-Process -FilePath (Resolve-Path $ExePath) -WorkingDirectory (Split-Path (Resolve-Path $ExePath)) -PassThru
   } finally {
-    if ($null -eq $previousWebViewArgs) { Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue }
-    else { $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousWebViewArgs }
+    if ($null -eq $previousSmokeFlag) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_TEST -ErrorAction SilentlyContinue }
+    else { $env:TARTEEL_WINDOWS_SMOKE_TEST = $previousSmokeFlag }
   }
-  $cdpTarget = Wait-ForWebViewCdpTarget $cdpPort 25
-  $tauriIpcReady = $false
-  for ($attempt = 1; $attempt -le 20; $attempt++) {
-    try {
-      if ((Invoke-WebViewCdpExpression $cdpTarget "typeof window.__TAURI_INTERNALS__") -eq 'object') { $tauriIpcReady = $true; break }
-    } catch { }
-    Start-Sleep -Milliseconds 500
-  }
-  if (-not $tauriIpcReady) { throw 'Connected to WebView2 CDP, but the Tauri IPC bridge did not become available.' }
-  Write-Host "Connected to the local WebView2 CDP target '$($cdpTarget.title)' on port $cdpPort."
   $idle = Wait-ForRow 'idle' 35
   if ($idle.aligned_within_half_pixel -ne $true) { throw "Idle alignment was not verified: $($idle.aligned_within_half_pixel)" }
   if ($null -eq $idle.capsule_rect_screen -or $null -eq $idle.capsule_anchor_center_screen) { throw 'Idle row did not include measured capsule and monitor-origin anchor coordinates.' }
@@ -355,14 +306,10 @@ try {
   Assert-BlackCapsuleCenter $idle $idleShot
   Copy-Item -Force $logPath (Join-Path $outDir 'geometry-after-idle.jsonl')
 
-  $music = $null
-  for ($attempt = 1; $attempt -le 3; $attempt++) {
-    Set-SmokePlayerState $cdpTarget 'Smoke test recitation.wav'
-    try { $music = Wait-ForRow 'compact' 6 ([long]$idle.timestamp_unix_ms); break }
-    catch { if ($attempt -eq 3) { throw }; Write-Warning "Waiting for the smoke player-state event (attempt $attempt): $($_.Exception.Message)"; Start-Sleep -Milliseconds 250 }
-  }
-  if ($null -eq $music) { throw 'The smoke player-state event did not open music compact mode.' }
+  $music = Wait-ForRow 'compact' 25 ([long]$idle.timestamp_unix_ms)
   Assert-MusicCompactBounds $music
+  $musicShot = Capture-Top 'music-compact-before-full'
+  Assert-MusicRoundedCorners $music $musicShot
   Click-RectCenter $music
   $full = Wait-ForRow 'full' 15 ([long]$music.timestamp_unix_ms) -Expanded
   Assert-FullStateBounds $full
@@ -379,9 +326,9 @@ try {
   Assert-MusicCompactBounds $musicCollapsed
   Assert-ClickThroughOutsideCapsule $musicCollapsed
   Assert-ClickThroughRoundedCorner $musicCollapsed
-  $musicShot = Capture-Top 'music-compact'
-  Set-SmokePlayerState $cdpTarget ''
-  $idleAfterMusic = Wait-ForRow 'idle' 15 ([long]$musicCollapsed.timestamp_unix_ms)
+  $musicCollapsedShot = Capture-Top 'music-compact-after-full'
+  Assert-MusicRoundedCorners $musicCollapsed $musicCollapsedShot
+  $idleAfterMusic = Wait-ForRow 'idle' 60 ([long]$musicCollapsed.timestamp_unix_ms)
   Assert-Anchor $idleAfterMusic
   Assert-RenderGutter $idleAfterMusic
 
@@ -411,7 +358,7 @@ try {
     'PASS: launched the built Tarteel Windows executable.',
     "PASS: measured idle capsule offset before correction=$($idle.pre_alignment.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress); after correction=$($collapsed.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress).",
     'PASS: visible idle capsule remains 44x24 CSS px with a transparent render gutter on every side.',
-    'PASS: music compact capsule remains 112x24 CSS px; rounded-corner and outside hit-testing pass through to the window behind.',
+    'PASS: music compact rounded rectangle remains 112x24 CSS px with radius 11; all four screenshot corners and antialiased edge pixels pass, and outside hit-testing reaches the window behind.',
     "PASS: physical click expanded the full player to 384x210 CSS px with a measured lower gutter; top-anchor range=$fullMotionSpan CSS px across $($full.motion_sample_count) frames.",
     "PASS: physical click expanded prayer state without clipping its bottom edge; lower gutter verified; top-anchor range=$motionSpan CSS px across $($prayer.motion_sample_count) frames.",
     'PASS: physical mouse click returned to idle, the island remained centered, and native hit-testing passed through outside its rounded corner and edge.',
@@ -425,26 +372,7 @@ try {
   exit 1
 } finally {
   if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
-  if ($null -eq $previousWebViewArgs) { Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue }
-  else { $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousWebViewArgs }
-  $registryCleanupError = $null
-  try {
-    $registryRoot = [Microsoft.Win32.Registry]::CurrentUser
-    $policyKey = $registryRoot.OpenSubKey($webViewRegistryPath, $true)
-    if ($policyKey) {
-      if ($webViewRegistryValueExisted) { $policyKey.SetValue($webViewRegistryValueName, $webViewRegistryPreviousValue, $webViewRegistryPreviousKind) }
-      else { $policyKey.DeleteValue($webViewRegistryValueName, $false) }
-      $policyKey.Close()
-    }
-    foreach ($candidatePath in @($webViewRegistryCreatedKeys | Sort-Object { $_.Length } -Descending)) {
-      $candidateKey = $registryRoot.OpenSubKey($candidatePath, $true)
-      if ($candidateKey) {
-        $isEmpty = $candidateKey.GetValueNames().Length -eq 0 -and $candidateKey.GetSubKeyNames().Length -eq 0
-        $candidateKey.Close()
-        if ($isEmpty) { $registryRoot.DeleteSubKey($candidatePath, $false) }
-      }
-    }
-  } catch { $registryCleanupError = $_.Exception.Message; Set-Status 'FAIL' }
+  if ($null -eq $previousSmokeFlag) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_TEST -ErrorAction SilentlyContinue }
+  else { $env:TARTEEL_WINDOWS_SMOKE_TEST = $previousSmokeFlag }
   if (Test-Path $logPath) { Copy-Item -Force $logPath (Join-Path $outDir 'geometry-final.jsonl') }
-  if ($registryCleanupError) { throw "Could not restore the temporary WebView2 registry policy: $registryCleanupError" }
 }

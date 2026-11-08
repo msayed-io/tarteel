@@ -88,7 +88,7 @@ const RM=matchMedia('(prefers-reduced-motion:reduce)').matches,mk=(x,k,c)=>({x,v
  * صُغّرت الحالتان المدمجتان، وأُزيل الامتداد السفلي المنفصل.
  * الحالات الموسعة أصغر بصريًا بنسبة 10% مع الاحتفاظ بتوزيع عناصرها.
  */
-const TARGET={idle:[44,24,12],compact:[112,24,9],full:[384,210,37],prayer:[400,170,40],tools:[432,270,41],alert:[396,83,36]};
+const TARGET={idle:[44,24,12],compact:[112,24,11],full:[384,210,37],prayer:[400,170,40],tools:[432,270,41],alert:[396,83,36]};
 const initialContentViewport=contentViewportSize(window.innerWidth,window.innerHeight);
 let raf=0,last=0,state='idle',back='compact',player={playing:false,duration:0,position:0,fileName:'',artist:'',cover:null,speed:1,sleepMode:'off',sleepMinutes:0},prayerState={schedule:null,preferences:{showNext:false,pauseAtAdhan:true},alert:null},scrub=false,compactStageHeight=initialContentViewport.height,host={...initialContentViewport},transitionId=0,hostSeq=0,alertTimer=0,screenFit=1,motionTrace=null,lastMotionTrace=null;
 /* المستطيل التفاعلي = حدود الجزيرة المرئية فقط.

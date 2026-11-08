@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use tauri::webview::Color;
-use tauri::{Emitter, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Listener, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_notification::NotificationExt;
 use walkdir::WalkDir;
 
@@ -615,6 +615,33 @@ pub fn run() {
       Some(vec!["--hidden"]),
     ))
     .setup(|app| {
+      /* اختبار Windows فقط: متغير عملية مؤقت يجهز حالة موسيقى اصطناعية عبر
+         الحدث نفسه الذي تستخدمه الواجهة. لا يُفعّل هذا المسار في التشغيل العادي. */
+      if std::env::var("TARTEEL_WINDOWS_SMOKE_TEST").ok().as_deref() == Some("1") {
+        let smoke_handle = app.handle().clone();
+        let _ = app.once_any("island-ready", move |_| {
+          let smoke_handle = smoke_handle.clone();
+          thread::spawn(move || {
+            thread::sleep(Duration::from_secs(2));
+            if let Err(cause) = smoke_handle.emit("player-state", serde_json::json!({
+              "state": "compact", "playing": false, "fileName": "Smoke test recitation.wav",
+              "artist": "Windows smoke", "cover": null, "duration": 60, "position": 0,
+              "speed": 1, "sleepMode": "off", "sleepMinutes": 0, "prayerAlert": ""
+            })) {
+              eprintln!("Tarteel Windows smoke music state emit failed: {cause}");
+              return;
+            }
+            thread::sleep(Duration::from_secs(45));
+            if let Err(cause) = smoke_handle.emit("player-state", serde_json::json!({
+              "state": "idle", "playing": false, "fileName": "", "artist": "",
+              "cover": null, "duration": 0, "position": 0, "speed": 1,
+              "sleepMode": "off", "sleepMinutes": 0, "prayerAlert": ""
+            })) {
+              eprintln!("Tarteel Windows smoke idle state emit failed: {cause}");
+            }
+          });
+        });
+      }
       /* الحجم يُحدد هنا لا في الملف: النافذة كانت تُبنى بلا `inner_size`
          فتحصل على الحجم الافتراضي (~800×600)، فيصبح مركزها (400, 300) بدل
          (0, 0). وكل تغيير حجم لاحق يُبقى المركز ثابتًا، فتظهر الجزيرة في
