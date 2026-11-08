@@ -111,6 +111,26 @@ function Assert-Anchor($Record) {
   Write-Host "Verified capsule center against monitor-origin anchor ($($anchor.x),$($anchor.y)): dx=$dx, dy=$dy."
 }
 
+function Assert-RenderGutter($Record) {
+  $rect = $Record.capsule_rect_client
+  $size = $Record.client_size
+  $scale = [double]$Record.scale_factor
+  if ($null -eq $rect -or $null -eq $size -or $scale -le 0) { throw 'Idle geometry is missing the client bounds needed to verify the transparent render gutter.' }
+  $visualWidth = ([double]$rect.right - [double]$rect.left) / $scale
+  $visualHeight = ([double]$rect.bottom - [double]$rect.top) / $scale
+  if ([Math]::Abs($visualWidth - 44.0) -gt 0.75 -or [Math]::Abs($visualHeight - 24.0) -gt 0.75) {
+    throw "The visible idle capsule changed size: $visualWidth x $visualHeight CSS px; expected 44 x 24."
+  }
+  $left = [double]$rect.left
+  $top = [double]$rect.top
+  $rightGap = [double]$size.width - [double]$rect.right
+  $bottomGap = [double]$size.height - [double]$rect.bottom
+  if ($left -lt 1.0 -or $top -lt 1.0 -or $rightGap -lt 1.0 -or $bottomGap -lt 1.0) {
+    throw "The visible capsule has no full physical-pixel render gutter: left=$left, top=$top, right=$rightGap, bottom=$bottomGap."
+  }
+  Write-Host "Verified 44x24 CSS-pixel visible capsule with a >=1 physical-pixel transparent gutter; margins=($left,$top,$rightGap,$bottomGap)."
+}
+
 function Assert-ExpandedBoundsContained($Record) {
   $rect = $Record.capsule_rect_client
   $size = $Record.client_size
@@ -183,6 +203,7 @@ try {
   if ($null -eq $idle.capsule_rect_screen -or $null -eq $idle.capsule_anchor_center_screen) { throw 'Idle row did not include measured capsule and monitor-origin anchor coordinates.' }
   if ($null -eq $idle.pre_alignment -or $null -eq $idle.pre_alignment.capsule_center_error_from_anchor_px) { throw 'The idle row did not preserve the measured capsule offset before correction.' }
   Assert-Anchor $idle
+  Assert-RenderGutter $idle
   $idleShot = Capture-Top 'idle-before-click'
   Assert-BlackCapsuleCenter $idle $idleShot
   Copy-Item -Force $logPath (Join-Path $outDir 'geometry-after-idle.jsonl')
@@ -202,6 +223,7 @@ try {
   $collapsed = Wait-ForRow 'idle' 15 ([long]$prayer.timestamp_unix_ms)
   if ($collapsed.aligned_within_half_pixel -ne $true) { throw "Collapsed capsule is outside the 0.5px monitor-anchor tolerance: $($collapsed.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress)" }
   Assert-Anchor $collapsed
+  Assert-RenderGutter $collapsed
   Assert-ClickThroughOutsideCapsule $collapsed
   Assert-ClickThroughRoundedCorner $collapsed
   $collapsedShot = Capture-Top 'idle-after-collapse'
@@ -211,6 +233,7 @@ try {
   $summary = @(
     'PASS: launched the built Tarteel Windows executable.',
     "PASS: measured idle capsule offset before correction=$($idle.pre_alignment.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress); after correction=$($collapsed.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress).",
+    'PASS: visible idle capsule remains 44x24 CSS px with a transparent render gutter on every side.',
     "PASS: physical click expanded prayer state without clipping its bottom edge; top-anchor range=$motionSpan CSS px across $($prayer.motion_sample_count) frames.",
     'PASS: physical mouse click returned to idle, the island remained centered, and native hit-testing passed through outside its rounded corner and edge.',
     "Display: $($collapsed.monitor_rc_monitor.right - $collapsed.monitor_rc_monitor.left)x$($collapsed.monitor_rc_monitor.bottom - $collapsed.monitor_rc_monitor.top); scale_factor=$($collapsed.scale_factor); native_dpi=$($collapsed.native_dpi)."

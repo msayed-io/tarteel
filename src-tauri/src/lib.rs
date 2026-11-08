@@ -414,7 +414,10 @@ async fn apply_island_native_region(
   island.run_on_main_thread(move || {
     let hwnd = windows::Win32::Foundation::HWND(raw_hwnd as *mut core::ffi::c_void);
     let result = match region {
-      Some((x, y, width, height, radius)) => hittest::set_collapsed_window_region(hwnd, x, y, width, height, radius),
+      Some((x, y, width, height, radius)) => {
+        let bounds = hittest::expand_for_antialias_fringe(x, y, width, height, radius);
+        hittest::set_collapsed_window_region(hwnd, bounds.0, bounds.1, bounds.2, bounds.3, bounds.4)
+      },
       None => hittest::clear_window_region(hwnd),
     };
     let _ = tx.send(result);
@@ -483,9 +486,9 @@ async fn set_island_pass_through(enabled: bool, app: tauri::AppHandle) -> Result
 
 #[tauri::command]
 fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
-  /* ارتفاع النافذة يشمل إزاحة الارتكاز وبكسل أمان بعد أبعاد TARGET. */
+  /* أبعاد الأمر هي أبعاد النافذة الفعلية وتشمل هامش الرسم الشفاف. */
   if !geometry::is_supported_island_resize(width, height) {
-    return Err("رفضت أبعادًا غير معتمدة لنافذة الجزيرة".into());
+    return Err(format!("رفضت أبعاد نافذة الجزيرة {width}×{height} CSS px: خارج الحدود الآمنة"));
   }
   let island = app.get_webview_window("island").ok_or_else(|| "نافذة الجزيرة غير متاحة".to_string())?;
   let monitor = island.current_monitor().map_err(|e| format!("تعذر تحديد شاشة الجزيرة: {e}"))?
@@ -498,7 +501,7 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
   /* أبقِ نافذة WebView على الأقل بارتفاع مسرح الخمول الصغير، ثم وسّعها
      قبل انتقال الحالة. هذه مساحة رسم للجزيرة فقط ولا تُحجز من Windows. */
   let target_width = (width * scale).round() as u32;
-  let floor = geometry::compact_stage_height_px(scale).max(1) as u32;
+  let floor = geometry::compact_window_height_px(scale).max(1) as u32;
   let desired = (height * scale).round() as u32;
   let target_height = desired.max(floor);
 
@@ -507,7 +510,7 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
 
   let target = island.clone();
   island.run_on_main_thread(move || {
-    /* قبل القياس: الصبغة أُزيلت منذ الإقلاع، فالمستطيل المرئي = المطلوب. */
+    /* الأبعاد المطلوبة تشمل الهامش الشفاف وتُطبّق كما هي على النافذة بلا إطار. */
     if let Err(e) = apply_island_bounds(&target, left, top, target_width, target_height) {
       eprintln!("Tarteel island bounds could not be applied: {e}");
     }
@@ -515,15 +518,15 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
   Ok(())
 }
 
-/// حجم نافذة الجزيرة عند الإقلاع: عرض الكبسولة الصغيرة × مسرح الخمول.
+/// حجم نافذة الرسم عند الإقلاع: مساحة الخمول المرئية مع الهامش الشفاف حولها.
 /// تحديده قبل الإظهار يمنع انتقال المركز من حجم WebView الافتراضي.
 fn island_boot_size_logical() -> (f64, f64) {
-  (44.0, geometry::COMPACT_STAGE_LOGICAL_HEIGHT)
+  (geometry::compact_window_width_logical(), geometry::compact_window_height_logical())
 }
 
 fn island_bounds_from_monitor(monitor_left: i32, monitor_top: i32, monitor_width: i32, scale: f64) -> (i32, i32, i32, i32) {
-  let width = (44.0 * scale).round() as i32;
-  let height = geometry::compact_stage_height_px(scale);
+  let width = geometry::compact_window_width_px(scale);
+  let height = geometry::compact_window_height_px(scale);
   let (x, y) = geometry::island_origin(monitor_left, monitor_top, monitor_width, width);
   (x, y, width, height)
 }
@@ -729,8 +732,8 @@ mod island_tests {
     for scale in [1.0, 1.25, 1.5] {
       let (x, y, w, h) = island_bounds_from_monitor(0, 0, 1920, scale);
       assert_eq!(y, 0, "الجزيرة تبدأ من أصل الشاشة المختارة");
-      assert_eq!(w, (44.0 * scale).round() as i32, "العرض المطلوب = 44 منطقية");
-      assert_eq!(h, geometry::compact_stage_height_px(scale), "النافذة تطابق مسرح CSS الصغير");
+      assert_eq!(w, geometry::compact_window_width_px(scale), "النافذة تشمل الهامش الشفاف");
+      assert_eq!(h, geometry::compact_window_height_px(scale), "النافذة تشمل الهامش الشفاف");
       assert!(x > 0 && x + w < 1920, "متمركزة أفقياً");
       let right_margin = 1920 - w - x;
       assert!((right_margin - x).abs() <= 1, "النافذتان متساويتان إلى أقرب بكسل فيزيائي");
@@ -740,16 +743,16 @@ mod island_tests {
   }
 
   #[test]
-  fn island_boot_size_is_explicit_and_uses_the_compact_stage() {
-    assert_eq!(island_boot_size_logical(), (44.0, 38.0));
+  fn island_boot_size_includes_the_transparent_gutter() {
+    assert_eq!(island_boot_size_logical(), (46.0, 40.0));
   }
 
   #[test]
-  fn compact_stage_height_matches_css_at_every_scale() {
+  fn transparent_window_gutter_preserves_css_stage_at_every_scale() {
     for dpi in [96u32, 120, 144, 192] {
       let scale = geometry::scale_from_dpi(dpi);
       let (_, _, _, h) = island_bounds_from_monitor(0, 0, 1920, scale);
-      assert_eq!(h, (38.0 * scale).round() as i32, "dpi {dpi}");
+      assert_eq!(h, (40.0 * scale).round() as i32, "dpi {dpi}");
     }
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compactTopInset, requiredViewportHeight } from '../src/engine/island-geometry.js';
+import { compactTopInset, contentViewportSize, nativeWindowSize, requiredViewportHeight } from '../src/engine/island-geometry.js';
 
 describe('مساحة نافذة Dynamic Island الموسعة', () => {
   it('تحسب إزاحة الارتكاز الصغيرة من مرحلة CSS المحفوظة', () => {
@@ -12,6 +12,22 @@ describe('مساحة نافذة Dynamic Island الموسعة', () => {
     expect(requiredViewportHeight(170, 38, 24)).toBe(178);
     expect(requiredViewportHeight(83, 38, 24)).toBe(91);
     expect(requiredViewportHeight(387, 38, 24)).toBe(395);
+  });
+
+  it('تحافظ على مساحة الرسم المرئية داخل حاشية شفافة لا تصغّر الكبسولة', () => {
+    expect(contentViewportSize(46, 40)).toEqual({ width: 44, height: 38 });
+    expect(nativeWindowSize(44, 38)).toEqual({ width: 46, height: 40 });
+    expect(nativeWindowSize(400, requiredViewportHeight(170, 38, 24))).toEqual({ width: 402, height: 180 });
+  });
+
+  it('تحوّل ارتفاعات الحالات المتغيرة مع fit إلى أبعاد نافذة فعلية محدودة', () => {
+    for (const fit of [1, 0.95, 0.9, 0.8, 0.45]) {
+      const viewportHeight = requiredViewportHeight(170, 38, 24, fit);
+      const windowSize = nativeWindowSize(400, viewportHeight);
+      expect(windowSize.width).toBe(402);
+      expect(windowSize.height).toBe(viewportHeight + 2);
+      expect(windowSize.height).toBeGreaterThanOrEqual(180);
+    }
   });
 
   it('تضمن بقاء الحد السفلي للرسم داخل مساحة WebView عند مقاييس شائعة', () => {

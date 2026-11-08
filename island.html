@@ -77,7 +77,7 @@
 <script type="module">
 import { emit, listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
-import { compactTopInset, requiredViewportHeight } from './src/engine/island-geometry.js';
+import { compactTopInset, contentViewportSize, nativeWindowSize, requiredViewportHeight } from './src/engine/island-geometry.js';
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)],isl=$('#isl'),fill=$('#fill'),tc=$('#tc'),rem=$('#tr'),bar=$('#bar'),pp=$('#pp'),toolsEl=$('.layer.tools');
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v)),toArabic=v=>String(v).replace(/\d/g,d=>'٠١٢٣٤٥٦٧٨٩'[d]);
 const fmt=s=>{s=Math.max(0,Math.floor(Number(s)||0));return toArabic(Math.floor(s/60)+':'+String(s%60).padStart(2,'0'))};
@@ -89,7 +89,8 @@ const RM=matchMedia('(prefers-reduced-motion:reduce)').matches,mk=(x,k,c)=>({x,v
  * الحالات الموسعة أصغر بصريًا بنسبة 10% مع الاحتفاظ بتوزيع عناصرها.
  */
 const TARGET={idle:[44,24,12],compact:[112,24,9],full:[384,210,37],prayer:[400,170,40],tools:[432,270,41],alert:[396,83,36]};
-let raf=0,last=0,state='idle',back='compact',player={playing:false,duration:0,position:0,fileName:'',artist:'',cover:null,speed:1,sleepMode:'off',sleepMinutes:0},prayerState={schedule:null,preferences:{showNext:false,pauseAtAdhan:true},alert:null},scrub=false,compactStageHeight=Math.max(1,Math.round(window.innerHeight)),host={width:Math.max(1,Math.round(window.innerWidth)),height:compactStageHeight},transitionId=0,hostSeq=0,alertTimer=0,screenFit=1,motionTrace=null,lastMotionTrace=null;
+const initialContentViewport=contentViewportSize(window.innerWidth,window.innerHeight);
+let raf=0,last=0,state='idle',back='compact',player={playing:false,duration:0,position:0,fileName:'',artist:'',cover:null,speed:1,sleepMode:'off',sleepMinutes:0},prayerState={schedule:null,preferences:{showNext:false,pauseAtAdhan:true},alert:null},scrub=false,compactStageHeight=initialContentViewport.height,host={...initialContentViewport},transitionId=0,hostSeq=0,alertTimer=0,screenFit=1,motionTrace=null,lastMotionTrace=null;
 /* المستطيل التفاعلي = حدود الجزيرة المرئية فقط.
    كل ما حولها داخل النافذة يصبح شفافًا للنقر، فلا تبتلع النافذة نقرات
    المستخدم على التطبيقات التي تحتها. القيمة تُرسل بالوحدات المنطقية
@@ -141,7 +142,7 @@ function apply(){
    نافذة سبق أن توسعت، يقصّ النظام المساحة الخارجية عند حدود الكبسولة. */
 function fitToScreen(){
   const desired=TARGET[state]?.[0]||480;
-  const available=Math.max(window.innerWidth,1);
+  const available=contentViewportSize(window.innerWidth,window.innerHeight).width;
   /* لا نصغّر الحالة المطابقة تمامًا لنافذة WebView؛ overflow مخفي أصلًا. */
   screenFit=Math.min(1,Math.max(.45,available/desired));
   document.documentElement.style.setProperty('--fit',screenFit.toFixed(6));
@@ -172,7 +173,7 @@ function scheduleGeometrySync(){clearTimeout(geometrySyncTimer);geometrySyncTime
 // the capsule showed half the width delta and snapped back. Growing early is safe
 // because it happens before the spring starts, while the capsule is still small.
 async function waitForViewportSize(width,height){const deadline=performance.now()+1200;while(window.innerWidth+1<width||window.innerHeight+1<height){if(performance.now()>=deadline)throw new Error(`WebView viewport resize timed out: expected ${width}x${height}, got ${window.innerWidth}x${window.innerHeight}`);await new Promise(resolve=>requestAnimationFrame(resolve))}}
-async function resizeHost(width,height){await invoke('resize_island',{width,height});await waitForViewportSize(width,height);host={width,height};fitToScreen()}
+async function resizeHost(width,height){const windowSize=nativeWindowSize(width,height);await invoke('resize_island',windowSize);await waitForViewportSize(windowSize.width,windowSize.height);host={width,height};fitToScreen()}
 function tick(now){const dt=Math.min(.032,(now-last)/1000);last=now;let moving=false;for(const p of Object.values(S)){p.v+=(-p.k*(p.x-p.t)-p.c*p.v)*dt;p.x+=p.v*dt;if(Math.abs(p.v)>.05||Math.abs(p.x-p.t)>.05)moving=true}apply();raf=moving?requestAnimationFrame(tick):0;if(!moving){for(const p of Object.values(S)){p.x=p.t;p.v=0}apply();recordStableGeometry()}}
 const kick=()=>{if(!raf){last=performance.now();raf=requestAnimationFrame(tick)}};
 async function go(next){if(!TARGET[next])return;const id=++transitionId;if(next==='tools')fitTools();if(next==='prayer')renderPrayer();const [width,height]=TARGET[next];const requiredHeight=requiredViewportHeight(height,compactStageHeight,TARGET.idle[1],screenFit);if(width>host.width||requiredHeight>host.height){const ask=++hostSeq;try{await resizeHost(Math.max(width,host.width),Math.max(requiredHeight,host.height))}catch(cause){reportWindowError(cause);return}if(ask!==hostSeq)return}if(id!==transitionId)return;if(next==='alert'&&state!=='alert')back=state==='tools'?'compact':state;motionTrace={minTop:Infinity,maxTop:-Infinity,samples:0};state=next;isl.dataset.state=next;syncPassThrough(next);isl.setAttribute('aria-expanded',['full','prayer','tools'].includes(next));setLayerAccessibility(next);if(next==='tools')syncTools();[S.w.t,S.h.t,S.r.t]=TARGET[next];fitToScreen();kick();emit('island-state',{state:next}).catch(()=>{})}

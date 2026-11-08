@@ -25,7 +25,8 @@ describe('تموضع الجزيرة عند أصل الشاشة', () => {
   it('يقيس CSS وRust الارتفاع نفسه على مقاييس DPI مختلفة', () => {
     expect(geo).toContain('fn scale_from_dpi');
     expect(geo).toContain('compact_stage_height_px');
-    expect(lib).toContain('geometry::compact_stage_height_px(scale)');
+    expect(geo).toContain('compact_window_height_px');
+    expect(lib).toContain('geometry::compact_window_height_px(scale)');
   });
 
   it('اختبارات Rust تشمل الشاشة الثانوية والمرحلة المصغرة وموضع الإقلاع', () => {
@@ -36,8 +37,8 @@ describe('تموضع الجزيرة عند أصل الشاشة', () => {
     ]) expect(geo).toContain(name);
     for (const name of [
       'island_bounds_are_derived_from_the_actual_monitor_origin',
-      'island_boot_size_is_explicit_and_uses_the_compact_stage',
-      'compact_stage_height_matches_css_at_every_scale',
+      'island_boot_size_includes_the_transparent_gutter',
+      'transparent_window_gutter_preserves_css_stage_at_every_scale',
       'a_second_monitor_is_centred_on_its_own_origin',
     ]) expect(lib).toContain(name);
   });

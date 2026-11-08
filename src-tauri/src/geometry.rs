@@ -15,19 +15,40 @@ impl Rect {
 }
 
 /// ارتفاع مساحة الرسم الصغيرة داخل نافذة الجزيرة بوحدات CSS المنطقية.
-/// يتضمن خلوصًا حول جسم الكبسولة فقط، بلا امتداد أو عنصر إضافي.
+/// يبقى مرجع تمركز الجزيرة المرئية؛ تحيط به نافذة شفافة بهامش غير مرئي.
 pub const COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 38.0;
+pub const COLLAPSED_CAPSULE_LOGICAL_WIDTH: f64 = 44.0;
 pub const CAPSULE_LOGICAL_HEIGHT: f64 = 24.0;
+pub const WINDOW_ANTIALIAS_GUTTER_LOGICAL: f64 = 1.0;
 pub const ISLAND_MAX_LOGICAL_HEIGHT: f64 = 430.0;
 
-/// يتحقق من أبعاد حاوية الجزيرة المنطقية التي يسمح بها أمر تغيير الحجم.
-/// ارتفاعات اللوحات تشمل إزاحة الارتكاز وبكسل أمان للتقريب؛ الأدوات متغيرة الارتفاع.
+pub fn compact_window_width_logical() -> f64 {
+  COLLAPSED_CAPSULE_LOGICAL_WIDTH + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL
+}
+
+pub fn compact_window_height_logical() -> f64 {
+  COMPACT_STAGE_LOGICAL_HEIGHT + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL
+}
+
+/// يقبل مقاسات الحاوية الفعلية بعد إضافة الهامش الشفاف، لا ارتفاعات ثابتة فقط.
+/// ارتفاع اللوحة يتغير مع إزاحة الارتكاز ومعامل الملاءمة؛ وتبقى جميع الأبعاد محدودة.
 pub fn is_supported_island_resize(width: f64, height: f64) -> bool {
-  if !width.is_finite() || !height.is_finite() || height.fract() != 0.0 { return false; }
-  let widths = [44.0, 112.0, 384.0, 396.0, 400.0, 432.0];
-  let fixed_heights = [24.0, 38.0, 91.0, 178.0, 218.0];
-  let tools_height = width == 432.0 && (228.0..=395.0).contains(&height);
-  widths.contains(&width) && (fixed_heights.contains(&height) || tools_height)
+  if !width.is_finite() || !height.is_finite() || width.fract() != 0.0 || height.fract() != 0.0 { return false; }
+  let window_width = width as i32;
+  let minimum_height = match window_width {
+    46 | 114 => compact_window_height_logical(),
+    386 => 210.0 + 1.0 + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL,
+    398 => 83.0 + 1.0 + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL,
+    402 => 170.0 + 1.0 + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL,
+    434 => 220.0 + 1.0 + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL,
+    _ => return false,
+  };
+  let maximum_height = if window_width <= 114 {
+    160.0
+  } else {
+    ISLAND_MAX_LOGICAL_HEIGHT + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL
+  };
+  height >= minimum_height && height <= maximum_height
 }
 
 fn safe_scale(scale: f64) -> f64 {
@@ -42,6 +63,15 @@ pub fn scale_from_dpi(dpi: u32) -> f64 {
 /// ارتفاع نافذة المرحلة الصغيرة بالبكسل الفيزيائي.
 pub fn compact_stage_height_px(scale: f64) -> i32 {
   (COMPACT_STAGE_LOGICAL_HEIGHT * safe_scale(scale)).round().max(1.0) as i32
+}
+
+/// العرض والارتفاع الفيزيائيان لنافذة الرسم، مع هامش CSS شفاف على كل جانب.
+pub fn compact_window_width_px(scale: f64) -> i32 {
+  (compact_window_width_logical() * safe_scale(scale)).round().max(1.0) as i32
+}
+
+pub fn compact_window_height_px(scale: f64) -> i32 {
+  (compact_window_height_logical() * safe_scale(scale)).round().max(1.0) as i32
 }
 
 /// إزاحة مركز الكبسولة عن أعلى الشاشة بالبكسل الفيزيائي، مع إبقاء الكسر.
@@ -83,6 +113,10 @@ mod tests {
     }
     assert_eq!(compact_stage_height_px(1.0), 38);
     assert_eq!(compact_stage_height_px(1.25), 48);
+    assert_eq!(compact_window_width_px(1.0), 46);
+    assert_eq!(compact_window_height_px(1.0), 40);
+    assert_eq!(compact_window_width_px(1.25), 58);
+    assert_eq!(compact_window_height_px(1.25), 50);
     assert_eq!(compact_anchor_offset_px(1.0), 19.0);
     assert_eq!(compact_anchor_offset_px(1.25), 23.75);
     assert_eq!(compact_anchor_offset_px(1.5), 28.5);
@@ -97,10 +131,20 @@ mod tests {
 
   #[test]
   fn resize_contract_accepts_only_restored_and_safety_padded_sizes() {
-    for (width, height) in [(112.0, 38.0), (384.0, 218.0), (400.0, 178.0), (400.0, 218.0), (396.0, 91.0), (432.0, 228.0), (432.0, 395.0)] {
+    for (width, height) in [
+      (46.0, 40.0), (114.0, 40.0), (114.0, 41.0),
+      (386.0, 213.0), (386.0, 220.0), (386.0, 227.0),
+      (398.0, 86.0), (398.0, 220.0),
+      (402.0, 173.0), (402.0, 185.0),
+      (434.0, 223.0), (434.0, 280.0), (434.0, 404.0), (434.0, 432.0),
+    ] {
       assert!(is_supported_island_resize(width, height), "unexpected rejection: {width}x{height}");
     }
-    for (width, height) in [(40.0, 38.0), (100.0, 38.0), (346.0, 218.0), (384.0, 210.0), (400.0, 169.0), (432.0, 227.0), (432.0, 396.0), (432.0, 278.5)] {
+    for (width, height) in [
+      (40.0, 38.0), (100.0, 38.0), (384.0, 220.0),
+      (386.0, 212.0), (398.0, 85.0), (402.0, 172.0),
+      (434.0, 222.0), (434.0, 433.0), (114.0, 161.0), (434.0, 432.5),
+    ] {
       assert!(!is_supported_island_resize(width, height), "unexpected acceptance: {width}x{height}");
     }
   }
@@ -122,6 +166,7 @@ mod tests {
   #[test]
   fn expanded_states_have_room_without_changing_compact_stage() {
     assert_eq!(compact_stage_height_px(1.25), 48);
+    assert_eq!(compact_window_height_px(1.25), 50);
     assert!(island_max_height_px(1.25) >= 537);
   }
 

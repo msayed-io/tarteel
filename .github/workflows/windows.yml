@@ -1,60 +1,271 @@
-name: Windows build
+name: Windows CI and automatic release
+
 on:
-  workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - main
+
 permissions:
   contents: read
+
+concurrency:
+  group: tarteel-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.select.outputs.version }}
+      should_release: ${{ steps.select.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+      - id: select
+        name: Select current or next patch version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref }}
+          HEAD_MESSAGE: ${{ github.event.head_commit.message || '' }}
+        run: |
+          set -euo pipefail
+          current="$(node scripts/release-version.js current)"
+          should_release=false
+          if [[ "$EVENT_NAME" == "push" && "$REF_NAME" == "refs/heads/main" && "$HEAD_MESSAGE" != *"[skip release]"* ]]; then
+            version="$(node scripts/release-version.js next)"
+            should_release=true
+          elif [[ "$EVENT_NAME" == "pull_request" || "$REF_NAME" != "refs/heads/main" ]]; then
+            version="$(node scripts/release-version.js next)"
+          else
+            version="$current"
+          fi
+          {
+            echo "version=$version"
+            echo "should_release=$should_release"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Tarteel release selection"
+            echo "Version: \`$version\`"
+            echo "Automatic draft preparation enabled: \`$should_release\`"
+            echo "Build number: \`#$GITHUB_RUN_NUMBER\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with: {node-version: 22, cache: npm}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
       - run: npm ci
-      - run: npm run test
+      - run: npm test
       - run: npm run build
+
   windows:
-    needs: test
+    needs: [version, test]
     runs-on: windows-2025
-    permissions:
-      contents: write
+    timeout-minutes: 45
+    outputs:
+      installer_sha256: ${{ steps.package-installer.outputs.sha256 }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with: {node-version: 22, cache: npm}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
       - run: npm ci
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
-        with: {toolchain: 1.90.0-x86_64-pc-windows-msvc}
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --lib
-      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: tarteel-v__VERSION__
-          releaseName: Tarteel v__VERSION__
-          releaseBody: |
-            يطابق وضع الخمول نسبة الصورة المرجعية (44×24px، نصف قطر 12px)، ويعرض الموسيقى كمستطيل بحواف مدوّرة لا كبسولة طويلة (112×24px، نصف قطر 9px).
-            لا يضيف أي ساق أو امتداد أسفل الجزيرة؛ الخط العمودي في صورة المرجع جزء من الخلفية.
-            يعيد مساحة التشغيل الكامل إلى 384×210px وبطاقة الصلاة إلى 400×170px، ويضيف مساحة WebView تعوّض إزاحة الارتكاز وهامش التقريب كي لا تُقص الحافة السفلية.
-            يطابق نصف قطر hit-test الأصلي شكل الجزيرة كي تصل النقرات خارجها، بما فيها الزوايا المستديرة، إلى النوافذ تحتها.
-          releaseDraft: true
-          prerelease: false
-          args: --bundles nsis
+          toolchain: 1.90.0-x86_64-pc-windows-msvc
+      - name: Apply the selected patch version before Windows tests and build
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: node scripts/release-version.js set "$env:RELEASE_VERSION"
+      - name: Verify all application version files
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: node scripts/release-version.js verify "$env:RELEASE_VERSION"
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+      - name: Build Windows app and NSIS installer
+        run: npm run tauri -- build --bundles nsis
       - name: Interactive island geometry smoke test
         shell: pwsh
         run: ./scripts/windows-island-smoke.ps1 -ExePath ./src-tauri/target/release/tarteel.exe
       - name: Upload island screenshots and geometry log
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: tarteel-island-ui-smoke
           path: artifacts/island-ui-smoke/*
           if-no-files-found: warn
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+          retention-days: 14
+      - name: Prepare readable installer name and checksum
+        id: package-installer
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundles = @(Get-ChildItem -Path 'src-tauri/target/release/bundle/nsis' -Filter '*.exe' -File)
+          if ($bundles.Count -ne 1) { throw "Expected one NSIS installer, found $($bundles.Count)." }
+          $outDir = 'artifacts/windows-installer'
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          $name = "Tarteel-$env:RELEASE_VERSION-x64-setup.exe"
+          $path = Join-Path $outDir $name
+          Copy-Item -Force $bundles[0].FullName $path
+          $sha = (Get-FileHash -Path $path -Algorithm SHA256).Hash.ToLowerInvariant()
+          "sha256=$sha" >> $env:GITHUB_OUTPUT
+          Write-Host "Prepared $path with SHA-256 $sha"
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: tarteel-windows-installers
-          path: |
-            src-tauri/target/release/bundle/nsis/*.exe
+          name: tarteel-windows-installer-${{ github.run_id }}
+          path: artifacts/windows-installer/Tarteel-${{ needs.version.outputs.version }}-x64-setup.exe
           if-no-files-found: error
+          retention-days: 14
+
+  release:
+    needs: [version, test, windows]
+    if: ${{ needs.version.outputs.should_release == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: tarteel-windows-installer-${{ github.run_id }}
+          path: artifacts/windows-installer
+      - name: Verify installer bytes against the Windows build output
+        id: verify-installer
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+          EXPECTED_SHA256: ${{ needs.windows.outputs.installer_sha256 }}
+        run: |
+          set -euo pipefail
+          asset="artifacts/windows-installer/Tarteel-${RELEASE_VERSION}-x64-setup.exe"
+          test -s "$asset"
+          actual="$(sha256sum "$asset" | cut -d' ' -f1)"
+          test "$actual" = "$EXPECTED_SHA256"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+          echo "Verified installer SHA-256: $actual" >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit the successful version bump and guard against stale builds
+        id: release-commit
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags --force
+          remote_sha="$(git rev-parse origin/main)"
+          if [[ "$remote_sha" == "$GITHUB_SHA" ]]; then
+            node scripts/release-version.js set "$RELEASE_VERSION"
+            node scripts/release-version.js verify "$RELEASE_VERSION"
+            git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "chore(release): v$RELEASE_VERSION [skip ci]"
+            git push origin HEAD:main
+            release_commit="$(git rev-parse HEAD)"
+            mode=create
+          else
+            remote_version="$(git show origin/main:package.json | jq -r '.version')"
+            remote_subject="$(git log -1 --format=%s origin/main)"
+            expected_subject="chore(release): v$RELEASE_VERSION [skip ci]"
+            if [[ "$remote_version" == "$RELEASE_VERSION" && "$remote_subject" == "$expected_subject" ]] && git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              release_commit="$remote_sha"
+              mode=reuse
+            else
+              release_commit=''
+              mode=stale
+              echo 'A newer main commit superseded this build; CI remains recorded, but this stale run will not publish.' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "release_commit=$release_commit" >> "$GITHUB_OUTPUT"
+      - name: Create or refresh draft release after successful tests
+        if: ${{ steps.release-commit.outputs.mode != 'stale' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+          RELEASE_COMMIT: ${{ steps.release-commit.outputs.release_commit }}
+          EXPECTED_SHA256: ${{ needs.windows.outputs.installer_sha256 }}
+        run: |
+          set -euo pipefail
+          tag="tarteel-v$RELEASE_VERSION"
+          asset="artifacts/windows-installer/Tarteel-$RELEASE_VERSION-x64-setup.exe"
+          notes_file="RELEASE_NOTES_v$RELEASE_VERSION.md"
+          if [[ ! -s "$notes_file" ]]; then
+            echo "Release notes file is missing or empty: $notes_file" >&2
+            exit 1
+          fi
+          notes="$(cat "$notes_file")"
+          notes+=$'\n\n---\nGitHub build number: #'"$GITHUB_RUN_NUMBER"$'\nSource commit: '"$GITHUB_SHA"$'\nInstaller SHA-256: '"$EXPECTED_SHA256"
+          existing_id="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$tag\") | .id" | head -n1)"
+          if [[ -n "$existing_id" ]]; then
+            existing_target="$(gh api "repos/$GITHUB_REPOSITORY/releases/$existing_id" --jq '.target_commitish')"
+            if [[ "$existing_target" != "$RELEASE_COMMIT" ]]; then
+              echo "Existing release $tag targets $existing_target, expected $RELEASE_COMMIT." >&2
+              exit 1
+            fi
+            is_draft="$(gh api "repos/$GITHUB_REPOSITORY/releases/$existing_id" --jq '.draft')"
+            if [[ "$is_draft" == "true" ]]; then
+              gh release upload "$tag" "$asset" --repo "$GITHUB_REPOSITORY" --clobber
+              gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes "$notes"
+            fi
+          else
+            gh release create "$tag" "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Tarteel v$RELEASE_VERSION" \
+              --target "$RELEASE_COMMIT" \
+              --draft \
+              --notes "$notes"
+          fi
+      - name: Verify draft release; do not publish
+        if: ${{ steps.release-commit.outputs.mode != 'stale' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+          RELEASE_COMMIT: ${{ steps.release-commit.outputs.release_commit }}
+          EXPECTED_SHA256: ${{ needs.windows.outputs.installer_sha256 }}
+        run: |
+          set -euo pipefail
+          tag="tarteel-v$RELEASE_VERSION"
+          asset_name="Tarteel-$RELEASE_VERSION-x64-setup.exe"
+          target="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')"
+          digest="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq ".assets[] | select(.name == \"$asset_name\") | .digest")"
+          test "$target" = "$RELEASE_COMMIT"
+          test "$digest" = "sha256:$EXPECTED_SHA256"
+          draft_state="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')"
+          test "$draft_state" = "true"
+          tag_commit="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')"
+          test "$tag_commit" = "$RELEASE_COMMIT"
+          {
+            echo "Draft Tarteel v$RELEASE_VERSION prepared for review; it was not published."
+            echo "Public publication requires explicit user approval."
+            echo "GitHub build number: #$GITHUB_RUN_NUMBER"
+            echo "Source commit: $RELEASE_COMMIT"
+            echo "Installer SHA-256: $EXPECTED_SHA256"
+          } >> "$GITHUB_STEP_SUMMARY"

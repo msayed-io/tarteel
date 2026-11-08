@@ -17,8 +17,8 @@ describe('السبب الجذري: النافذة تُولد بحجمها الص
 
   it('حجم الإقلاع مشتق من مرحلة CSS الصغيرة لا من مساحة نظامية', () => {
     expect(lib).toContain('fn island_boot_size_logical');
-    expect(lib).toContain('geometry::COMPACT_STAGE_LOGICAL_HEIGHT');
-    expect(lib).toContain('geometry::compact_stage_height_px');
+    expect(lib).toContain('geometry::compact_window_width_logical()');
+    expect(lib).toContain('geometry::compact_window_height_logical()');
   });
 
   it('الحجم والموضع يُطبَّقان معًا بعد معرفة الشاشة', () => {
@@ -34,15 +34,16 @@ describe('السبب الجذري: النافذة تُولد بحجمها الص
     expect(lib).toContain('island_bounds_from_monitor(origin.x, origin.y, area.width as i32, scale)');
     expect(geo).toContain('fn island_origin');
     expect(geo).toContain('fn compact_stage_height_px');
+    expect(geo).toContain('fn compact_window_height_px');
   });
 });
 
 describe('التمركز: النافذة هي المرجع', () => {
   it('لا يعتمد على screen.availWidth في حساب التملاء', () => {
     /* في بيئات لا ترجع availWidth فيها عرض الشاشة الحقيقي، يتقلّص المقياس
-       إلى 0.714 ويظهر انزياح وهمي. المرجع الصحيح هو نافذة الجزيرة. */
+       إلى 0.714 ويظهر انزياح وهمي. المرجع الصحيح هو مساحة الرسم داخل النافذة. */
     expect(html).not.toContain('screen.availWidth-16');
-    expect(html).toContain('Math.max(window.innerWidth,1)');
+    expect(html).toContain('contentViewportSize(window.innerWidth,window.innerHeight).width');
   });
 
   it('المعادلة تحافظ على مركز الكبسولة نفسه خلال التوسعة والانطواء', () => {
@@ -53,7 +54,7 @@ describe('التمركز: النافذة هي المرجع', () => {
   });
 
   it('المرساة ثابتة ولا تعتمد على ارتفاع الجسم أثناء النابض', () => {
-    expect(html).toContain('compactStageHeight=Math.max(1,Math.round(window.innerHeight))');
+    expect(html).toContain('compactStageHeight=initialContentViewport.height');
     const anchoredTop=(stage,smallHeight,fit)=>Math.max(0,(stage-smallHeight*fit)/2);
     expect(anchoredTop(38,24,1)).toBe(7);
     expect(anchoredTop(38,24,.96)).toBeCloseTo(7.48,5);
@@ -73,7 +74,7 @@ describe('ضمانات الهندسة عبر كل المقاسات', () => {
   it('اختبارات التماثل على مقاييس متعددة موجودة', () => {
     expect(geo).toContain('compact_capsule_keeps_a_visible_gap_at_common_scales');
     expect(geo).toContain('compact_stage_and_anchor_scale_with_dpi');
-    expect(lib).toContain('compact_stage_height_matches_css_at_every_scale');
+    expect(lib).toContain('transparent_window_gutter_preserves_css_stage_at_every_scale');
   });
 
   it('التمركز على شاشة ثانوية يحترم إحداثيها', () => {
@@ -84,8 +85,8 @@ describe('ضمانات الهندسة عبر كل المقاسات', () => {
 
 describe('تزامن حجم حاوية الجزيرة مع نافذة Tauri الفعلية', () => {
   it('يبدأ host من قياس WebView بدل الأبعاد الافتراضية القديمة', () => {
-    expect(html).toContain('compactStageHeight=Math.max(1,Math.round(window.innerHeight))');
-    expect(html).toContain('host={width:Math.max(1,Math.round(window.innerWidth)),height:compactStageHeight}');
+    expect(html).toContain('const initialContentViewport=contentViewportSize(window.innerWidth,window.innerHeight)');
+    expect(html).toContain('host={...initialContentViewport}');
     expect(html).not.toContain('host={width:480,height:262}');
   });
 
@@ -97,8 +98,9 @@ describe('تزامن حجم حاوية الجزيرة مع نافذة Tauri ال
     expect(transition).toContain('await resizeHost(Math.max(width,host.width),Math.max(requiredHeight,host.height))');
     expect(transition.indexOf('await resizeHost')).toBeLessThan(transition.indexOf('state=next'));
     const resizeHost = html.split('async function resizeHost(')[1].split('function tick(now)')[0];
-    expect(resizeHost).toContain("await invoke('resize_island',{width,height})");
-    expect(resizeHost).toContain('await waitForViewportSize(width,height)');
+    expect(resizeHost).toContain('const windowSize=nativeWindowSize(width,height)');
+    expect(resizeHost).toContain("await invoke('resize_island',windowSize)");
+    expect(resizeHost).toContain('await waitForViewportSize(windowSize.width,windowSize.height)');
     expect(resizeHost.indexOf('await waitForViewportSize')).toBeLessThan(resizeHost.indexOf('host={width,height}'));
   });
 

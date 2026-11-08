@@ -150,17 +150,29 @@ mod imp {
 #[cfg(windows)]
 pub use imp::{attach, detach};
 
-/// Applies a rounded native window region while the island is collapsed.
-/// Unlike `HTTRANSPARENT`, the window manager excludes points outside this
-/// region before choosing a target, including windows owned by other threads.
+/// يوسّع منطقة القص بكسلًا فيزيائيًا كي تمر الحافة الملساء كاملة بلا قصّ.
+pub fn expand_for_antialias_fringe(x: i32, y: i32, width: i32, height: i32, radius: i32) -> (i32, i32, i32, i32, i32) {
+  let fringe = 1;
+  (
+    x.saturating_sub(fringe),
+    y.saturating_sub(fringe),
+    width.saturating_add(2 * fringe),
+    height.saturating_add(2 * fringe),
+    radius.saturating_add(fringe),
+  )
+}
+
 fn rounded_region_ellipse_diameter(width: i32, height: i32, radius: i32) -> i32 {
   if width <= 0 || height <= 0 {
     return 0;
   }
-  radius.max(0).min(width.min(height) / 2).saturating_mul(2)
+    radius.max(0).min(width.min(height) / 2).saturating_mul(2)
 }
 
 #[cfg(windows)]
+/// Applies a rounded native window region while the island is collapsed.
+/// Unlike `HTTRANSPARENT`, the window manager excludes points outside this
+/// region before choosing a target, including windows owned by other threads.
 pub fn set_collapsed_window_region(
   hwnd: windows::Win32::Foundation::HWND,
   x: i32,
@@ -207,6 +219,14 @@ mod tests {
   fn native_rounding_matches_idle_and_music_shapes() {
     assert_eq!(rounded_region_ellipse_diameter(44, 24, 12), 24);
     assert_eq!(rounded_region_ellipse_diameter(112, 24, 9), 18);
+    assert_eq!(rounded_region_ellipse_diameter(46, 26, 13), 26);
+    assert_eq!(rounded_region_ellipse_diameter(114, 26, 10), 20);
+  }
+
+  #[test]
+  fn native_region_leaves_a_one_pixel_fringe_around_the_css_edge() {
+    assert_eq!(expand_for_antialias_fringe(1, 7, 44, 24, 12), (0, 6, 46, 26, 13));
+    assert_eq!(expand_for_antialias_fringe(1, 7, 112, 24, 9), (0, 6, 114, 26, 10));
   }
 
   #[test]
