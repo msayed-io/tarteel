@@ -403,34 +403,86 @@ pub fn emit_to_ui(app: &tauri::AppHandle, event: &str, payload: serde_json::Valu
   let _ = app.emit(event, payload);
 }
 
+#[cfg(windows)]
+async fn apply_island_native_region(
+  island: &tauri::WebviewWindow,
+  region: Option<(i32, i32, i32, i32)>,
+) -> Result<(), String> {
+  let hwnd = island.hwnd().map_err(|e| format!("تعذر الحصول على مقبض نافذة الجزيرة: {e}"))?;
+  let raw_hwnd = hwnd.0 as isize;
+  let (tx, rx) = std::sync::mpsc::sync_channel(1);
+  island.run_on_main_thread(move || {
+    let hwnd = windows::Win32::Foundation::HWND(raw_hwnd as *mut core::ffi::c_void);
+    let result = match region {
+      Some((x, y, width, height)) => hittest::set_collapsed_window_region(hwnd, x, y, width, height),
+      None => hittest::clear_window_region(hwnd),
+    };
+    let _ = tx.send(result);
+  }).map_err(|e| format!("تعذر جدولة منطقة نافذة الجزيرة على خيط الواجهة: {e}"))?;
+  tauri::async_runtime::spawn_blocking(move || rx.recv())
+    .await.map_err(|e| format!("تعذر انتظار تطبيق منطقة نافذة الجزيرة: {e}"))?
+    .map_err(|e| format!("انقطع تطبيق منطقة نافذة الجزيرة: {e}"))?
+}
+
 /// تُستدعى من الجزيرة لتحديد المنطقة التفاعلية الفعلية.
 ///
-/// الواجهة تعرف شكل الكبسولة بعد كل انتقال، فتبلّغ به. كل ما هو خارج هذا
-/// المستطيل يصبح شفافًا للنقر، فتصل النقرات إلى نوافذ المستخدم تحته.
+/// الواجهة تعرف شكل الكبسولة بعد كل انتقال، فتبلّغ به. في الوضع المطوي
+/// تُطابق منطقة HWND نفسها شكل الكبسولة، كي تصل النقرات خارجها إلى أي تطبيق.
 #[tauri::command]
-fn set_island_hit_rect(x: f64, y: f64, width: f64, height: f64, app: tauri::AppHandle) -> Result<(), String> {
+async fn set_island_hit_rect(x: f64, y: f64, width: f64, height: f64, app: tauri::AppHandle) -> Result<(), String> {
   let island = app.get_webview_window("island").ok_or_else(|| "نافذة الجزيرة غير متاحة".to_string())?;
   let scale = island.scale_factor().map_err(|e| format!("تعذر قراءة مقياس الشاشة: {e}"))?;
-  let left = (x * scale).round() as i32;
-  let top = (y * scale).round() as i32;
-  let right = ((x + width) * scale).round() as i32;
-  let bottom = ((y + height) * scale).round() as i32;
-  hittest::set_interactive_rect(left, top, (right - left).max(0), (bottom - top).max(0));
+  #[cfg(windows)]
+  let (client_offset_x, client_offset_y) = {
+    use windows::Win32::Foundation::{POINT, RECT};
+    use windows::Win32::Graphics::Gdi::ClientToScreen;
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+    let hwnd = island.hwnd().map_err(|e| format!("تعذر قراءة مقبض نافذة الجزيرة: {e}"))?;
+    let mut window_rect = RECT::default();
+    unsafe { GetWindowRect(hwnd, &mut window_rect) }.map_err(|e| format!("تعذر قراءة حدود نافذة الجزيرة: {e}"))?;
+    let mut client_origin = POINT { x: 0, y: 0 };
+    if !unsafe { ClientToScreen(hwnd, &mut client_origin) }.as_bool() {
+      return Err(format!("تعذر تحويل أصل WebView إلى إحداثيات الشاشة: {}", windows::core::Error::from_thread()));
+    }
+    (client_origin.x - window_rect.left, client_origin.y - window_rect.top)
+  };
+  #[cfg(not(windows))]
+  let (client_offset_x, client_offset_y) = (0, 0);
+  let left = (x * scale).round() as i32 + client_offset_x;
+  let top = (y * scale).round() as i32 + client_offset_y;
+  let right = ((x + width) * scale).round() as i32 + client_offset_x;
+  let bottom = ((y + height) * scale).round() as i32 + client_offset_y;
+  let width = (right - left).max(0);
+  let height = (bottom - top).max(0);
+  hittest::set_interactive_rect(left, top, width, height);
+  #[cfg(windows)]
+  if hittest::pass_through() {
+    apply_island_native_region(&island, Some((left, top, width, height))).await?;
+  }
   Ok(())
 }
 
 /// يفعّل أو يوقف تمرير النقرات. الموسّعات توقفه لتلتقط كل نقراتها.
 #[tauri::command]
-fn set_island_pass_through(enabled: bool) {
+async fn set_island_pass_through(enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
   hittest::set_pass_through(enabled);
+  #[cfg(windows)]
+  {
+    let island = app.get_webview_window("island").ok_or_else(|| "نافذة الجزيرة غير متاحة".to_string())?;
+    /* ارفع القصّ أثناء الحركة؛ set_island_hit_rect يعيد شكل الكبسولة بعد استقرارها. */
+    apply_island_native_region(&island, None).await?;
+  }
+  #[cfg(not(windows))]
+  let _ = app;
+  Ok(())
 }
 
 #[tauri::command]
 fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
   /* يجب أن تطابق TARGET في island.html بكسلًا ببكسل. */
-  let widths = [44.0, 112.0, 384.0, 440.0, 444.0, 480.0];
-  let heights = [24.0, 38.0, 92.0, 188.0, 210.0, 262.0, 424.0];
-  let tools_height = width == 480.0 && (220.0..=430.0).contains(&height) && height.fract() == 0.0;
+  let widths = [40.0, 100.0, 346.0, 396.0, 400.0, 432.0];
+  let heights = [22.0, 38.0, 83.0, 169.0, 189.0];
+  let tools_height = width == 432.0 && (220.0..=387.0).contains(&height) && height.fract() == 0.0;
   if !widths.contains(&width) || (!heights.contains(&height) && !tools_height) {
     return Err("رفضت أبعادًا غير معتمدة لنافذة الجزيرة".into());
   }
@@ -465,11 +517,11 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
 /// حجم نافذة الجزيرة عند الإقلاع: عرض الكبسولة الصغيرة × مسرح الخمول.
 /// تحديده قبل الإظهار يمنع انتقال المركز من حجم WebView الافتراضي.
 fn island_boot_size_logical() -> (f64, f64) {
-  (44.0, geometry::COMPACT_STAGE_LOGICAL_HEIGHT)
+  (40.0, geometry::COMPACT_STAGE_LOGICAL_HEIGHT)
 }
 
 fn island_bounds_from_monitor(monitor_left: i32, monitor_top: i32, monitor_width: i32, scale: f64) -> (i32, i32, i32, i32) {
-  let width = (44.0 * scale).round() as i32;
+  let width = (40.0 * scale).round() as i32;
   let height = geometry::compact_stage_height_px(scale);
   let (x, y) = geometry::island_origin(monitor_left, monitor_top, monitor_width, width);
   (x, y, width, height)
@@ -676,7 +728,7 @@ mod island_tests {
     for scale in [1.0, 1.25, 1.5] {
       let (x, y, w, h) = island_bounds_from_monitor(0, 0, 1920, scale);
       assert_eq!(y, 0, "الجزيرة تبدأ من أصل الشاشة المختارة");
-      assert_eq!(w, (44.0 * scale).round() as i32, "العرض المطلوب = 44 منطقية");
+      assert_eq!(w, (40.0 * scale).round() as i32, "العرض المطلوب = 40 منطقية");
       assert_eq!(h, geometry::compact_stage_height_px(scale), "النافذة تطابق مسرح CSS الصغير");
       assert!(x > 0 && x + w < 1920, "متمركزة أفقياً");
       let right_margin = 1920 - w - x;
@@ -688,7 +740,7 @@ mod island_tests {
 
   #[test]
   fn island_boot_size_is_explicit_and_uses_the_compact_stage() {
-    assert_eq!(island_boot_size_logical(), (44.0, 38.0));
+    assert_eq!(island_boot_size_logical(), (40.0, 38.0));
   }
 
   #[test]

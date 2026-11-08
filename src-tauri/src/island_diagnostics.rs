@@ -31,6 +31,7 @@ struct Snapshot {
   schema: u32,
   timestamp_unix_ms: u128,
   coordinate_unit: &'static str,
+  window_handle: isize,
   state: String,
   scale_factor: f64,
   native_dpi: Option<u32>,
@@ -142,8 +143,6 @@ pub async fn record_island_geometry(
     if interactive.width() <= 0 || interactive.height() <= 0 {
       return Err("أصبح مستطيل النقر فارغًا بعد التحويل إلى البكسل الفيزيائي".into());
     }
-    crate::hittest::set_interactive_rect(interactive.left, interactive.top, interactive.width(), interactive.height());
-
     let hwnd = island.hwnd().map_err(|e| format!("تعذر قراءة مقبض الجزيرة: {e}"))?;
     let raw_hwnd = hwnd.0 as isize;
     let state_for_main = state.clone();
@@ -217,9 +216,10 @@ unsafe fn measure(
   let origin_error = PointErrorPx { x: origin.x as f64 - target_client_x, y: origin.y as f64 - target_client_y };
   let native_dpi = match unsafe { GetDpiForWindow(hwnd) } { 0 => None, dpi => Some(dpi) };
   Ok(Snapshot {
-    schema: 3,
+    schema: 4,
     timestamp_unix_ms: now_ms(),
     coordinate_unit: "physical virtual-desktop pixels",
+    window_handle: hwnd.0 as isize,
     state,
     scale_factor: scale,
     native_dpi,

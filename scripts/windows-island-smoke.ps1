@@ -33,7 +33,7 @@ function Wait-ForRow([string]$State, [int]$TimeoutSeconds, [Nullable[long]]$Afte
       if ($_.state -ne $State -or ($null -ne $After -and [long]$_.timestamp_unix_ms -le $After)) { return $false }
       if ($null -eq $_.capsule_rect_client) { return $false }
       $capsuleHeight = [double]$_.capsule_rect_client.bottom - [double]$_.capsule_rect_client.top
-      $compactHeight = 24.0 * [double]$_.scale_factor
+      $compactHeight = 22.0 * [double]$_.scale_factor
       if ($Expanded) { return $capsuleHeight -gt $compactHeight }
       return $capsuleHeight -le $compactHeight
     })
@@ -111,14 +111,35 @@ function Assert-Anchor($Record) {
   Write-Host "Verified capsule center against monitor-origin anchor ($($anchor.x),$($anchor.y)): dx=$dx, dy=$dy."
 }
 
+function Assert-ClickThroughOutsideCapsule($Record) {
+  $window = $Record.window_rect_outer
+  $capsule = $Record.capsule_rect_screen
+  if ($null -eq $window -or $null -eq $capsule -or $null -eq $Record.window_handle) {
+    throw 'Collapsed geometry row is missing the native window/capsule bounds or HWND.'
+  }
+  $x = [int][Math]::Round([double]$capsule.right + 10)
+  $y = [int][Math]::Round(([double]$capsule.top + [double]$capsule.bottom) / 2.0)
+  if ($x -ge [double]$window.right -or $y -lt [double]$window.top -or $y -ge [double]$window.bottom) {
+    throw 'The measured collapsed HWND has no point outside the capsule available for a native pass-through check.'
+  }
+  $underlying = [TarteelUiSmokeNative]::WindowFromPoint([TarteelScreenPoint]@{ X = $x; Y = $y })
+  if ($underlying -eq [IntPtr]::Zero) { throw "WindowFromPoint returned no target at ($x,$y)." }
+  if ($underlying.ToInt64() -eq [long]$Record.window_handle) {
+    throw "The collapsed island HWND still wins native hit-testing outside its capsule at ($x,$y)."
+  }
+  Write-Host "Verified native WindowFromPoint resolves outside the collapsed capsule to HWND $underlying, not the island."
+}
+
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+[StructLayout(LayoutKind.Sequential)] public struct TarteelScreenPoint { public int X; public int Y; }
 public static class TarteelUiSmokeNative {
   [DllImport("user32.dll", SetLastError=true)] public static extern bool SetCursorPos(int X, int Y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int nIndex);
+  [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(TarteelScreenPoint point);
 }
 '@
 
@@ -152,6 +173,7 @@ try {
   $collapsed = Wait-ForRow 'idle' 15 ([long]$prayer.timestamp_unix_ms)
   if ($collapsed.aligned_within_half_pixel -ne $true) { throw "Collapsed capsule is outside the 0.5px monitor-anchor tolerance: $($collapsed.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress)" }
   Assert-Anchor $collapsed
+  Assert-ClickThroughOutsideCapsule $collapsed
   $collapsedShot = Capture-Top 'idle-after-collapse'
   Assert-BlackCapsuleCenter $collapsed $collapsedShot
   Copy-Item -Force $logPath (Join-Path $outDir 'geometry-final.jsonl')
@@ -160,7 +182,7 @@ try {
     'PASS: launched the built Tarteel Windows executable.',
     "PASS: measured idle capsule offset before correction=$($idle.pre_alignment.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress); after correction=$($collapsed.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress).",
     "PASS: physical click expanded prayer state; top-anchor range=$motionSpan CSS px across $($prayer.motion_sample_count) frames.",
-    'PASS: physical mouse click returned to idle and the measured capsule remained centered.',
+    'PASS: physical mouse click returned to idle, the capsule remained centered, and native hit-testing passed through outside it.',
     "Display: $($collapsed.monitor_rc_monitor.right - $collapsed.monitor_rc_monitor.left)x$($collapsed.monitor_rc_monitor.bottom - $collapsed.monitor_rc_monitor.top); scale_factor=$($collapsed.scale_factor); native_dpi=$($collapsed.native_dpi)."
   )
   Set-Content -Path (Join-Path $outDir 'summary.txt') -Value $summary -Encoding UTF8

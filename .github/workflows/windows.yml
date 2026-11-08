@@ -37,8 +37,8 @@ jobs:
           releaseName: Tarteel v__VERSION__
           releaseBody: |
             Keeps the Dynamic Island capsule anchored during expansion and collapse, with Windows motion-frame verification.
-            Refines only the compact idle/music silhouette and sizing; full, prayer, tools, and alert dimensions remain unchanged.
-            Adds measured Windows monitor/work-area diagnostics and an interactive launch/click/collapse smoke test.
+            Refines the compact idle/music silhouette and reduces expanded states by 10% while preserving their internal layout.
+            Constrains the native input region to the capsule while collapsed; includes measured geometry and click-through smoke verification.
           releaseDraft: true
           prerelease: false
           args: --bundles nsis

@@ -6,11 +6,13 @@ const geo = readFileSync(resolve(__dirname, '../src-tauri/src/geometry.rs'), 'ut
 const frame = readFileSync(resolve(__dirname, '../src-tauri/src/frame.rs'), 'utf8');
 const hittest = readFileSync(resolve(__dirname, '../src-tauri/src/hittest.rs'), 'utf8');
 const island = readFileSync(resolve(__dirname, '../island.html'), 'utf8');
+const rust = readFileSync(resolve(__dirname, '../src-tauri/src/lib.rs'), 'utf8');
+const windowsSmoke = readFileSync(resolve(__dirname, '../scripts/windows-island-smoke.ps1'), 'utf8');
 
 describe('المرحلة المصغرة ومركز الشاشة', () => {
   it('مركز الكبسولة مرجعه منتصف مرحلة CSS الصغيرة', () => {
     expect(geo).toContain('COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 38.0');
-    expect(geo).toContain('CAPSULE_LOGICAL_HEIGHT: f64 = 24.0');
+    expect(geo).toContain('CAPSULE_LOGICAL_HEIGHT: f64 = 22.0');
     expect(geo).toContain('fn compact_anchor_offset_px(scale: f64) -> f64');
     expect(geo).toContain('(COMPACT_STAGE_LOGICAL_HEIGHT / 2.0) * safe_scale(scale)');
     expect(geo).toContain('fn compact_stage_height_px(scale: f64) -> i32');
@@ -24,7 +26,7 @@ describe('المرحلة المصغرة ومركز الشاشة', () => {
   });
 
   it('المستطيل التفاعلي يتبع حدود الكبسولة المرئية بعد القياس', () => {
-    expect(island).toContain('reportHitRect(visualLeft,top,vw,vh+neckVisible*f)');
+    expect(island).toContain('reportHitRect(visualLeft,top,vw,vh)');
     expect(island).toContain('const vw=w*f, vh=h*f');
   });
 });
@@ -33,6 +35,13 @@ describe('النقرات تصل إلى النوافذ تحت الجزيرة', ()
   it('النافذة تستخدم hit testing أصليًا لتمرير النقاط الخارجية', () => {
     expect(hittest).toContain('HTTRANSPARENT');
     expect(hittest).toContain('WM_NCHITTEST');
+    expect(hittest).toContain('CreateRoundRectRgn');
+    expect(hittest).toContain('SetWindowRgn(hwnd, Some(region), true)');
+    expect(hittest).toContain('SetWindowRgn(hwnd, None, true)');
+    expect(rust).toContain('ClientToScreen(hwnd, &mut client_origin)');
+    expect(rust).toContain('client_offset_x, client_offset_y');
+    expect(rust).toContain('hittest::set_collapsed_window_region');
+    expect(windowsSmoke).toContain('WindowFromPoint');
     expect(hittest).toContain('fn point_is_interactive');
     expect(hittest).toContain('Hit::Transparent');
   });

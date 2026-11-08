@@ -1,21 +1,18 @@
 //! تمرير النقرات — لماذا كانت النوافذ «معطّلة» في أعلاها.
 //!
 //! نافذة الجزيرة شفافة بصريًا (`transparent(true)`) لكنها **ليست شفافة
-//! للنقر**. حجمها 480×262 منطقية، أي 600×327 بكسل فيزيائية على مقياس
-//! 125%. أي أن مستطيلًا بعرض 600 بكسل وارتفاع 327 يجلس فوق الشاشة، ويبتلع
-//! كل نقرة تقع فيه ولو كان ما تحته مرئيًا بوضوح.
+//! للنقر**. بعد التوسيع يمكن أن تبقى نافذة WebView بأبعاد أكبر من الرسم
+//! المطوي؛ لذلك لا يكفي الاعتماد على المستطيل الرسومي وحده لتمرير النقرات.
 //!
 //! هذا هو السبب الجذري لما وصفه المستخدم: «نص النوافذ معطّل في الأعلى».
 //! النص مقروء لأن النافذة شفافة، لكن النقر لا يصل إلى النافذة التي تحته لأن
 //! نافذتنا فوقها وهي دائمة البقاء في المقدمة.
 //!
-//! الحل القياسي في ويندوز: معالجة `WM_NCHITTEST`. لكل نقطة يسأل ويندوز
-//! النافذة «هل تريدين هذه النقطة؟». نجيب `HTTRANSPARENT` للنقاط التي لا
-//! يوجد فيها شيء مرئي، فيتخطاها ويندوز ويمرّر النقرة إلى ما تحتها. أما
-//! النقاط التي عليها الكبسولة فتُترك للنافذة فتبقى قابلة للنقر.
-//!
-//! القرار يُتخذ داخل النافذة نفسها، حيث تعرف الواجهة شكل الكبسولة بالضبط،
-//! ثم يُبلَّغ للخادم عبر استدعاء واحد عند كل تغيير حالة.
+//! `WM_NCHITTEST` وحده غير كافٍ: نتيجة `HTTRANSPARENT` تمرر الإدخال إلى
+//! نافذة من الخيط نفسه فقط، وليس إلى تطبيق آخر مثل Chrome. في الحالة
+//! المطوية تُضبط لذلك منطقة HWND الأصلية بشكل الكبسولة، فيختار النظام
+//! نافذة التطبيق الواقعة تحتها للنقاط خارج المنطقة. تزال المنطقة عند
+//! التوسع كي تستقبل لوحة الجزيرة الموسعة كل نقراتها.
 
 use std::sync::atomic::{AtomicI32, AtomicBool, Ordering};
 
@@ -152,6 +149,46 @@ mod imp {
 
 #[cfg(windows)]
 pub use imp::{attach, detach};
+
+/// Applies a rounded native window region while the island is collapsed.
+/// Unlike `HTTRANSPARENT`, the window manager excludes points outside this
+/// region before choosing a target, including windows owned by other threads.
+#[cfg(windows)]
+pub fn set_collapsed_window_region(
+  hwnd: windows::Win32::Foundation::HWND,
+  x: i32,
+  y: i32,
+  width: i32,
+  height: i32,
+) -> Result<(), String> {
+  use windows::Win32::Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn};
+
+  if width <= 0 || height <= 0 {
+    return clear_window_region(hwnd);
+  }
+  let region = unsafe { CreateRoundRectRgn(x, y, x + width, y + height, height, height) };
+  if region.is_invalid() {
+    return Err("تعذر إنشاء منطقة النقر المطابقة لكبسولة الجزيرة".into());
+  }
+  let applied = unsafe { SetWindowRgn(hwnd, Some(region), true) };
+  if applied == 0 {
+    let _ = unsafe { DeleteObject(HGDIOBJ(region.0)) };
+    return Err("تعذر تطبيق منطقة النقر المطابقة لكبسولة الجزيرة".into());
+  }
+  Ok(())
+}
+
+/// Restores the full native window region before an expanded state is shown.
+#[cfg(windows)]
+pub fn clear_window_region(hwnd: windows::Win32::Foundation::HWND) -> Result<(), String> {
+  use windows::Win32::Graphics::Gdi::SetWindowRgn;
+
+  let cleared = unsafe { SetWindowRgn(hwnd, None, true) };
+  if cleared == 0 {
+    return Err("تعذر استعادة منطقة نافذة الجزيرة الموسعة".into());
+  }
+  Ok(())
+}
 
 #[cfg(test)]
 mod tests {

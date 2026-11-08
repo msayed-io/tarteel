@@ -55,8 +55,8 @@ describe('التمركز: النافذة هي المرجع', () => {
   it('المرساة ثابتة ولا تعتمد على ارتفاع الجسم أثناء النابض', () => {
     expect(html).toContain('compactStageHeight=Math.max(1,Math.round(window.innerHeight))');
     const anchoredTop=(stage,smallHeight,fit)=>Math.max(0,(stage-smallHeight*fit)/2);
-    expect(anchoredTop(38,24,1)).toBe(7);
-    expect(anchoredTop(38,24,.96)).toBeCloseTo(7.48,5);
+    expect(anchoredTop(38,22,1)).toBe(8);
+    expect(anchoredTop(38,22,.96)).toBeCloseTo(8.44,5);
   });
 
   it('لا translate سالب يزحزح المحور الأفقي', () => {
@@ -108,7 +108,7 @@ describe('تزامن حجم حاوية الجزيرة مع نافذة Tauri ال
     expect(html).toContain('hitHeight:activeHitRect.height');
     expect(diagnostics).toContain('motion_top_min_screen_css_px');
     expect(diagnostics).toContain('motion_sample_count');
-    expect(diagnostics).toContain('set_interactive_rect(interactive.left, interactive.top');
+    expect(lib).toContain('hittest::set_interactive_rect(left, top, width, height)');
   });
 
   it('يسجل هندسة الشاشة والنافذة الفعلية عند الإقلاع', () => {

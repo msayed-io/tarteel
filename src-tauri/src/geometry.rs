@@ -15,9 +15,9 @@ impl Rect {
 }
 
 /// ارتفاع مساحة الرسم الصغيرة داخل نافذة الجزيرة بوحدات CSS المنطقية.
-/// يشمل الكبسولة القصيرة وامتدادها المركزي كما في island.html.
+/// يتضمن خلوصًا حول جسم الكبسولة فقط، بلا امتداد أو عنصر إضافي.
 pub const COMPACT_STAGE_LOGICAL_HEIGHT: f64 = 38.0;
-pub const CAPSULE_LOGICAL_HEIGHT: f64 = 24.0;
+pub const CAPSULE_LOGICAL_HEIGHT: f64 = 22.0;
 pub const ISLAND_MAX_LOGICAL_HEIGHT: f64 = 430.0;
 
 fn safe_scale(scale: f64) -> f64 {
@@ -35,7 +35,7 @@ pub fn compact_stage_height_px(scale: f64) -> i32 {
 }
 
 /// إزاحة مركز الكبسولة عن أعلى الشاشة بالبكسل الفيزيائي، مع إبقاء الكسر.
-/// CSS يضع جسم الكبسولة 24px في منتصف مرحلة الرسم ذات الارتفاع 38px.
+/// CSS يضع جسم الكبسولة 22px في منتصف مرحلة الرسم ذات الارتفاع 38px.
 pub fn compact_anchor_offset_px(scale: f64) -> f64 {
   (COMPACT_STAGE_LOGICAL_HEIGHT / 2.0) * safe_scale(scale)
 }
@@ -80,9 +80,9 @@ mod tests {
 
   #[test]
   fn compact_capsule_keeps_a_visible_gap_at_common_scales() {
-    assert_eq!(compact_capsule_margin_px(1.0), 7);
-    assert_eq!(compact_capsule_margin_px(1.25), 9);
-    assert_eq!(compact_capsule_margin_px(1.5), 11);
+    assert_eq!(compact_capsule_margin_px(1.0), 8);
+    assert_eq!(compact_capsule_margin_px(1.25), 10);
+    assert_eq!(compact_capsule_margin_px(1.5), 12);
   }
 
   #[test]

@@ -19,14 +19,18 @@ describe('Tarteel production surface', () => {
     expect(html).toContain('lang="ar" dir="rtl"');
   });
 
-  it('refines only compact geometry and preserves every expanded-state size', async () => {
+  it('shrinks all states coherently while preserving the expanded-state internal layout', async () => {
     const html = await read('island.html');
     const target = html.match(/TARGET=\{idle:\[(\d+),(\d+),(\d+)\],compact:\[(\d+),(\d+),(\d+)\],full:\[(\d+),(\d+),(\d+)\],prayer:\[(\d+),(\d+),(\d+)\],tools:\[(\d+),(\d+),(\d+)\],alert:\[(\d+),(\d+),(\d+)\]\}/);
     expect(target).not.toBeNull();
-    expect(target.slice(1, 4).map(Number)).toEqual([44, 24, 12]);
-    expect(target.slice(4, 7).map(Number)).toEqual([112, 24, 12]);
-    expect(target.slice(7, 10).map(Number)).toEqual([384, 210, 37]);
-    expect(html).toContain('[data-state=full] .full{transform:scale(.8)}');
+    expect(target.slice(1, 4).map(Number)).toEqual([40, 22, 11]);
+    expect(target.slice(4, 7).map(Number)).toEqual([100, 22, 11]);
+    expect(target.slice(7, 10).map(Number)).toEqual([346, 189, 33]);
+    expect(target.slice(10, 13).map(Number)).toEqual([400, 169, 40]);
+    expect(target.slice(13, 16).map(Number)).toEqual([432, 270, 41]);
+    expect(target.slice(16, 19).map(Number)).toEqual([396, 83, 36]);
+    expect(html).toContain('[data-state=full] .full{transform:scale(.72)}');
+    expect(html).toContain('[data-state=prayer] .prayer,[data-state=tools] .tools,[data-state=alert] .alert{transform:scale(.9)}');
     expect(html).toContain('.prayer{width:444px;height:188px');
     expect(html).toContain('.plist{flex:none;width:216px');
     expect(html).toContain('width:82px;height:82px;flex:0 0 82px');
@@ -166,6 +170,8 @@ describe('Tarteel production surface', () => {
     expect(islandBuilder).not.toContain('.parent(');
     expect(rust).toContain('frame::strip_frame');
     expect(rust).toContain('hittest::attach');
+    expect(rust).toContain('hittest::set_collapsed_window_region');
+    expect(rust).toContain('hittest::clear_window_region');
     expect(rust).toContain('window.label() != "main"');
     /* تغيّر مقصود في v0.6.0: (X) يُخفي إلى الصينية ولا يقتل العملية، لأن
        قتلها يُلغي الأذان. الخروج النهائي من قائمة الصينية وحدها. */
@@ -186,6 +192,8 @@ describe('Tarteel production surface', () => {
     // The former growth-driven drop shadow is gone from both the style and the script.
     expect(html).not.toContain('--p,0');
     expect(html).not.toContain("setProperty('--p'");
+    expect(html).not.toContain('.island::before');
+    expect(html).not.toContain('NECK_HEIGHT');
   });
 
   it('never re-centres a window that is still resizing', async () => {
