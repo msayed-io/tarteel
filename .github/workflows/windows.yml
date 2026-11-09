@@ -203,7 +203,7 @@ jobs:
           fi
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "release_commit=$release_commit" >> "$GITHUB_OUTPUT"
-      - name: Create or refresh draft release after successful tests
+      - name: Publish release after all checks pass
         if: ${{ steps.release-commit.outputs.mode != 'stale' }}
         shell: bash
         env:
@@ -233,16 +233,16 @@ jobs:
             if [[ "$is_draft" == "true" ]]; then
               gh release upload "$tag" "$asset" --repo "$GITHUB_REPOSITORY" --clobber
               gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes "$notes"
+              gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$existing_id" -F draft=false
             fi
           else
             gh release create "$tag" "$asset" \
               --repo "$GITHUB_REPOSITORY" \
               --title "Tarteel v$RELEASE_VERSION" \
               --target "$RELEASE_COMMIT" \
-              --draft \
               --notes "$notes"
           fi
-      - name: Verify draft release; do not publish
+      - name: Verify public release after all checks pass
         if: ${{ steps.release-commit.outputs.mode != 'stale' }}
         shell: bash
         env:
@@ -259,12 +259,14 @@ jobs:
           test "$target" = "$RELEASE_COMMIT"
           test "$digest" = "sha256:$EXPECTED_SHA256"
           draft_state="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')"
-          test "$draft_state" = "true"
+          test "$draft_state" = "false"
+          prerelease_state="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')"
+          test "$prerelease_state" = "false"
           tag_commit="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')"
           test "$tag_commit" = "$RELEASE_COMMIT"
           {
-            echo "Draft Tarteel v$RELEASE_VERSION prepared for review; it was not published."
-            echo "Public publication requires explicit user approval."
+            echo "Public Tarteel v$RELEASE_VERSION published after all CI checks passed."
+            echo "Release URL: $(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json url --jq '.url')"
             echo "GitHub build number: #$GITHUB_RUN_NUMBER"
             echo "Source commit: $RELEASE_COMMIT"
             echo "Installer SHA-256: $EXPECTED_SHA256"
