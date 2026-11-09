@@ -90,7 +90,7 @@ export default function DailyPrayerTable({ schedule, placeName, onOpenSettings }
       <section className="times glass" dir="rtl" aria-label="مواقيت الصلاة">
         <header className="times-head">
           <h2>مواقيت الصلاة</h2>
-          <button type="button" className="times-place" onClick={onOpenSettings}>
+          <button type="button" className="times-place glass rim" onClick={onOpenSettings}>
             تحديد موقعي
           </button>
         </header>
@@ -100,10 +100,10 @@ export default function DailyPrayerTable({ schedule, placeName, onOpenSettings }
   }
 
   return (
-    <section className="times glass" dir="rtl" aria-label="مواقيت الصلاة">
-      <header className="times-head">
-        <h2>مواقيت الصلاة</h2>
-        <button type="button" className="times-place" onClick={onOpenSettings} title="تغيير الموقع">
+      <section className="times glass" dir="rtl" aria-label="مواقيت الصلاة">
+        <header className="times-head">
+          <h2>مواقيت الصلاة</h2>
+          <button type="button" className="times-place glass rim" onClick={onOpenSettings} title="تغيير الموقع">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
             <path d="M12 21s-7-6.2-7-11a7 7 0 1 1 14 0c0 4.8-7 11-7 11Z" />
             <circle cx="12" cy="10" r="2.6" />

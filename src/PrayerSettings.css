@@ -597,6 +597,13 @@
   height: 16px;
 }
 
+.ps-rim-endpoint {
+  min-width: 28px;
+  color: var(--ps-text-3);
+  font-size: 11px;
+  text-align: center;
+}
+
 .prayer-settings input.ps-range {
   --ps-fill: var(--ps-range-progress, 0%);
   width: auto;

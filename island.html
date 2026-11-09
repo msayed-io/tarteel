@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>تَرتيل</title>
 <style>
-:root{--black:#000;--text:#fff;--sub:rgba(235,235,245,.6);--track:rgba(235,235,245,.3);--fill:#9d9da1;--ctl:#dcdce1;--accent:#5AA9FF;--chip:rgba(255,255,255,.1);--chip-on:rgba(255,255,255,.22);--green:var(--accent);--font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;--ease-out:cubic-bezier(.2,.9,.3,1)}
+:root{--black:#000;--rim:1;--rim-system:1;--text:#fff;--sub:rgba(235,235,245,.6);--track:rgba(235,235,245,.3);--fill:#9d9da1;--ctl:#dcdce1;--accent:#5AA9FF;--chip:rgba(255,255,255,.1);--chip-on:rgba(255,255,255,.22);--green:var(--accent);--font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;--ease-out:cubic-bezier(.2,.9,.3,1)}
 *{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}html,body{height:100%;overflow:hidden;background:transparent;color:var(--text);-webkit-font-smoothing:antialiased}body{font-family:var(--font)}button{font-family:inherit}
 .island{position:fixed;top:7px;left:0;translate:0 0;width:44px;height:24px;border-radius:12px;background:transparent;overflow:visible;cursor:pointer;transform-origin:50% 0;user-select:none;scale:var(--fit,1);will-change:width,height,border-radius;transition:scale .28s var(--ease-out);z-index:1}
 .island-surface{position:absolute;inset:0;overflow:hidden;border-radius:inherit;background:var(--black);z-index:1}
@@ -27,7 +27,7 @@
 .wave i{display:block;width:3px;height:100%;border-radius:2px;background:currentColor;transform-origin:50% 50%;animation:eq .9s ease-in-out infinite alternate;transition:transform .35s var(--ease-out)}
 .wave i:nth-child(1){animation-duration:.8s;animation-delay:-.2s}.wave i:nth-child(2){animation-duration:.6s;animation-delay:-.5s}.wave i:nth-child(3){animation-duration:1s;animation-delay:-.1s}.wave i:nth-child(4){animation-duration:.7s;animation-delay:-.7s}.wave i:nth-child(5){animation-duration:.9s;animation-delay:-.35s}
 @keyframes eq{from{transform:scaleY(.25)}to{transform:scaleY(1)}}.paused .wave i{animation:none;transform:scaleY(.2)}.compact .wave{right:9px;top:5px;width:15px;height:13px}.full .wave{right:27px;top:64px;width:28px;height:16px}
-.idle-prayer{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0;border:0;background:transparent;color:#fff;font:600 8.5px/1 var(--font);white-space:nowrap;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .2s ease,filter .2s ease}
+.idle-prayer{position:absolute;inset:0;border-radius:12px;display:flex;align-items:center;justify-content:center;padding:0;border:0;background:transparent;color:#fff;font:600 8.5px/1 var(--font);white-space:nowrap;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .2s ease,filter .2s ease}
 [data-state=idle] .idle-prayer{opacity:1;pointer-events:auto}#idlePrayerName{display:block;max-width:100%;padding:0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
 .title,.artist{position:absolute;left:124px;right:76px;font-size:22px;line-height:26px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;unicode-bidi:plaintext}
 .title{top:62px;font-weight:600;letter-spacing:-.01em;transition:opacity .15s}.artist{top:90px;font-weight:400;color:var(--sub)}
@@ -45,12 +45,16 @@
 .sw{flex:1;display:flex;align-items:center;justify-content:space-between;gap:8px;height:38px;padding:0 12px;border:0;border-radius:12px;background:var(--chip);color:#fff;font:600 13px var(--font);cursor:pointer;text-align:start}.sw i{flex:none;position:relative;width:34px;height:20px;border-radius:10px;background:rgba(255,255,255,.25);transition:background .25s}.sw i::after{content:"";position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:right .25s var(--ease-out)}.sw[aria-checked=true] i{background:var(--green)}.sw[aria-checked=true] i::after{right:16px}
 .alert .tx{flex:1;min-width:0}.alert h3{font:600 19px/24px var(--font)}.alert p{font:400 14px/19px var(--font);color:var(--sub)}.pill{height:34px;padding:0 16px;border:0;border-radius:999px;background:var(--chip-on);color:#fff;font:600 14px var(--font);cursor:pointer;transition:scale .2s var(--ease-out)}.pill:active{scale:.94}.pill.main{background:#fff;color:#000}.pill.stop{border:1px solid rgba(90,169,255,.28);background:rgba(90,169,255,.14);color:#5AA9FF}.pill[hidden]{display:none}
 @media (prefers-reduced-motion:reduce){.wave i{animation:none;transform:scaleY(.6)}}
+
+.rim{position:relative}.rim::after{content:"";position:absolute;inset:var(--rim-inset-top,0px) var(--rim-inset-right,0px) var(--rim-inset-bottom,0px) var(--rim-inset-left,0px);box-sizing:border-box;border-radius:var(--rim-radius,inherit);padding:var(--rim-w,1px);pointer-events:none;opacity:var(--rim-effective,var(--rim,1));background-image:var(--rim-image,linear-gradient(rgba(255,255,255,.06),rgba(255,255,255,.06)));background-size:100% 100%;;-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude}
+@supports not ((-webkit-mask-composite:xor) or (mask-composite:exclude)){.rim::after{display:none}.rim{box-shadow:inset 0 0 0 .5px rgba(255,255,255,.14)}}
+@media(prefers-reduced-transparency:reduce){.rim{--rim-system:.5}}
 </style>
 </head>
 <body>
 <div id="isl" class="island" data-state="idle" role="button" tabindex="0" aria-label="Dynamic Island — فتح مواقيت الصلاة" aria-expanded="false">
   <div class="island-surface">
-  <div class="layer idle" data-s="idle" dir="rtl" aria-hidden="false"><button class="idle-prayer" id="idlePrayer" aria-label="فتح مواقيت الصلاة"><span id="idlePrayerName"></span></button></div>
+  <div class="layer idle" data-s="idle" dir="rtl" aria-hidden="false"><button class="idle-prayer rim" id="idlePrayer" aria-label="فتح مواقيت الصلاة"><span id="idlePrayerName"></span></button></div>
   <div class="layer compact" data-s="compact" aria-hidden="true"><div class="art" id="compactArt"></div><div class="wave"><i></i><i></i><i></i><i></i><i></i></div></div>
   <div class="layer full" data-s="full" aria-hidden="true" inert>
     <div class="art" id="fullArt"></div><div class="title" id="ttl"></div><div class="artist" id="sub"></div><div class="wave"><i></i><i></i><i></i><i></i><i></i></div>
@@ -59,30 +63,35 @@
     <button class="ctl" id="bk" aria-label="المقطع السابق" title="اضغط مطولًا للتلاوة السابقة"><svg width="48" height="30" viewBox="0 0 48 30" stroke-width="4"><path d="M23 3 4 15l19 12ZM45 3 26 15l19 12Z"/></svg></button>
     <button class="ctl pp" id="pp" aria-label="تشغيل"><svg class="ico pause" width="36" height="48" viewBox="0 0 36 48" stroke="none"><rect width="14" height="48" rx="4"/><rect x="22" width="14" height="48" rx="4"/></svg><svg class="ico play" width="38" height="48" viewBox="0 0 38 48" stroke-width="8"><path d="M6 6 33 24 6 42Z"/></svg></button>
     <button class="ctl" id="fw" aria-label="المقطع التالي" title="اضغط مطولًا للتلاوة التالية"><svg width="48" height="30" viewBox="0 0 48 30" stroke-width="4"><path d="M3 3l19 12L3 27ZM25 3l19 12-19 12Z"/></svg></button>
-    <button class="tbtn" id="tb" aria-label="الأدوات"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 12h3M13 12h7M4 17h11M21 17h-1"/><circle cx="16" cy="7" r="2.5"/><circle cx="10" cy="12" r="2.5"/><circle cx="18" cy="17" r="2.5"/></svg></button>
+    <button class="tbtn rim" id="tb" aria-label="الأدوات"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 12h3M13 12h7M4 17h11M21 17h-1"/><circle cx="16" cy="7" r="2.5"/><circle cx="10" cy="12" r="2.5"/><circle cx="18" cy="17" r="2.5"/></svg></button>
   </div>
   <div class="layer prayer" data-s="prayer" dir="rtl" aria-hidden="true" role="group" aria-label="مواقيت الصلاة">
     <div class="pmain"><div class="next-info"><span class="lab" id="plab">المواقيت غير متاحة</span><h2 id="pnm">—</h2></div><div class="prayer-count-wrap"><div class="prayer-count-ring" id="prayerCountRing" role="timer" aria-live="off" aria-label="الوقت المتبقي غير متاح"><div class="prayer-count-core"><div class="pcd"><b id="pcd">—</b><small>متبقي</small></div></div></div></div></div>
     <div class="plist" id="plist" aria-label="جدول اليوم"></div>
   </div>
   <div class="layer tools" data-s="tools" dir="rtl" aria-hidden="true">
-    <div class="th"><b>الأدوات</b><button class="tbtn" id="tback" aria-label="رجوع"><svg width="22" height="22" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></button></div>
-    <div class="sec"><label>السرعة</label><div class="chips" id="chSpeed"><button data-v="0.75" aria-pressed="false">0.75×</button><button data-v="1" aria-pressed="true">1×</button><button data-v="1.25" aria-pressed="false">1.25×</button><button data-v="1.5" aria-pressed="false">1.5×</button></div></div>
-    <div class="sec"><label>مؤقت النوم</label><div class="chips" id="chSleep"><button data-v="0" aria-pressed="true">إيقاف</button><button data-v="15" aria-pressed="false">15 د</button><button data-v="30" aria-pressed="false">30 د</button><button data-v="60" aria-pressed="false">60 د</button><button data-v="end" aria-pressed="false">نهاية السورة</button></div></div>
+    <div class="th"><b>الأدوات</b><button class="tbtn rim" id="tback" aria-label="رجوع"><svg width="22" height="22" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></button></div>
+    <div class="sec"><label>السرعة</label><div class="chips" id="chSpeed"><button class="rim" data-v="0.75" aria-pressed="false">0.75×</button><button class="rim" data-v="1" aria-pressed="true">1×</button><button class="rim" data-v="1.25" aria-pressed="false">1.25×</button><button class="rim" data-v="1.5" aria-pressed="false">1.5×</button></div></div>
+    <div class="sec"><label>مؤقت النوم</label><div class="chips" id="chSleep"><button class="rim" data-v="0" aria-pressed="true">إيقاف</button><button class="rim" data-v="15" aria-pressed="false">15 د</button><button class="rim" data-v="30" aria-pressed="false">30 د</button><button class="rim" data-v="60" aria-pressed="false">60 د</button><button class="rim" data-v="end" aria-pressed="false">نهاية السورة</button></div></div>
     <div class="sec"><label>إعدادات الصلاة</label><div class="rows"><button class="sw" id="swCount" role="switch" aria-checked="false"><span>عرض الصلاة القادمة</span><i></i></button><button class="sw" id="swPause" role="switch" aria-checked="true"><span>إيقاف التلاوة عند الأذان</span><i></i></button></div></div>
   </div>
-  <div class="layer alert" data-s="alert" dir="rtl" aria-hidden="true" role="alert"><div class="tx"><h3 id="alT"></h3><p id="alS"></p></div><button class="pill stop" id="alStop" hidden>إيقاف الأذان</button><button class="pill" id="alR" hidden>استئناف</button><button class="pill main" id="alD">تم</button></div>
+  <div class="layer alert" data-s="alert" dir="rtl" aria-hidden="true" role="alert"><div class="tx"><h3 id="alT"></h3><p id="alS"></p></div><button class="pill stop rim" id="alStop" hidden>إيقاف الأذان</button><button class="pill rim" id="alR" hidden>استئناف</button><button class="pill main rim" id="alD">تم</button></div>
   </div>
 </div>
 <script type="module">
 import { emit, listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { compactTopInset, contentViewportSize, nativeWindowSize, requiredViewportHeight } from './src/engine/island-geometry.js';
+import { installSpecularRim } from './src/lib/specular-rim.js';
+import { applyRimIntensity, readRimIntensity } from './src/lib/rim-preference.js';
+applyRimIntensity(readRimIntensity(), document);
+installSpecularRim(document);
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)],isl=$('#isl'),fill=$('#fill'),tc=$('#tc'),rem=$('#tr'),bar=$('#bar'),pp=$('#pp'),toolsEl=$('.layer.tools');
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v)),toArabic=v=>String(v).replace(/\d/g,d=>'٠١٢٣٤٥٦٧٨٩'[d]);
 const fmt=s=>{s=Math.max(0,Math.floor(Number(s)||0));return toArabic(Math.floor(s/60)+':'+String(s%60).padStart(2,'0'))};
 const countdown=ms=>{const n=Math.max(0,Math.ceil(ms/1000)),h=Math.floor(n/3600),m=Math.floor(n%3600/60),s=n%60;return toArabic(h?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`)};
 const control=(action,extra={})=>emit('island-control',{action,...extra}).catch(cause=>console.error('Tarteel island control event failed',cause));
+listen('island-rim-intensity',event=>applyRimIntensity(event.payload?.value,document)).catch(cause=>console.error('Tarteel island rim listener failed',cause));
 const RM=matchMedia('(prefers-reduced-motion:reduce)').matches,mk=(x,k,c)=>({x,v:0,t:x,k,c:RM?2*Math.sqrt(k):c}),S={w:mk(44,300,28),h:mk(24,260,25),r:mk(12,320,30)};
 /*
  * صُغّرت الحالتان المدمجتان، وأُزيل الامتداد السفلي المنفصل.

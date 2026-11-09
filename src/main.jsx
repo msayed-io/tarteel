@@ -8,6 +8,8 @@ import PrayerSettings from './PrayerSettings.jsx';
 import { displayPlaceName } from './engine/display.js';
 import { resolveLocation, readDevicePosition, locationNeedsRefresh, describeLocationError } from './engine/location.js';
 import { buildSchedule, scheduleNeedsRebuild, alarmEvents, upcoming, current as currentPrayerOf, countdownLabel, toNativeEvents } from './engine/schedule.js';
+import { installSpecularRim } from './lib/specular-rim.js';
+import { applyRimIntensity, readRimIntensity } from './lib/rim-preference.js';
 import './styles.css';
 
 const DIG = '٠١٢٣٤٥٦٧٨٩';
@@ -94,6 +96,19 @@ const mimeFor = path => {
 };
 
 function App() {
+  useEffect(() => {
+    const broadcastRimIntensity = event => {
+      const value = Number(event.detail?.value);
+      if (Number.isFinite(value)) emit('island-rim-intensity', { value }).catch(cause => console.error('Tarteel island rim update failed', cause));
+    };
+    document.addEventListener('tarteel-rim-change', broadcastRimIntensity);
+    applyRimIntensity(readRimIntensity(), document);
+    const uninstallRim = installSpecularRim(document);
+    return () => {
+      document.removeEventListener('tarteel-rim-change', broadcastRimIntensity);
+      uninstallRim();
+    };
+  }, []);
   const initialConfig = readPrayerConfig();
   const [tracks, setTracks] = useState(() => readJson('tarteel.library', []));
   const [favorites, setFavorites] = useState(() => new Set(readJson('tarteel.favorites', [])));
@@ -754,7 +769,7 @@ function App() {
   return <>
     <header className="bar">
       <div className="brand glass rim"><div className="mark">ت</div><b>تَرتيل</b></div>
-      <div className="tabs glass rim" role="group" aria-label="التصفية"><button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>المكتبة</button><button aria-pressed={filter === 'fav'} onClick={() => setFilter('fav')}>المفضلة</button></div>
+      <div className="tabs glass rim" role="group" aria-label="التصفية"><button className="rim" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>المكتبة</button><button className="rim" aria-pressed={filter === 'fav'} onClick={() => setFilter('fav')}>المفضلة</button></div>
       <div className="tools"><label className="search glass rim"><Icon name="search"/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="ابحث عن سورة أو قارئ" aria-label="بحث"/></label><button className="circle glass btn rim" aria-label="اختيار مجلد الصوت" onClick={selectFolder}><Icon name="folder"/></button><button className="circle glass btn rim" aria-label="إعدادات الصلاة والموقع" onClick={() => setPrayerSettingsOpen(true)}><Icon name="sliders"/></button></div>
     </header>
     <main>
@@ -762,10 +777,10 @@ function App() {
       {error && <p className="error" role="alert">{error}</p>}
       {!tracks.length ? <div className="empty">{busy ? 'جارٍ فحص مجلد الصوت…' : 'اختر مجلد الصوت لبدء مكتبتك'}</div> : visible.length ? <div className="list" role="list">{visible.map(track => {
         const index = tracks.indexOf(track), on = index === current;
-        return <div className={`row${on ? ' on' : ''}`} role="listitem" key={track.path}><button className="hit" onClick={() => load(index, true)} aria-current={on ? 'true' : undefined}><span className="cover">{track.cover ? <img src={track.cover} alt=""/> : on && playing ? <span className="eq"><i/><i/><i/></span> : track.file_name.slice(0, 1)}</span><span className="meta"><b title={track.file_name}>{track.file_name}</b><span>{track.artist || 'ملف صوتي محلي'}</span></span><span className="dur">{track.duration ? fmt(track.duration) : '—'}</span></button><button className="fav" aria-pressed={favorites.has(index)} aria-label={`المفضلة: ${track.file_name}`} onClick={() => setFavorites(old => { const next = new Set(old); next.has(index) ? next.delete(index) : next.add(index); return next; })}><Icon name="heart" filled={favorites.has(index)}/></button></div>;
+        return <div className={`row${on ? ' on' : ''}`} role="listitem" key={track.path}><button className="hit" onClick={() => load(index, true)} aria-current={on ? 'true' : undefined}><span className="cover">{track.cover ? <img src={track.cover} alt=""/> : on && playing ? <span className="eq"><i/><i/><i/></span> : track.file_name.slice(0, 1)}</span><span className="meta"><b title={track.file_name}>{track.file_name}</b><span>{track.artist || 'ملف صوتي محلي'}</span></span><span className="dur">{track.duration ? fmt(track.duration) : '—'}</span></button><button className="fav rim" aria-pressed={favorites.has(index)} aria-label={`المفضلة: ${track.file_name}`} onClick={() => setFavorites(old => { const next = new Set(old); next.has(index) ? next.delete(index) : next.add(index); return next; })}><Icon name="heart" filled={favorites.has(index)}/></button></div>;
       })}</div> : <p className="empty">{query.trim() ? 'لا توجد نتائج' : 'لم تُضف أي تلاوة إلى المفضلة بعد'}</p>}
     </main>
-    <footer className="player glass big"><div className="pr"><div className="now">{active ? <div className="cover">{active.cover ? <img src={active.cover} alt=""/> : active.file_name.slice(0, 1)}</div> : <div className="cover">ت</div>}<div className="meta"><b title={active?.file_name || ''}>{active?.title || active?.file_name || ''}</b><span>{active?.artist || ''}</span></div></div><div className="ctl"><button className="tbtn" onClick={() => step(-1)} aria-label="السابق"><Transport type="prev"/></button><button className="tbtn play" onClick={toggle} aria-label={playing ? 'إيقاف مؤقت' : 'تشغيل'}>{playing ? <Transport type="pause"/> : <Transport type="play"/>}</button><button className="tbtn" onClick={() => step(1)} aria-label="التالي"><Transport type="next"/></button></div><div className="vol"><input type="range" min="0" max="100" value={volume} onChange={changeVolume} style={{ '--p': `${volume}%` }} aria-label="مستوى الصوت"/><Icon name="volume"/></div></div><div className="seek"><span>{fmt(pos)}</span><input type="range" min="0" max={duration || 0} step="any" value={Math.min(pos, duration || 0)} onChange={seek} style={{ '--p': `${duration ? pos / duration * 100 : 0}%` }} aria-label="التقدّم"/><span>{fmt(duration)}</span></div></footer>
+    <footer className="player glass big"><div className="pr"><div className="now">{active ? <div className="cover">{active.cover ? <img src={active.cover} alt=""/> : active.file_name.slice(0, 1)}</div> : <div className="cover">ت</div>}<div className="meta"><b title={active?.file_name || ''}>{active?.title || active?.file_name || ''}</b><span>{active?.artist || ''}</span></div></div><div className="ctl"><button className="tbtn rim" onClick={() => step(-1)} aria-label="السابق"><Transport type="prev"/></button><button className="tbtn play rim" onClick={toggle} aria-label={playing ? 'إيقاف مؤقت' : 'تشغيل'}>{playing ? <Transport type="pause"/> : <Transport type="play"/>}</button><button className="tbtn rim" onClick={() => step(1)} aria-label="التالي"><Transport type="next"/></button></div><div className="vol"><input type="range" min="0" max="100" value={volume} onChange={changeVolume} style={{ '--p': `${volume}%` }} aria-label="مستوى الصوت"/><Icon name="volume"/></div></div><div className="seek"><span>{fmt(pos)}</span><input type="range" min="0" max={duration || 0} step="any" value={Math.min(pos, duration || 0)} onChange={seek} style={{ '--p': `${duration ? pos / duration * 100 : 0}%` }} aria-label="التقدّم"/><span>{fmt(duration)}</span></div></footer>
     {prayerSettingsOpen && <PrayerSettings config={prayerConfig} schedule={prayerSchedule} onClose={() => setPrayerSettingsOpen(false)} onSave={savePrayerSettings} onPreviewAlarm={previewAlarm}/>}
   </>;
 }

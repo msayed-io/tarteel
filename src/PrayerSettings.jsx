@@ -4,6 +4,7 @@ import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notif
 import { invoke } from '@tauri-apps/api/core';
 import { resolveLocation, describeLocationError } from './engine/location.js';
 import { METHODS, methodForTimeZone } from './engine/astro.js';
+import { applyRimIntensity, readRimIntensity, storeRimIntensity } from './lib/rim-preference.js';
 import './PrayerSettings.css';
 
 /**
@@ -36,6 +37,7 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
   const [adhanVolume, setAdhanVolume] = useState(config.adhanVolume ?? 80);
   const [adhanMuted, setAdhanMuted] = useState(Boolean(config.adhanMuted ?? false));
   const [autostart, setAutostart] = useState(false);
+  const [rimIntensity, setRimIntensity] = useState(() => readRimIntensity());
   const [methodId, setMethodId] = useState(config.methodId || 'auto');
   const [school, setSchool] = useState(config.school ?? 'auto');
   /* تبقى الإزاحات المحفوظة داخليًا وفي حساب الجدول حتى من دون إظهار بطاقة الضبط. */
@@ -46,6 +48,12 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
   /* آخر إعدادات أُرسلت، لمنع حلقة حفظ لا نهائية عند تحديث الأب. */
   const lastSavedRef = useRef('');
   const timerRef = useRef(0);
+
+  const handleRimIntensityChange = event => {
+    const value = storeRimIntensity(event.target.value);
+    setRimIntensity(value);
+    applyRimIntensity(value, document);
+  };
 
   const snapshot = useCallback(() => ({
     location,
@@ -202,7 +210,7 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
             <h2 id="ps-title">إعدادات الصلاة والتنبيهات</h2>
             <p className="ps-head-sub"><Icon name="check" /> يُحفظ كل تغيير تلقائيًا</p>
           </div>
-          <button type="button" className="ps-close" aria-label="إغلاق" onClick={onClose}>
+          <button type="button" className="ps-close rim" aria-label="إغلاق" onClick={onClose}>
             <Icon name="x" />
           </button>
         </header>
@@ -221,7 +229,7 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
                   </div>
                 )}
               </div>
-              <button type="button" className={`ps-button ps-button-blue${busy ? ' is-spinning' : ''}`} onClick={requestDeviceLocation} disabled={busy} aria-busy={busy}>
+              <button type="button" className={`ps-button ps-button-blue rim${busy ? ' is-spinning' : ''}`} onClick={requestDeviceLocation} disabled={busy} aria-busy={busy}>
                 <Icon name="refresh" /> {location ? 'تحديث موقعي الآن' : 'استخدام موقع الجهاز وطلب الإذن'}
               </button>
             </div>
@@ -267,7 +275,7 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
               <div className="ps-control-row">
                 <span className="ps-row-icon"><Icon name="bell" /></span>
                 <span className="ps-row-label" id="ps-notify-label">إذن إشعار التنبيه المسبق</span>
-                <button id="ps-notify" type="button" className="ps-button ps-button-ghost ps-control" aria-labelledby="ps-notify-label" aria-pressed={notificationsAllowed} onClick={requestNotifications}>
+                <button id="ps-notify" type="button" className="ps-button ps-button-ghost ps-control rim" aria-labelledby="ps-notify-label" aria-pressed={notificationsAllowed} onClick={requestNotifications}>
                   {notificationsAllowed ? 'ممنوحة ✓' : 'طلب الإذن'}
                 </button>
               </div>
@@ -330,7 +338,7 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
 
               {onPreviewAlarm && (
                 <div className="ps-card-foot">
-                  <button type="button" className="ps-button ps-button-preview" onClick={onPreviewAlarm}>
+                  <button type="button" className="ps-button ps-button-preview rim" onClick={onPreviewAlarm}>
                     <Icon name="play" /> تجربة صوت الأذان
                   </button>
                 </div>
@@ -354,6 +362,37 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
                 </label>
               </div>
             </div>
+          </section>
+
+          <section className="ps-section" aria-labelledby="ps-rim-title">
+            <h3 className="ps-section-title" id="ps-rim-title">المظهر</h3>
+            <div className="ps-card">
+              <div className="ps-control-row ps-volume-row">
+                <div className="ps-volume-heading">
+                  <span className="ps-row-icon"><Icon name="sun" /></span>
+                  <span className="ps-row-label" id="ps-rim-label">شدة الحافة اللامعة</span>
+                  <bdi className="ps-volume-badge" dir="ltr">{Math.round(rimIntensity * 100)}%</bdi>
+                </div>
+                <div className="ps-slider-line">
+                  <span className="ps-rim-endpoint" aria-hidden="true">٠</span>
+                  <input
+                    className="ps-range"
+                    id="ps-rim-intensity"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={rimIntensity}
+                    aria-labelledby="ps-rim-label"
+                    aria-valuetext={`${Math.round(rimIntensity * 100)}%`}
+                    style={{ '--ps-range-progress': `${rimIntensity * 100}%` }}
+                    onChange={handleRimIntensityChange}
+                  />
+                  <span className="ps-rim-endpoint" aria-hidden="true">١٠٠٪</span>
+                </div>
+              </div>
+            </div>
+            <p className="ps-hint">خفّف اللمعة أو أوقفها عند ٠٪؛ لا يتغيّر شكل الحافة أو سماكتها.</p>
           </section>
 
           {error && <p className="ps-feedback" role="alert">{error}</p>}
