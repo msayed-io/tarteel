@@ -69,7 +69,10 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
+      - name: Install Chromium for rendered rim pixel tests
+        run: npx playwright install --with-deps chromium
       - run: npm test
+      - run: npm run test:rim-browser
       - run: npm run build
 
   windows:
@@ -86,6 +89,9 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
+      - name: Install Chromium for rendered rim pixel tests
+        run: npx playwright install chromium
+      - run: npm run test:rim-browser
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
         with:
           toolchain: 1.90.0-x86_64-pc-windows-msvc

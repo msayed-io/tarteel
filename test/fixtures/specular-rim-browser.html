@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ar" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Specular rim pixel smoke fixture</title>
+  <link rel="stylesheet" href="../../src/styles.css">
+  <style>
+    html, body { width: 1100px; height: 1200px; min-width: 1100px; margin: 0; overflow: visible; background: #080808; }
+    body { position: relative; }
+    #app { position: static; }
+    .rim-host { position: absolute; left: 20px; width: 370px; height: 80px; overflow: visible; background: #000; }
+    #blackHost { top: 20px; background: #000; }
+    #lightHost { top: 120px; background: #c0c0c0; }
+    #motionHost { top: 220px; background: rgb(20,20,20); transition: background-color 400ms linear; }
+    #redHost { top: 320px; background: #c0c0c0; }
+    .probe { position: absolute; left: 10px; top: 10px; width: 350px; height: 60px; border: 0; border-radius: 30px; padding: 0; background: transparent; }
+    #circle44, #circle36 { position: absolute; left: 450px; top: 30px; border: 0; padding: 0; background: #000; border-radius: 50%; }
+    #circle44 { width: 44px; height: 44px; }
+    #circle36 { left: 520px; width: 36px; height: 36px; }
+    #rtlHost { position: absolute; left: 20px; top: 420px; width: 370px; height: 80px; background: #000; direction: rtl; }
+    #rtlProbe { left: 10px; top: 10px; width: 350px; height: 60px; }
+    #rotHost { position: absolute; left: 570px; top: 150px; width: 500px; height: 470px; background: #000; }
+    #rotProbe { position: absolute; left: 75px; top: 220px; width: 350px; height: 60px; border-radius: 30px; background: transparent; transform: rotate(90deg); transform-origin: 50% 50%; }
+    #moveProbe { transition: width 320ms linear, height 320ms linear, border-radius 320ms linear, scale 320ms linear; }
+    #glassHost { position: absolute; left: 20px; top: 520px; width: 370px; height: 80px; background: repeating-linear-gradient(90deg,#111 0 12px,#292929 12px 24px); }
+    #glassTest { position: absolute; inset: 10px; border-radius: 20px; background: var(--glass); }
+    #calPillHost { top: 620px; background: #000; }
+    #calCircle44Host, #calCircle36Host { position: absolute; left: 450px; top: 620px; width: 64px; height: 64px; background: #000; }
+    #calCircle36Host { left: 520px; width: 56px; height: 56px; }
+    #calCircle44, #calCircle36 { position: absolute; left: 10px; top: 10px; border-radius: 50%; background: transparent; }
+    #calCircle44 { width: 44px; height: 44px; }
+    #calCircle36 { width: 36px; height: 36px; }
+    .calibration { --rim-image: linear-gradient(#fff,#fff); --rim-effective: 1; }
+    #scrollHost { position: absolute; left: 20px; top: 930px; width: 370px; height: 80px; background: #000; }
+    #scrollProbe { left: 10px; top: 10px; }
+    #affineHost, #calAffineHost { position: absolute; left: 20px; top: 1100px; width: 1000px; height: 300px; background: #000; }
+    #calAffineHost { top: 1450px; }
+    #affineProbe, #calAffineProbe { left: 100px; top: 80px; transform-origin: 0 0; transform: matrix(2,0,0,1,0,0); }
+    #nestedHost { position: absolute; left: 20px; top: 1800px; width: 370px; height: 80px; background: #000; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <section id="blackHost" class="rim-host"><button id="blackProbe" class="probe rim" aria-label="black background"></button></section>
+    <section id="lightHost" class="rim-host"><button id="lightProbe" class="probe rim" aria-label="light background"></button></section>
+    <section id="motionHost" class="rim-host"><button id="moveProbe" class="probe glass btn rim" aria-label="moving background"></button></section>
+    <section id="redHost" class="rim-host"><button id="redProbe" class="probe rim" aria-label="red pixel test"></button></section>
+    <button id="circle44" class="rim" aria-label="44 pixel circle"></button>
+    <button id="circle36" class="rim" aria-label="36 pixel circle"></button>
+    <div id="rtlHost"><button id="rtlProbe" class="probe rim" aria-label="RTL background"></button></div>
+    <section id="rotHost"><button id="rotProbe" class="rim" aria-label="rotated pill"></button></section>
+    <section id="glassHost"><div id="glassTest" class="glass"></div></section>
+    <section id="scrollHost"><button id="scrollProbe" class="probe rim" aria-label="scroll test"></button></section>
+    <section id="affineHost"><button id="affineProbe" class="probe rim" aria-label="affine transform"></button></section>
+    <section id="nestedHost" class="glass"><button id="nestedProbe" class="probe rim" aria-label="nested glass control"></button></section>
+  </div>
+  <section id="calPillHost" class="rim-host"><div id="calPill" class="probe rim calibration"></div></section>
+  <section id="calCircle44Host"><div id="calCircle44" class="rim calibration"></div></section>
+  <section id="calCircle36Host"><div id="calCircle36" class="rim calibration"></div></section>
+  <section id="calAffineHost"><div id="calAffineProbe" class="probe rim calibration"></div></section>
+  <script type="module">
+    import { installSpecularRim, rasterizeSpecularRim } from '../../src/lib/specular-rim.js';
+    const ringUrl = (width, height, radius, transform) => {
+      const image = rasterizeSpecularRim({ width, height, radius, transform, devicePixelRatio: window.devicePixelRatio, includeLight: false });
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext('2d');
+      const pixels = context.createImageData(image.width, image.height);
+      pixels.data.set(image.data);
+      context.putImageData(pixels, 0, 0);
+      return `url("${canvas.toDataURL('image/png')}")`;
+    };
+    document.getElementById('calPill').style.setProperty('--rim-image', ringUrl(350, 60, 30));
+    document.getElementById('calCircle44').style.setProperty('--rim-image', ringUrl(44, 44, 22));
+    document.getElementById('calCircle36').style.setProperty('--rim-image', ringUrl(36, 36, 18));
+    window.setAffineMatrix = async transform => {
+      const { a, b, c, d } = transform;
+      const css = `matrix(${a},${b},${c},${d},0,0)`;
+      document.getElementById('affineProbe').style.transform = css;
+      const calibration = document.getElementById('calAffineProbe');
+      calibration.style.transform = css;
+      calibration.style.setProperty('--rim-image', ringUrl(350, 60, 30, transform));
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    };
+    await window.setAffineMatrix({ a: 2, b: 0, c: 0, d: 1 });
+    installSpecularRim(document.getElementById('app'));
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    window.setRedRim = () => {
+      const image = rasterizeSpecularRim({ width: 350, height: 60, radius: 30, devicePixelRatio: window.devicePixelRatio, color: [255, 0, 0] });
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext('2d');
+      const pixels = context.createImageData(image.width, image.height);
+      pixels.data.set(image.data);
+      context.putImageData(pixels, 0, 0);
+      document.getElementById('redProbe').style.setProperty('--rim-image', `url("${canvas.toDataURL('image/png')}")`);
+    };
+    window.animateBackdrop = () => { document.getElementById('motionHost').style.backgroundColor = 'rgb(100,100,100)'; };
+    window.rimTestReady = true;
+  </script>
+</body>
+</html>

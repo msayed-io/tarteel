@@ -4,6 +4,7 @@ const FILL_LIGHT = 0.28;
 const EXPONENT = 6;
 const INV_SQRT2 = 1 / Math.sqrt(2);
 const EDGE_WIDTH = 1;
+const SPATIAL_HANDOFF = 12;
 const renderCache = new WeakMap();
 const GEOMETRY_PROPERTIES = new Set([
   'transform', 'rotate', 'scale', 'translate', 'left', 'right', 'top', 'bottom', 'width', 'height',
@@ -17,6 +18,165 @@ const GEOMETRY_ANIMATION_KEYS = new Set([
 const clamp01 = value => Math.max(0, Math.min(1, value));
 const signNonZero = value => value < 0 ? -1 : 1;
 
+function perimeterMetrics(width, height, radius) {
+  const r = Math.max(0, Math.min(Number(radius) || 0, width / 2, height / 2));
+  const top = Math.max(0, width - 2 * r);
+  const side = Math.max(0, height - 2 * r);
+  const arc = r * Math.PI / 2;
+  const perimeter = 2 * (top + side) + 4 * arc;
+  return { r, top, side, arc, perimeter };
+}
+
+function maximumSingularValue(matrix) {
+  const { a = 1, b = 0, c = 0, d = 1 } = matrix;
+  const trace = a * a + b * b + c * c + d * d;
+  const determinant = a * d - b * c;
+  const discriminant = Math.sqrt(Math.max(0, trace * trace - 4 * determinant * determinant));
+  return Math.sqrt(Math.max(1e-12, (trace + discriminant) / 2));
+}
+
+/** Build the screen-space perimeter once; straight sections are exact and arcs use an integrated LUT. */
+function buildScreenPerimeterMetric(width, height, radius, matrix) {
+  const { a = 1, b = 0, c = 0, d = 1 } = matrix;
+  const { r, top, side, arc, perimeter } = perimeterMetrics(width, height, radius);
+  const columnX = Math.hypot(a, b);
+  const columnY = Math.hypot(c, d);
+  const dot = a * c + b * d;
+  const uniformRotationScale = Math.abs(columnX - columnY) < 1e-10 && Math.abs(dot) < 1e-10;
+  const uniformScale = (columnX + columnY) / 2 || 1;
+  if (uniformRotationScale) {
+    return {
+      total: perimeter * uniformScale,
+      at: position => ((position % perimeter) + perimeter) % perimeter * uniformScale,
+    };
+  }
+
+  const segments = [];
+  let localStart = 0;
+  let screenStart = 0;
+  const addStraight = (length, tangentX, tangentY) => {
+    if (length <= 0) return;
+    const factor = Math.hypot(a * tangentX + c * tangentY, b * tangentX + d * tangentY);
+    segments.push({ localStart, localLength: length, screenStart, screenLength: length * factor, kind: 'straight', factor });
+    localStart += length;
+    screenStart += length * factor;
+  };
+  const addArc = (length, thetaStart) => {
+    if (length <= 0 || r <= 0) return;
+    const count = 64;
+    const values = new Float64Array(count + 1);
+    const speed = theta => {
+      const tx = -Math.sin(theta);
+      const ty = Math.cos(theta);
+      return r * Math.hypot(a * tx + c * ty, b * tx + d * ty);
+    };
+    for (let i = 1; i <= count; i += 1) {
+      const lo = thetaStart + (i - 1) * Math.PI / 2 / count;
+      const hi = thetaStart + i * Math.PI / 2 / count;
+      const mid = (lo + hi) / 2;
+      values[i] = values[i - 1] + (hi - lo) * (speed(lo) + 4 * speed(mid) + speed(hi)) / 6;
+    }
+    segments.push({ localStart, localLength: length, screenStart, screenLength: values[count], kind: 'arc', values, thetaStart, count });
+    localStart += length;
+    screenStart += values[count];
+  };
+
+  addStraight(top, 1, 0);
+  addArc(arc, -Math.PI / 2);
+  addStraight(side, 0, 1);
+  addArc(arc, 0);
+  addStraight(top, -1, 0);
+  addArc(arc, Math.PI / 2);
+  addStraight(side, 0, -1);
+  addArc(arc, Math.PI);
+
+  return {
+    total: screenStart,
+    at(position) {
+      if (perimeter <= 0) return 0;
+      const value = ((position % perimeter) + perimeter) % perimeter;
+      const segment = segments.find((item, index) => value < item.localStart + item.localLength || index === segments.length - 1);
+      if (!segment) return 0;
+      const local = Math.max(0, Math.min(segment.localLength, value - segment.localStart));
+      if (segment.kind === 'straight') return segment.screenStart + local * segment.factor;
+      const fraction = local / segment.localLength;
+      const scaled = fraction * segment.count;
+      const index = Math.min(segment.count - 1, Math.floor(scaled));
+      const part = scaled - index;
+      const arcLength = segment.values[index] + (segment.values[index + 1] - segment.values[index]) * part;
+      return segment.screenStart + arcLength;
+    },
+  };
+}
+
+/** Return a clockwise perimeter coordinate measured from the top-left tangent. */
+function perimeterPosition(nx, ny, x, y, width, height, radius) {
+  const { r, top, side, arc } = perimeterMetrics(width, height, radius);
+  const rightStart = top + arc;
+  const bottomStart = rightStart + side + arc;
+  const leftStart = bottomStart + top + arc;
+  const topLeftStart = leftStart + side;
+  const epsilon = 1e-7;
+
+  if (nx < -epsilon && ny < -epsilon) {
+    let angle = Math.atan2(ny, nx);
+    if (angle < 0) angle += 2 * Math.PI;
+    return topLeftStart + r * (angle - Math.PI);
+  }
+  if (nx > epsilon && ny < -epsilon) {
+    const angle = Math.atan2(ny, nx);
+    return top + r * (angle + Math.PI / 2);
+  }
+  if (nx > epsilon && ny > epsilon) {
+    const angle = Math.atan2(ny, nx);
+    return rightStart + side + r * angle;
+  }
+  if (nx < -epsilon && ny > epsilon) {
+    const angle = Math.atan2(ny, nx);
+    return bottomStart + r * (angle - Math.PI / 2);
+  }
+  if (ny < 0) return Math.max(0, Math.min(top, x - r));
+  if (nx > 0) return rightStart + Math.max(0, Math.min(side, y - r));
+  if (ny > 0) return bottomStart + Math.max(0, Math.min(top, width - r - x));
+  if (nx < 0) return leftStart + Math.max(0, Math.min(side, height - r - y));
+  return 0;
+}
+
+function pointOnPerimeter(width, height, radius, position) {
+  const { r, top, side, arc, perimeter } = perimeterMetrics(width, height, radius);
+  let s = ((position % perimeter) + perimeter) % perimeter;
+  if (s <= top || arc === 0) return { x: r + Math.min(s, top), y: 0 };
+  s -= top;
+  if (s <= arc) {
+    const angle = -Math.PI / 2 + s / r;
+    return { x: width - r + r * Math.cos(angle), y: r + r * Math.sin(angle) };
+  }
+  s -= arc;
+  if (s <= side || arc === 0) return { x: width, y: r + Math.min(s, side) };
+  s -= side;
+  if (s <= arc) {
+    const angle = s / r;
+    return { x: width - r + r * Math.cos(angle), y: height - r + r * Math.sin(angle) };
+  }
+  s -= arc;
+  if (s <= top || arc === 0) return { x: width - r - Math.min(s, top), y: height };
+  s -= top;
+  if (s <= arc) {
+    const angle = Math.PI / 2 + s / r;
+    return { x: r + r * Math.cos(angle), y: height - r + r * Math.sin(angle) };
+  }
+  s -= arc;
+  if (s <= side || arc === 0) return { x: 0, y: height - r - Math.min(s, side) };
+  s -= side;
+  const angle = Math.PI + s / r;
+  return { x: r + r * Math.cos(angle), y: r + r * Math.sin(angle) };
+}
+
+/** Expose boundary points so pixel tests can sample exact positions on the rim. */
+export function roundedRectBoundaryPoint(width, height, radius, position) {
+  return pointOnPerimeter(width, height, radius, position);
+}
+
 /** Exact alpha from the directive's screen-fixed two-lobe lighting model. */
 export function specularRimIntensity(nx, ny) {
   const length = Math.hypot(nx, ny);
@@ -26,6 +186,58 @@ export function specularRimIntensity(nx, ny) {
   const towardKey = Math.max(0, -(x + y) * INV_SQRT2);
   const towardFill = Math.max(0, (x + y) * INV_SQRT2);
   return BASE + KEY_LIGHT * towardKey ** EXPONENT + FILL_LIGHT * towardFill ** EXPONENT;
+}
+
+/** Combine the screen-space normal model with cubic, fixed-pixel spatial envelopes. */
+export function combinedSpecularRimIntensity({ nx, ny, localNx = nx, localNy = ny, x, y, width, height, radius, transform = { a: 1, b: 0, c: 0, d: 1 }, perimeterMetric } = {}) {
+  const length = Math.hypot(nx, ny);
+  if (!Number.isFinite(length) || length === 0) return BASE;
+  const screenX = nx / length;
+  const screenY = ny / length;
+  const towardKey = Math.max(0, -(screenX + screenY) * INV_SQRT2) ** EXPONENT;
+  const towardFill = Math.max(0, (screenX + screenY) * INV_SQRT2) ** EXPONENT;
+  if (towardKey === 0 && towardFill === 0) return BASE;
+
+  const { a = 1, b = 0, c = 0, d = 1 } = transform;
+  const keyLocalX = a * -INV_SQRT2 + b * -INV_SQRT2;
+  const keyLocalY = c * -INV_SQRT2 + d * -INV_SQRT2;
+  const fillLocalX = -keyLocalX;
+  const fillLocalY = -keyLocalY;
+  const keyPosition = perimeterPosition(keyLocalX, keyLocalY, width / 2, 0, width, height, radius);
+  const fillPosition = perimeterPosition(fillLocalX, fillLocalY, width / 2, height, width, height, radius);
+  const currentPosition = perimeterPosition(localNx, localNy, x, y, width, height, radius);
+  const metric = perimeterMetric || buildScreenPerimeterMetric(width, height, radius, transform);
+  const { total: screenPerimeter } = metric;
+  const circularDistance = origin => {
+    const current = metric.at(currentPosition);
+    const target = metric.at(origin);
+    const delta = Math.abs(current - target);
+    return Math.min(delta, Math.max(0, screenPerimeter - delta));
+  };
+
+  const gradientLength = Math.abs(width * (a * -INV_SQRT2 + b * INV_SQRT2))
+    + Math.abs(height * (c * -INV_SQRT2 + d * INV_SQRT2));
+  const topLength = Math.min(48, 0.32 * gradientLength);
+  const bottomLength = Math.min(36, 0.30 * gradientLength);
+  const keyDistance = circularDistance(keyPosition);
+  const fillDistance = circularDistance(fillPosition);
+  const availableHandoff = Math.max(0, (screenPerimeter / 2 - topLength - bottomLength) / 2);
+  const handoffLength = Math.min(SPATIAL_HANDOFF, availableHandoff);
+  const boundedLobe = (angular, amplitude, distance, extent) => {
+    if (distance <= extent) {
+      const cubicEnvelope = amplitude * Math.max(0, 1 - distance / extent) ** 3;
+      return Math.min(angular, cubicEnvelope);
+    }
+    if (handoffLength === 0 || distance >= extent + handoffLength) return angular;
+    const progress = (distance - extent) / handoffLength;
+    const smooth = progress * progress * (3 - 2 * progress);
+    return angular * smooth;
+  };
+
+  // The cubic stations cap each corner lobe; outside that local zone, smoothly
+  // restore I(n), preserving .095 on the lower straight edge midpoint.
+  return BASE + boundedLobe(KEY_LIGHT * towardKey, KEY_LIGHT, keyDistance, topLength)
+    + boundedLobe(FILL_LIGHT * towardFill, FILL_LIGHT, fillDistance, bottomLength);
 }
 
 /** Signed distance and outward unit normal for a rounded rectangle with one radius. */
@@ -75,6 +287,57 @@ export function screenNormal(nx, ny, matrix = { a: 1, b: 0, c: 0, d: 1 }) {
   return { nx: tx / magnitude, ny: ty / magnitude, distanceScale: magnitude };
 }
 
+function maximumInverseScale(matrix) {
+  const { a = 1, b = 0, c = 0, d = 1 } = matrix;
+  const determinant = Math.abs(a * d - b * c);
+  if (!Number.isFinite(determinant) || determinant < 1e-9) return 1;
+  const trace = a * a + b * b + c * c + d * d;
+  const discriminant = Math.sqrt(Math.max(0, trace * trace - 4 * determinant * determinant));
+  const minimumSingularValue = Math.sqrt(Math.max(1e-12, (trace - discriminant) / 2));
+  return 1 / minimumSingularValue;
+}
+
+function edgeRangesForRow(y, width, height, radius, band) {
+  const ranges = [];
+  // A normal-distance band widens in x near a circle's horizontal tangent.
+  const cornerBand = band + Math.sqrt(2 * radius * band + band * band);
+  const add = (left, right) => {
+    if (right >= 0 && left <= width) ranges.push([Math.max(0, left), Math.min(width, right)]);
+  };
+
+  if (y <= band) add(radius - band, width - radius + band);
+  if (height - y <= band) add(radius - band, width - radius + band);
+  if (y >= radius - band && y <= height - radius + band) {
+    add(-band, band);
+    add(width - band, width + band);
+  }
+
+  if (radius > 0 && y >= 0 && y <= radius) {
+    const dx = Math.sqrt(Math.max(0, radius * radius - (y - radius) ** 2));
+    const left = radius - dx;
+    const right = width - radius + dx;
+    add(left - cornerBand, left + cornerBand);
+    add(right - cornerBand, right + cornerBand);
+  }
+  if (radius > 0 && y >= height - radius && y <= height) {
+    const dy = y - (height - radius);
+    const dx = Math.sqrt(Math.max(0, radius * radius - dy * dy));
+    const left = radius - dx;
+    const right = width - radius + dx;
+    add(left - cornerBand, left + cornerBand);
+    add(right - cornerBand, right + cornerBand);
+  }
+
+  ranges.sort((left, right) => left[0] - right[0]);
+  const merged = [];
+  for (const range of ranges) {
+    const last = merged.at(-1);
+    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
+    else merged.push([...range]);
+  }
+  return merged;
+}
+
 /**
  * Rasterize the directive's one-logical-pixel rounded-rectangle rim.
  * The returned RGBA bytes can be written directly to Canvas ImageData.
@@ -87,6 +350,9 @@ export function rasterizeSpecularRim({
   transform = { a: 1, b: 0, c: 0, d: 1 },
   intensity = 1,
   thickness = EDGE_WIDTH,
+  color = [255, 255, 255],
+  applyRing = true,
+  includeLight = true,
 } = {}) {
   const w = Number(width);
   const h = Number(height);
@@ -97,29 +363,57 @@ export function rasterizeSpecularRim({
     return { width: 0, height: 0, data: new Uint8ClampedArray(0), scaleX: 0, scaleY: 0 };
   }
 
-  const pixelWidth = Math.max(1, Math.ceil(w * dpr));
-  const pixelHeight = Math.max(1, Math.ceil(h * dpr));
+  const supersample = Math.max(1, maximumSingularValue(transform));
+  const pixelWidth = Math.max(1, Math.ceil(w * dpr * supersample));
+  const pixelHeight = Math.max(1, Math.ceil(h * dpr * supersample));
   const scaleX = pixelWidth / w;
   const scaleY = pixelHeight / h;
   const pixels = new Uint8ClampedArray(pixelWidth * pixelHeight * 4);
   const aa = 1 / dpr;
   const requestedThickness = Number(thickness);
   const t = Math.max(0.75, Math.min(1.25, Number.isFinite(requestedThickness) ? requestedThickness : EDGE_WIDTH));
+  const perimeterMetric = buildScreenPerimeterMetric(w, h, radius, transform);
 
+  const drawPixel = (px, py) => {
+    const x = (px + 0.5) / scaleX;
+    const y = (py + 0.5) / scaleY;
+    const { distance, nx, ny } = roundedRectDistance(x, y, w, h, radius);
+    const normal = screenNormal(nx, ny, transform);
+    if (!applyRing && Math.abs(distance) > t + 2 * aa * normal.distanceScale) return;
+    const distanceOnScreen = distance / normal.distanceScale;
+    const ring = applyRing
+      ? clamp01(0.5 - (Math.abs(distanceOnScreen + 0.5 * t) - 0.5 * t) / aa)
+      : 1;
+    const field = includeLight ? combinedSpecularRimIntensity({
+      nx: normal.nx,
+      ny: normal.ny,
+      localNx: nx,
+      localNy: ny,
+      x,
+      y,
+      width: w,
+      height: h,
+      radius,
+      transform,
+      perimeterMetric,
+    }) : 1;
+    const alpha = clamp01(field * ring * rim);
+    if (alpha <= 0) return;
+    const index = (py * pixelWidth + px) * 4;
+    pixels[index] = color[0];
+    pixels[index + 1] = color[1];
+    pixels[index + 2] = color[2];
+    pixels[index + 3] = Math.round(alpha * 255);
+  };
+
+  const r = Math.max(0, Math.min(Number(radius) || 0, w / 2, h / 2));
+  const band = (t + 2 * aa) * maximumInverseScale(transform);
   for (let py = 0; py < pixelHeight; py += 1) {
     const y = (py + 0.5) / scaleY;
-    for (let px = 0; px < pixelWidth; px += 1) {
-      const x = (px + 0.5) / scaleX;
-      const { distance, nx, ny } = roundedRectDistance(x, y, w, h, radius);
-      const normal = screenNormal(nx, ny, transform);
-      const distanceOnScreen = distance / normal.distanceScale;
-      const ring = clamp01(0.5 - (Math.abs(distanceOnScreen + 0.5 * t) - 0.5 * t) / aa);
-      const alpha = clamp01(specularRimIntensity(normal.nx, normal.ny) * ring * rim);
-      const index = (py * pixelWidth + px) * 4;
-      pixels[index] = 255;
-      pixels[index + 1] = 255;
-      pixels[index + 2] = 255;
-      pixels[index + 3] = Math.round(alpha * 255);
+    for (const [left, right] of edgeRangesForRow(y, w, h, r, band)) {
+      const first = Math.max(0, Math.floor(left * scaleX) - 1);
+      const last = Math.min(pixelWidth - 1, Math.ceil(right * scaleX) + 1);
+      for (let px = first; px <= last; px += 1) drawPixel(px, py);
     }
   }
 
@@ -227,7 +521,9 @@ function renderElement(element) {
   const signature = JSON.stringify([rimWidth, rimHeight, radius, thickness, dpr, matrix.a, matrix.b, matrix.c, matrix.d, insets.top, insets.right, insets.bottom, insets.left]);
   if (renderCache.get(element) === signature) return;
 
-  const pixels = rasterizeSpecularRim({ width: rimWidth, height: rimHeight, radius, devicePixelRatio: dpr, transform: matrix, thickness });
+  // One antialiased SDF ring is baked into the PNG; no second CSS mask can widen
+  // the inner corner or multiply the edge coverage.
+  const pixels = rasterizeSpecularRim({ width: rimWidth, height: rimHeight, radius, devicePixelRatio: dpr, transform: matrix, thickness, applyRing: true });
   const canvas = document.createElement('canvas');
   canvas.width = pixels.width;
   canvas.height = pixels.height;

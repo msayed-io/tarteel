@@ -4,6 +4,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   rasterizeSpecularRim,
+  roundedRectBoundaryPoint,
+  roundedRectDistance,
   screenNormal,
   specularRimIntensity,
 } from '../src/lib/specular-rim.js';
@@ -26,7 +28,7 @@ function sampleAlpha(image, x, y) {
   return image.data[(py * image.width + px) * 4 + 3] / 255;
 }
 
-function nearbyMaximum(image, x, y, radius = 2) {
+function nearbyMaximum(image, x, y, radius = 0.35) {
   const left = Math.max(0, Math.floor((x - radius) * image.scaleX));
   const right = Math.min(image.width - 1, Math.ceil((x + radius) * image.scaleX));
   const top = Math.max(0, Math.floor((y - radius) * image.scaleY));
@@ -40,79 +42,141 @@ function nearbyMaximum(image, x, y, radius = 2) {
   return maximum;
 }
 
-function cornerPeakPoint(width, height, lower = false) {
-  const radius = Math.min(width, height) / 2;
-  const halfStrokeOnDiagonal = 0.5 / sqrt2;
-  if (!lower) {
-    return { x: radius - radius / sqrt2 + halfStrokeOnDiagonal, y: radius - radius / sqrt2 + halfStrokeOnDiagonal };
+function coverageCorrectedSample(image, x, y, width, height, radius) {
+  const aa = 1 / Math.max(image.scaleX, image.scaleY);
+  let nearest = null;
+  for (let py = Math.max(0, Math.floor((y - 0.6) * image.scaleY)); py <= Math.min(image.height - 1, Math.ceil((y + 0.6) * image.scaleY)); py += 1) {
+    for (let px = Math.max(0, Math.floor((x - 0.6) * image.scaleX)); px <= Math.min(image.width - 1, Math.ceil((x + 0.6) * image.scaleX)); px += 1) {
+      const sampleX = (px + 0.5) / image.scaleX;
+      const sampleY = (py + 0.5) / image.scaleY;
+      const { distance } = roundedRectDistance(sampleX, sampleY, width, height, radius);
+      const coverage = Math.max(0, Math.min(1, 0.5 - (Math.abs(distance + 0.5) - 0.5) / aa));
+      if (coverage < 0.45) continue;
+      const offset = (py * image.width + px) * 4 + 3;
+      const distanceToStation = Math.hypot(sampleX - x, sampleY - y);
+      if (!nearest || distanceToStation < nearest.distance) {
+        nearest = { distance: distanceToStation, alpha: image.data[offset] / 255 / coverage };
+      }
+    }
   }
-  return {
-    x: width - radius + radius / sqrt2 - halfStrokeOnDiagonal,
-    y: height - radius + radius / sqrt2 - halfStrokeOnDiagonal,
-  };
+  if (!nearest) throw new Error('No well-covered ring pixel close to the station');
+  return nearest.alpha;
 }
 
-describe('الحافة اللامعة — اختبار نموذج الـShader والبكسلات', () => {
-  it('1. يبقي داخل العنصر شفافًا تمامًا ولا ينتج لونًا غير الأبيض في طبقة الحلقة', () => {
-    const image = rasterizeSpecularRim({ width: 120, height: 48, radius: 24, devicePixelRatio: 1 });
+function perimeterMetrics(width, height, radius) {
+  const top = width - 2 * radius;
+  const side = height - 2 * radius;
+  const arc = radius * Math.PI / 2;
+  return { top, side, arc, perimeter: 2 * (top + side) + 4 * arc };
+}
+
+function stationPoint(width, height, radius, lower, fraction, extent) {
+  const { top, side, arc, perimeter } = perimeterMetrics(width, height, radius);
+  const peak = lower ? top + arc + side + arc / 2 : perimeter - arc / 2;
+  return roundedRectBoundaryPoint(width, height, radius, peak + extent * fraction);
+}
+
+function expectedStation(base, amplitude, fraction) {
+  return base + amplitude * (1 - fraction) ** 3;
+}
+
+function estimateLineCoverage(image, x) {
+  const px = Math.max(0, Math.min(image.width - 1, Math.floor(x * image.scaleX)));
+  let count = 0;
+  for (let py = 0; py < Math.min(image.height, Math.ceil(2 * image.scaleY)); py += 1) {
+    if (image.data[(py * image.width + px) * 4 + 3] / 255 >= 0.06 * 0.95) count += 1;
+  }
+  return count;
+}
+
+describe('الحافة اللامعة — البكسلات والهندسة', () => {
+  it('1. اختبار الأحمر: لا يظهر اللون إلا في حلقة الحافة، والداخل شفاف تمامًا', () => {
+    const image = rasterizeSpecularRim({ width: 120, height: 48, radius: 24, devicePixelRatio: 3, color: [255, 0, 0] });
     const center = (Math.floor(image.height / 2) * image.width + Math.floor(image.width / 2)) * 4;
     expect(image.data[center + 3]).toBe(0);
-    const edge = (Math.floor(0.5 * image.scaleY) * image.width + Math.floor(60 * image.scaleX)) * 4;
-    expect(image.data[edge + 3]).toBeGreaterThan(0);
+    expect(sampleAlpha(image, 60, 0.5)).toBeGreaterThan(0);
+    let redPixels = 0;
     for (let i = 0; i < image.data.length; i += 4) {
-      expect(image.data[i]).toBe(255);
-      expect(image.data[i + 1]).toBe(255);
-      expect(image.data[i + 2]).toBe(255);
+      if (image.data[i + 3] > 0) {
+        redPixels += 1;
+        expect(image.data[i]).toBe(255);
+        expect(image.data[i + 1]).toBe(0);
+        expect(image.data[i + 2]).toBe(0);
+      }
     }
-    expect(rimRule).toContain('mask-composite:exclude');
+    expect(redPixels).toBeGreaterThan(0);
+    expect(rimRule).not.toMatch(/mask/);
   });
 
-  it('2. يطابق قيم المعادلة ويقيس الشريط العلوي والسفلي المرسومين فعليًا', () => {
+  it('2. يختبر نقاط نموذج I(n) ومحطات التلاشي من ألفا البكسلات المرسومة', () => {
     expect(specularRimIntensity(-1 / sqrt2, -1 / sqrt2)).toBeCloseTo(0.60, 6);
     expect(specularRimIntensity(1 / sqrt2, 1 / sqrt2)).toBeCloseTo(0.34, 6);
     expect(specularRimIntensity(0, -1)).toBeCloseTo(0.1275, 6);
     expect(specularRimIntensity(0, 1)).toBeCloseTo(0.095, 6);
     expect(specularRimIntensity(1, 0)).toBeCloseTo(0.095, 6);
 
-    const pill = rasterizeSpecularRim({ width: 350, height: 60, radius: 30 });
-    expect(sampleAlpha(pill, 175, 0.5)).toBeCloseTo(0.1275, 2);
-    expect(sampleAlpha(pill, 175, 59.5)).toBeCloseTo(0.095, 2);
+    const width = 350;
+    const height = 60;
+    const radius = 30;
+    const image = rasterizeSpecularRim({ width, height, radius, devicePixelRatio: 3 });
+    const upperPeak = stationPoint(width, height, radius, false, 0, 48);
+    expect(coverageCorrectedSample(image, upperPeak.x, upperPeak.y, width, height, radius)).toBeCloseTo(0.60, 2);
+    const upperStops = [0, 0.25, 0.5, 0.75, 1];
+    const upperExpected = [0.60, 0.2896875, 0.1275, 0.0684375, 0.06];
+    upperStops.forEach((fraction, index) => {
+      const point = stationPoint(width, height, radius, false, fraction, 48);
+      expect(coverageCorrectedSample(image, point.x, point.y, width, height, radius)).toBeCloseTo(upperExpected[index], 2);
+    });
+    const lowerExpected = [0.34, 0.178125, 0.095, 0.064375, 0.06];
+    upperStops.forEach((fraction, index) => {
+      const point = stationPoint(width, height, radius, true, fraction, 36);
+      expect(coverageCorrectedSample(image, point.x, point.y, width, height, radius)).toBeCloseTo(lowerExpected[index], 2);
+    });
+    expect(sampleAlpha(image, width / 2, 0.5)).toBeCloseTo(0.1275, 2);
+    expect(sampleAlpha(image, width / 2, height - 0.5)).toBeCloseTo(0.095, 2);
+    const lowerRecovery = stationPoint(width, height, radius, true, 42 / 36, 36);
+    expect(coverageCorrectedSample(image, lowerRecovery.x, lowerRecovery.y, width, height, radius)).toBeCloseTo(0.0775, 2);
   });
 
-  it('3. يضع القمتين على الانحناء الحقيقي وبشدة متقاربة عند 350×60 و44×44 و36×36', () => {
+  it('3. يحافظ على امتداد اللمعة الفيزيائي ويقصّ القمتين للأحجام الصغيرة', () => {
     for (const [width, height] of [[350, 60], [44, 44], [36, 36]]) {
-      for (const dpr of [2, 3]) {
-        const image = rasterizeSpecularRim({ width, height, radius: Math.min(width, height) / 2, devicePixelRatio: dpr });
-        const upper = cornerPeakPoint(width, height);
-        const lower = cornerPeakPoint(width, height, true);
-        expect(nearbyMaximum(image, upper.x, upper.y, 1)).toBeCloseTo(0.60, 2);
-        expect(nearbyMaximum(image, lower.x, lower.y, 1)).toBeCloseTo(0.34, 2);
+      const radius = Math.min(width, height) / 2;
+      const gradientLength = (width + height) / sqrt2;
+      const upperLength = Math.min(48, 0.32 * gradientLength);
+      const lowerLength = Math.min(36, 0.30 * gradientLength);
+      const image = rasterizeSpecularRim({ width, height, radius, devicePixelRatio: 3 });
+      for (const [lower, extent, base, amplitude] of [
+        [false, upperLength, 0.06, 0.54],
+        [true, lowerLength, 0.06, 0.28],
+      ]) {
+        for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+          const point = stationPoint(width, height, radius, lower, fraction, extent);
+          const actual = coverageCorrectedSample(image, point.x, point.y, width, height, radius);
+          expect(Math.abs(actual - expectedStation(base, amplitude, fraction))).toBeLessThan(0.03);
+        }
       }
-      const lowDensity = rasterizeSpecularRim({ width, height, radius: Math.min(width, height) / 2, devicePixelRatio: 1 });
-      const upper = cornerPeakPoint(width, height);
-      const lower = cornerPeakPoint(width, height, true);
-      expect(nearbyMaximum(lowDensity, upper.x, upper.y, 2)).toBeGreaterThan(0.42);
-      expect(nearbyMaximum(lowDensity, lower.x, lower.y, 2)).toBeGreaterThan(0.23);
     }
   });
 
-  it('4. يحافظ على سماكة 1 CSS px عند كثافات 1× و2× و3×', () => {
-    const edgeIntensity = specularRimIntensity(0, -1);
+  it('4. يرسم سماكة شعرية بمقدار 1 CSS px عند DPR 1× و2× و3× مع تنعيم المنحنيات', () => {
     for (const dpr of [1, 2, 3]) {
       const image = rasterizeSpecularRim({ width: 120, height: 44, radius: 22, devicePixelRatio: dpr });
-      const centerX = Math.floor(60 * image.scaleX);
-      let coveredDevicePixels = 0;
-      for (let y = 0; y < image.height; y += 1) {
-        const alpha = image.data[(y * image.width + centerX) * 4 + 3] / 255;
-        if (alpha >= edgeIntensity * 0.95) coveredDevicePixels += 1;
+      expect(estimateLineCoverage(image, 60)).toBe(dpr);
+      const corner = roundedRectBoundaryPoint(120, 44, 22, 2 * (120 - 44) + 3 * (22 * Math.PI / 2) + 2 * (44 - 44) + (22 * Math.PI / 4));
+      const samples = [];
+      for (let offset = -2; offset <= 2; offset += 1) {
+        const x = Math.max(0, Math.min(image.width - 1, Math.floor((corner.x + offset / dpr) * image.scaleX)));
+        const y = Math.max(0, Math.min(image.height - 1, Math.floor((corner.y + offset / dpr) * image.scaleY)));
+        samples.push(image.data[(y * image.width + x) * 4 + 3]);
       }
-      expect(coveredDevicePixels).toBe(dpr);
+      expect(samples.some(value => value > 0 && value < 255)).toBe(true);
     }
   });
 
-  it('5. يبقي لون الحلقة أبيضًا مستقلًا عن الخلفية ولا يضيف مزجًا أو توهجًا', () => {
+  it('5. ينتج طبقة بيضاء مستقلة عن الخلفية بلا مزج أو توهج في تعريف الحلقة', () => {
     const image = rasterizeSpecularRim({ width: 80, height: 44, radius: 22 });
     for (let i = 0; i < image.data.length; i += 4) {
+      if (image.data[i + 3] === 0) continue;
       expect(image.data[i]).toBe(255);
       expect(image.data[i + 1]).toBe(255);
       expect(image.data[i + 2]).toBe(255);
@@ -122,7 +186,7 @@ describe('الحافة اللامعة — اختبار نموذج الـShader �
     expect(rimRule).not.toMatch(/mix-blend-mode|background-blend-mode/);
   });
 
-  it('6. يبقي الضوء ثابتًا للشاشة عند دوران الشكل ولا يقلبه اتجاه RTL', () => {
+  it('6. يثبت الضوء في إحداثيات الشاشة مع الدوران ولا يعكسه اتجاه RTL', () => {
     const rotate90 = { a: 0, b: 1, c: -1, d: 0 };
     const oldTopLeft = screenNormal(-1 / sqrt2, -1 / sqrt2, rotate90);
     expect(specularRimIntensity(oldTopLeft.nx, oldTopLeft.ny)).toBeCloseTo(0.06, 6);
@@ -147,10 +211,10 @@ describe('الحافة اللامعة — اختبار نموذج الـShader �
     expect(main).toContain("emit('island-rim-intensity'");
     expect(island).toContain("listen('island-rim-intensity'");
     expect(island).toContain('applyRimIntensity(readRimIntensity(), document)');
-    expect(engine).toContain("element.parentElement?.closest('.glass') ? 0.85 : 1");
+    expect(engine).toContain('element.parentElement?.closest(\'.glass\') ? 0.85 : 1');
   });
 
-  it('7. يحترم شدة rim وتقليل الشفافية ويوفر بديلًا آمنًا عند غياب mask', () => {
+  it('7. يضاعف شدة الحلقة إلى النصف عند تقليل الشفافية ويوقف التمويه بتعبئة معتمة', () => {
     const half = rasterizeSpecularRim({ width: 80, height: 44, radius: 22, intensity: 0.5 });
     const full = rasterizeSpecularRim({ width: 80, height: 44, radius: 22, intensity: 1 });
     const sample = (Math.floor(0.5 * full.scaleY) * full.width + Math.floor(40 * full.scaleX)) * 4 + 3;
@@ -158,13 +222,11 @@ describe('الحافة اللامعة — اختبار نموذج الـShader �
     expect(css).toContain('@media(prefers-reduced-transparency:reduce)');
     expect(css).toContain('.rim{--rim-system:.5}');
     expect(css).toContain('--rim:1;--rim-system:1');
+    expect(css).toContain('--glass:rgba(30,32,37,1)');
+    expect(css).toContain('.glass{-webkit-backdrop-filter:none;backdrop-filter:none}');
     expect(engine).toContain('requested * system * overlay');
-    expect(css).toContain('@supports not ((-webkit-mask-composite:xor) or (mask-composite:exclude))');
-    expect(css).toContain('.rim::after{display:none}');
-    expect(css).toContain('inset 0 0 0 .5px rgba(255,255,255,.14)');
-    expect(css).toContain('.rim:not(.glass){box-shadow:inset 0 0 0 .5px');
     expect(island).toContain('.rim{--rim-system:.5}');
-    expect(island).toContain('.rim{box-shadow:inset 0 0 0 .5px');
+    expect(island).toContain('background-size:100% 100%');
   });
 
   it('يحفظ إعداد الشدة من صفر إلى واحد ويحدّث الخاصية العامة فورًا مع إرسال حدث إعادة الرسم', () => {
@@ -196,17 +258,17 @@ describe('الحافة اللامعة — اختبار نموذج الـShader �
     expect(settings).toContain('applyRimIntensity(value, document)');
   });
 
-  it('يرتب القناع قبل الدمج ويحتفظ بحلقة واحدة للعنصر دون إضافة حلقة للبطاقة الكبيرة', () => {
-    expect(rimRule).toContain('padding:var(--rim-w,1px)');
-    expect(rimRule).toContain('-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0)');
-    expect(rimRule).toContain('-webkit-mask-composite:xor');
-    expect(rimRule).toContain('mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0)');
-    expect(rimRule).toContain('mask-composite:exclude');
-    expect(rimRule.indexOf('-webkit-mask:')).toBeLessThan(rimRule.indexOf('-webkit-mask-composite:'));
-    expect(rimRule.indexOf('mask:')).toBeLessThan(rimRule.indexOf('mask-composite:'));
+  it('يرسم حلقة SDF واحدة بلا قناع متراكب ويحافظ على العناصر المؤهلة فقط', () => {
+    expect(rimRule).toContain('background-image:var(--rim-image)');
+    expect(rimRule).toContain('background-size:100% 100%');
+    expect(rimRule).toContain('background-repeat:no-repeat');
+    expect(rimRule).not.toMatch(/mask|padding:var\(--rim-w/);
+    expect(rimRule).not.toContain('linear-gradient');
     expect(rimRule).toContain('pointer-events:none');
-    expect(rimRule).toContain('border-radius:var(--rim-radius,inherit)');
+    expect(engine).toContain('applyRing: true');
+    expect(engine).toContain('const ring = applyRing');
     expect(css).not.toContain('.rim::before');
+    expect(css).not.toContain('mask-composite');
     expect(main).toContain('className="brand glass rim"');
     expect(main).toContain('className="tabs glass rim"');
     expect(main).toContain('className="search glass rim"');
@@ -214,5 +276,7 @@ describe('الحافة اللامعة — اختبار نموذج الـShader �
     expect(main).toContain('className="player glass big"');
     expect(main).not.toContain('player glass big rim');
     expect(css.match(/\.rim::after\{[^}]*content:""/g)).toHaveLength(1);
+    expect(island).not.toContain('mask-composite');
+    expect(island).not.toContain('.rim::after{display:none}');
   });
 });
