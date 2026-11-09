@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "تَرتيل",
-        "width": 1120,
-        "height": 760,
+        "width": 920,
+        "height": 640,
         "minWidth": 720,
         "minHeight": 560,
         "center": true,
@@ -37,7 +37,7 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "assets/adhan.mp3"
+      "assets/adhan-call.mpeg"
     ]
   }
 }

@@ -3,7 +3,7 @@
 //!
 //! لماذا مهام ويندوز وليس خيطًا داخل التطبيق؟
 //! لأن الخيط يموت بموت العملية. مهمة ويندوز تعيش في خدمة النظام، فتُوقظ
-//! التطبيق عند موعد الأذان حتى لو كان مغلقًا تمامًا أو الجهاز مقفلًا.
+//! التطبيق مخفيًا عند موعد الأذان حتى لو كان مغلقًا تمامًا أو الجهاز مقفلًا.
 //!
 //! نستخدم واجهة `schtasks.exe` الرسمية لأنها:
 //!   • موجودة في كل نسخة Windows 11 بلا أي حزمة إضافية.
@@ -18,7 +18,8 @@
 //!     إن كان الجهاز نائمًا وقت الموعد.
 //!   • `<WakeToRun>true</WakeToRun>` — إيقاظ الجهاز من السكون للن تطبيق.
 //!   • `<Priority>4</Priority>` — أولوية عالية (المدى 0–10؛ 4 مرتفع بلا خطر).
-//!   • `<ExecutionTimeLimit>` قصير — العملية الخفيفة لا تُستهلك في الخلفية.
+//!   • `<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>` بلا حد زمني — التطبيق
+//!     يبدأ مخفيًا ويبقى متاحًا لبقية المواعيد، ولا يُقطع ملف الأذان بعد دقيقتين.
 //!
 //! بادئة أسماء المهام `TarteelAdhan_` تجعل حذفها كله آمنًا ومحددًا، فلا نلمس
 //! أي مهمة أخرى للمستخدم.
@@ -128,13 +129,13 @@ pub fn build_task_xml(spec: &TaskSpec, exe_path: &str, local_start: &str) -> Str
     <Hidden>false</Hidden>
     <RunOnlyIfIdle>false</RunOnlyIfIdle>
     <WakeToRun>true</WakeToRun>
-    <ExecutionTimeLimit>PT2M</ExecutionTimeLimit>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
     <Priority>4</Priority>
   </Settings>
   <Actions Context="Author">
     <Exec>
       <Command>{exe}</Command>
-      <Arguments>--adhan-task "{id}"</Arguments>
+      <Arguments>--hidden --adhan-task "{id}"</Arguments>
     </Exec>
   </Actions>
 </Task>"#,
@@ -321,6 +322,8 @@ mod tests {
         assert!(xml.contains("<RunLevel>LeastPrivilege</RunLevel>"));
         assert!(xml.contains("<Priority>4</Priority>"));
         assert!(xml.contains("--adhan-task \"TarteelAdhan_2026_10_31_fajr\""));
+        assert!(xml.contains("--hidden --adhan-task"));
+        assert!(xml.contains("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"));
         assert!(xml.contains("الفجر"));
     }
 

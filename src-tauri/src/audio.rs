@@ -10,16 +10,148 @@
 //!   • `last_played` يمنع تكرار الصلاة نفسها خلال نافذة حراسة.
 //!   • الاستئناف من السكون لا يُعيد تشغيل ما مضى: الخلفية تتحقق من العمر.
 
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
-use std::io::BufReader;
+use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
+use std::fs::File;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use symphonia::core::audio::SampleBuffer;
+use symphonia::core::codecs::{Decoder as SymphoniaDecoder, DecoderOptions};
+use symphonia::core::errors::Error as SymphoniaError;
+use symphonia::core::formats::{FormatOptions, FormatReader};
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::probe::Hint;
 
 /// مستوى الصوت الافتراضي (0..=100).
 pub const DEFAULT_VOLUME: u32 = 80;
 
 /// أقل مدة بين تشغيلين لنفس المعرّف تُعدّ تكرارًا (2 دقيقة).
 pub const REPEAT_GUARD_MS: i64 = 120_000;
+
+/// مصدر متدفق لملف الأذان AAC داخل حاوية MP4.
+/// نمرر `File` نفسه إلى Symphonia كي يعرف طول المصدر؛ غلاف Rodio العام يخفي
+/// طول الملف، فيرفض قارئ MP4 عمليات seek اللازمة للوصول إلى مسار الصوت.
+struct M4aAdhanSource {
+  format: Box<dyn FormatReader>,
+  decoder: Box<dyn SymphoniaDecoder>,
+  track_id: u32,
+  samples: Vec<f32>,
+  position: usize,
+  channels: u16,
+  sample_rate: u32,
+  total_duration: Option<Duration>,
+  ended: bool,
+}
+
+impl M4aAdhanSource {
+  fn open(path: &Path) -> Result<Self, String> {
+    let file = File::open(path).map_err(|error| format!("تعذر فتح ملف الأذان: {error}"))?;
+    let stream = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    hint.with_extension("m4a");
+    let format_options = FormatOptions { enable_gapless: true, ..Default::default() };
+    let probed = symphonia::default::get_probe()
+      .format(&hint, stream, &format_options, &MetadataOptions::default())
+      .map_err(|error| format!("تعذر فحص حاوية ملف الأذان: {error:?}"))?;
+    let (track_id, codec_params) = {
+      let track = probed.format.default_track()
+        .ok_or_else(|| "لم يُعثر على مسار صوت في ملف الأذان".to_string())?;
+      (track.id, track.codec_params.clone())
+    };
+    let total_duration = codec_params.time_base.zip(codec_params.n_frames)
+      .map(|(time_base, frames)| Duration::from(time_base.calc_time(frames)));
+    let decoder = symphonia::default::get_codecs()
+      .make(&codec_params, &DecoderOptions::default())
+      .map_err(|error| format!("تعذر تجهيز فك ترميز ملف الأذان: {error:?}"))?;
+    let mut source = Self {
+      format: probed.format,
+      decoder,
+      track_id,
+      samples: Vec::new(),
+      position: 0,
+      channels: 0,
+      sample_rate: 0,
+      total_duration,
+      ended: false,
+    };
+    if !source.fill_samples()? {
+      return Err("ملف الأذان لا يحتوي عينات صوت قابلة للتشغيل".into());
+    }
+    Ok(source)
+  }
+
+  fn fill_samples(&mut self) -> Result<bool, String> {
+    if self.ended { return Ok(false); }
+    let mut decode_errors = 0;
+    loop {
+      let packet = match self.format.next_packet() {
+        Ok(packet) => packet,
+        Err(SymphoniaError::IoError(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+          self.ended = true;
+          return Ok(false);
+        }
+        Err(error) => {
+          self.ended = true;
+          return Err(format!("تعذر قراءة ملف الأذان: {error:?}"));
+        }
+      };
+      if packet.track_id() != self.track_id { continue; }
+      let decoded = match self.decoder.decode(&packet) {
+        Ok(decoded) => decoded,
+        Err(SymphoniaError::DecodeError(_)) if decode_errors < 3 => {
+          decode_errors += 1;
+          continue;
+        }
+        Err(error) => {
+          self.ended = true;
+          return Err(format!("تعذر فك ترميز ملف الأذان: {error:?}"));
+        }
+      };
+      let spec = decoded.spec().to_owned();
+      self.channels = spec.channels.count() as u16;
+      self.sample_rate = spec.rate;
+      let mut samples = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
+      samples.copy_interleaved_ref(decoded);
+      self.samples.clear();
+      self.samples.extend_from_slice(samples.samples());
+      self.position = 0;
+      if !self.samples.is_empty() { return Ok(true); }
+    }
+  }
+}
+
+impl Iterator for M4aAdhanSource {
+  type Item = f32;
+
+  fn next(&mut self) -> Option<Self::Item> {
+    if self.position >= self.samples.len() {
+      match self.fill_samples() {
+        Ok(true) => {}
+        Ok(false) => return None,
+        Err(error) => {
+          eprintln!("Tarteel adhan decode stopped: {error}");
+          return None;
+        }
+      }
+    }
+    let sample = self.samples.get(self.position).copied();
+    if sample.is_some() { self.position += 1; }
+    sample
+  }
+}
+
+impl Source for M4aAdhanSource {
+  fn current_frame_len(&self) -> Option<usize> {
+    let remaining = self.samples.len().saturating_sub(self.position);
+    (remaining > 0).then_some(remaining)
+  }
+
+  fn channels(&self) -> u16 { self.channels }
+  fn sample_rate(&self) -> u32 { self.sample_rate }
+  fn total_duration(&self) -> Option<Duration> { self.total_duration }
+}
 
 /// حالة محرك الصوت المشتركة بين الخلفية والأوامر.
 #[derive(Clone)]
@@ -140,9 +272,7 @@ impl AudioEngine {
       }
     }
 
-    let file = std::fs::File::open(path).map_err(|e| format!("تعذر فتح ملف الأذان: {e}"))?;
-    let source = Decoder::new(BufReader::new(file))
-      .map_err(|e| format!("تعذر فك ترميز ملف الأذان: {e}"))?;
+    let source = M4aAdhanSource::open(path)?;
 
     self.stop();
     let handle = self.ensure_device()?;
@@ -165,13 +295,6 @@ impl AudioEngine {
   pub fn is_playing(&self) -> bool {
     self.inner.sink.lock().map(|slot| slot.as_ref().map(|s| !s.empty()).unwrap_or(false)).unwrap_or(false)
   }
-}
-
-/// يقرأ مدة الملف بالثواني — تُستخدم لاختبار سلامة ملف الأذان المرفق.
-pub fn probe_duration_secs(path: &std::path::Path) -> Result<u64, String> {
-  let file = std::fs::File::open(path).map_err(|e| format!("تعذر فتح الملف: {e}"))?;
-  let decoder = Decoder::new(BufReader::new(file)).map_err(|e| format!("تعذر فك الترميز: {e}"))?;
-  Ok(decoder.total_duration().map(|d| d.as_secs()).unwrap_or(0))
 }
 
 /// هل يستحق هذا المعرّف تشغيلًا الآن؟ منطق خالص لاختبار الحراسة.
@@ -219,12 +342,15 @@ mod tests {
   }
 
   #[test]
-  fn bundled_adhan_mp3_decodes_with_the_expected_duration() {
+  fn bundled_user_adhan_audio_decodes_with_the_expected_duration() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
       .join("assets")
-      .join("adhan.mp3");
-    let duration = probe_duration_secs(&path).expect("the bundled adhan MP3 must decode");
-    assert!((220..=235).contains(&duration), "unexpected bundled adhan duration: {duration}s");
+      .join("adhan-call.mpeg");
+    let mut source = M4aAdhanSource::open(&path).expect("the user's bundled adhan-call.mpeg must decode");
+    let duration = source.total_duration.expect("duration metadata must be present");
+    assert!((220..=235).contains(&duration.as_secs()), "unexpected bundled adhan duration: {duration:?}");
+    let decoded_samples = source.by_ref().count();
+    assert!(decoded_samples > 1_000_000, "the full adhan must decode, got {decoded_samples} samples");
   }
 
   #[test]

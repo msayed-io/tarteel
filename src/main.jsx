@@ -441,15 +441,16 @@ function App() {
     } else setNativeSleepDeadline(null);
   }, []);
 
-  /*
-   * التنبيه المسبق إشعار نظام عادي واحد بصوت ويندوز الافتراضي؛ لا يستخدم
-   * ملف الأذان ولا مسار toast المنبّه الحلقي المستخدم عند دخول وقت الصلاة.
-   */
-  const preAlarmFiredRef = useRef(new Set());
+  /* التنبيه المسبق وحده يستخدم إشعار ويندوز وصوته الافتراضي؛ إذنه لا يدخل في الأذان الفعلي. */
+  const preAlarmFiredRef = useRef(new Set(readJson('tarteel.prayer.pre-alerts', [])));
+  const persistPreAlarmFired = () => {
+    localStorage.setItem('tarteel.prayer.pre-alerts', JSON.stringify([...preAlarmFiredRef.current].slice(-512)));
+  };
   useEffect(() => {
     const tick = () => {
-      const minutes = Number(prayerConfigRef.current.preAlarmMinutes) || 0;
-      if (minutes <= 0) return;
+      const config = prayerConfigRef.current;
+      const minutes = Number(config.preAlarmMinutes) || 0;
+      if (minutes <= 0 || !config.notificationsAllowed) return;
       const events = prayerScheduleRef.current?.events;
       if (!Array.isArray(events)) return;
       const now = Date.now();
@@ -461,14 +462,11 @@ function App() {
         const firedId = `pre|${event.id}`;
         if (preAlarmFiredRef.current.has(firedId)) continue;
         preAlarmFiredRef.current.add(firedId);
-        try {
-          sendNotification({
-            title: `بعد ${minutes} دقائق: صلاة ${event.name}`,
-            body: 'استعد لصلاة الفريضة.',
-          });
-        } catch (cause) {
-          console.error('Tarteel pre-alarm notification failed', cause);
-        }
+        persistPreAlarmFired();
+        Promise.resolve(sendNotification({
+          title: `بعد ${minutes} دقائق: صلاة ${event.name}`,
+          body: 'استعد لصلاة الفريضة.',
+        })).catch(cause => console.error('Tarteel pre-alarm notification failed', cause));
       }
     };
     tick();
@@ -588,6 +586,7 @@ function App() {
       return;
     }
     try {
+      await invoke('stop_adhan').catch(() => {});
       await audio.current.play();
       clearPendingResume();
       adhanAlertRef.current = null; setAdhanAlert(null);
@@ -612,19 +611,20 @@ function App() {
     if (prayerConfigRef.current.adhanSound && !prayerConfigRef.current.adhanMuted) {
       invoke('play_adhan', { id: payload.id }).catch(cause => {
         console.error('Tarteel adhan playback failed', cause);
+        setError(`تعذّر تشغيل الأذان: ${String(cause)}`);
+        emit('adhan-playback-state', { playing: false }).catch(() => {});
       });
     }
 
-    /* إشعار المنبّه: يتجاوز عدم الإزعاج ويبقى حتى يتفاعل المستخدم. */
-    invoke('show_alarm_notification', {
-      title: `حان وقت صلاة ${payload.name || ''}`,
-      body: 'حان موعد الصلاة وفق موقعك وتوقيتك المحلي.',
-    }).catch(cause => console.error('Tarteel alarm toast failed', cause));
+    /* في موعد الصلاة لا نرسل إشعار ويندوز؛ الحدث يفتح بطاقة التطبيق ويشغّل ملف الأذان فقط. */
+    if (!prayerConfigRef.current.adhanSound || prayerConfigRef.current.adhanMuted) {
+      emit('adhan-playback-state', { playing: false }).catch(() => {});
+    }
     const wasPlaying = !audio.current.paused;
     const shouldPause = wasPlaying && Boolean(prayerConfigRef.current.pauseAtAdhan);
     const record = {
       id: payload.id, key: payload.key || '', name: payload.name, at: payload.at,
-      createdAt: Date.now(), wasPlaying, pausedByAdhan: shouldPause,
+      createdAt: Date.now(), wasPlaying, pausedByAdhan: shouldPause, preview: Boolean(payload.preview),
     };
     if (shouldPause) {
       const activeTrack = currentRef.current === null ? null : tracksRef.current[currentRef.current];
@@ -633,33 +633,32 @@ function App() {
       localStorage.setItem('tarteel.adhan.resume', JSON.stringify(pending));
       audio.current.pause();
     } else clearPendingResume();
-    if (payload.notificationError) {
-      record.notificationError = payload.notificationError;
-      setError(`وصل موعد الصلاة إلى التطبيق، لكن إشعار Windows فشل: ${payload.notificationError}. تحقق من إذن الإشعارات وإعدادات Focus.`);
-    } else if (!prayerConfigRef.current.notificationsAllowed) {
-      record.notificationError = 'notification-permission-not-granted';
-      setError('وصل تنبيه الصلاة داخل التطبيق، لكن إشعار Windows غير ممنوح.');
-    }
     adhanAlertRef.current = record; setAdhanAlert(record);
     localStorage.setItem('tarteel.adhan.alert', JSON.stringify(record));
   };
 
-  /** تجربة التنبيه: يُطلق حدثًا حقيقيًا عبر Rust ليعمل بنفس المسار الفعلي. */
+  /** التجربة تشغّل ملف الأذان وتعرض بطاقته داخل التطبيق فقط، بلا إشعار ويندوز. */
   const previewAlarm = async () => {
+    setError('');
+    const at = Date.now();
+    const sample = { id: `preview-${at}`, key: 'preview', name: 'الأذان التجريبي', at, preview: true };
+    handleAdhan(sample);
+    emit('prayer-alarm-restore', sample).catch(cause => console.error('Tarteel adhan preview card failed', cause));
+  };
+
+  const stopAdhan = async () => {
     try {
-      await invoke('fire_alarm_now', { key: null });
+      await invoke('stop_adhan');
     } catch (cause) {
-      /* لا يوجد موعد قادم في الجدول: نعرض بطاقة اختبار مباشرة بدل الفشل الصامت. */
-      const sample = { id: 'preview', key: 'fajr', name: 'الفجر', at: Date.now(), createdAt: Date.now(), wasPlaying: false, pausedByAdhan: false };
-      adhanAlertRef.current = sample;
-      setAdhanAlert(sample);
-      console.warn('Tarteel alarm preview fell back to a local card', cause);
+      console.error('Tarteel adhan stop failed', cause);
+      setError(`تعذّر إيقاف الأذان: ${String(cause)}`);
     }
   };
 
   const controls = {
     toggle, step, seekTo, seekBy, setSpeed, setSleep,
-    resumeAfterAdhan, dismissAdhan: clearAdhanAlert,
+    resumeAfterAdhan, stopAdhan,
+    dismissAdhan: async () => { await stopAdhan(); clearAdhanAlert(); },
     setPrayerPreference: (key, value) => updatePrayerPreferences({ [key]: Boolean(value) }),
     openPrayerSettings: () => setPrayerSettingsOpen(true)
   };
@@ -674,7 +673,6 @@ function App() {
     state: active ? 'compact' : 'idle', playing, fileName: active?.title || active?.file_name || '', artist: active?.artist || '',
     cover: active?.cover || null, duration: Number.isFinite(duration) ? duration : 0, position: Number.isFinite(pos) ? pos : 0,
     speed: audioPrefsRef.current.speed, sleepMode: audioPrefsRef.current.sleepMode, sleepMinutes: audioPrefsRef.current.sleepMinutes,
-    prayerAlert: adhanAlertRef.current?.notificationError || ''
   }).catch(cause => console.error('Tarteel island player state event failed', cause));
   statePublisherRef.current = publishPlayerState;
 
@@ -719,6 +717,7 @@ function App() {
         if (payload.action === 'set-sleep') controlsRef.current.setSleep(String(payload.value));
         if (payload.action === 'set-prayer-preference') controlsRef.current.setPrayerPreference(payload.key, payload.value);
         if (payload.action === 'resume-after-adhan') controlsRef.current.resumeAfterAdhan();
+        if (payload.action === 'stop-adhan') controlsRef.current.stopAdhan();
         if (payload.action === 'dismiss-adhan') controlsRef.current.dismissAdhan();
         if (payload.action === 'open-prayer-settings') controlsRef.current.openPrayerSettings();
       }),
@@ -739,6 +738,7 @@ function App() {
       listen('island-error', event => setError(String(event.payload?.message || 'تعذر تغيير حجم نافذة الجزيرة.')))
     ]).then(([control, ready, alarm, sleepListener, dismiss, islandError]) => {
       unlistenControl = control; unlistenReady = ready; unlistenAlarm = alarm; unlistenSleep = sleepListener; unlistenDismiss = dismiss; unlistenIslandError = islandError;
+      emit('main-ready').catch(cause => console.error('Tarteel startup-ready acknowledgement failed', cause));
     }).catch(cause => {
       console.error('Tarteel event listeners failed to initialize', cause);
       setError(`تعذر تهيئة ربط أحداث الصوت/الصلاة: ${String(cause)}`);
@@ -753,9 +753,9 @@ function App() {
 
   return <>
     <header className="bar">
-      <div className="brand glass"><div className="mark">ت</div><b>تَرتيل</b></div>
-      <div className="tabs glass" role="group" aria-label="التصفية"><button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>المكتبة</button><button aria-pressed={filter === 'fav'} onClick={() => setFilter('fav')}>المفضلة</button></div>
-      <div className="tools"><label className="search glass"><Icon name="search"/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="ابحث عن سورة أو قارئ" aria-label="بحث"/></label><button className="circle glass btn" aria-label="اختيار مجلد الصوت" onClick={selectFolder}><Icon name="folder"/></button><button className="circle glass btn" aria-label="إعدادات الصلاة والموقع" onClick={() => setPrayerSettingsOpen(true)}><Icon name="sliders"/></button></div>
+      <div className="brand glass rim"><div className="mark">ت</div><b>تَرتيل</b></div>
+      <div className="tabs glass rim" role="group" aria-label="التصفية"><button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>المكتبة</button><button aria-pressed={filter === 'fav'} onClick={() => setFilter('fav')}>المفضلة</button></div>
+      <div className="tools"><label className="search glass rim"><Icon name="search"/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="ابحث عن سورة أو قارئ" aria-label="بحث"/></label><button className="circle glass btn rim" aria-label="اختيار مجلد الصوت" onClick={selectFolder}><Icon name="folder"/></button><button className="circle glass btn rim" aria-label="إعدادات الصلاة والموقع" onClick={() => setPrayerSettingsOpen(true)}><Icon name="sliders"/></button></div>
     </header>
     <main>
       <h1>{filter === 'all' ? 'المكتبة' : 'المفضلة'}</h1><p className="sub">{count(visible.length)}</p>

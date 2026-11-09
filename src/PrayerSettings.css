@@ -3,25 +3,21 @@
 }
 
 .prayer-settings-backdrop {
-  --ps-bg-backdrop: #060608;
-  --ps-surface-modal: #131316;
-  --ps-surface-card: #18181c;
-  --ps-surface-raised: #1f1f24;
-  --ps-surface-hover: #26262c;
-  --ps-border: #26262d;
-  --ps-border-strong: #34343d;
-  --ps-text: #f5f5f7;
-  --ps-text-2: #b9b9c2;
-  --ps-text-3: #878791;
-  --ps-blue: #6aa8f5;
-  --ps-blue-solid: #8ab4f8;
-  --ps-blue-bg: rgba(106, 168, 245, .12);
-  --ps-blue-bg-hover: rgba(106, 168, 245, .19);
-  --ps-blue-line: rgba(106, 168, 245, .28);
-  --ps-violet: #cdb9ee;
-  --ps-violet-bg: #2a2237;
-  --ps-violet-bg-hover: #342a43;
-  --ps-violet-line: rgba(205, 185, 238, .26);
+  --ps-bg-backdrop: var(--bg);
+  --ps-surface-modal: var(--bg);
+  --ps-surface-card: var(--surface);
+  --ps-surface-raised: var(--glass);
+  --ps-surface-hover: var(--glass-hover);
+  --ps-border: var(--hairline);
+  --ps-border-strong: color-mix(in srgb, var(--text) 18%, transparent);
+  --ps-text: var(--text);
+  --ps-text-2: var(--text-2);
+  --ps-text-3: var(--text-3);
+  --ps-blue: var(--accent);
+  --ps-blue-solid: var(--accent);
+  --ps-blue-bg: var(--accent-soft);
+  --ps-blue-bg-hover: color-mix(in srgb, var(--accent) 22%, transparent);
+  --ps-blue-line: color-mix(in srgb, var(--accent) 36%, transparent);
   --ps-r-card: 16px;
   --ps-r-control: 12px;
 
@@ -32,7 +28,7 @@
   place-items: center;
   padding: 16px;
   background: var(--ps-bg-backdrop);
-  background: rgba(6, 6, 8, .72);
+  background: color-mix(in srgb, var(--bg) 76%, transparent);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
@@ -302,16 +298,16 @@
   background: var(--ps-surface-hover) !important;
 }
 
-.ps-button-violet {
+.ps-button-preview {
   width: 100%;
   height: 42px;
-  border-color: var(--ps-violet-line) !important;
-  background: var(--ps-violet-bg) !important;
-  color: var(--ps-violet) !important;
+  border-color: var(--ps-blue-line) !important;
+  background: var(--ps-blue-bg) !important;
+  color: var(--ps-blue) !important;
 }
 
-.ps-button-violet:hover {
-  background: var(--ps-violet-bg-hover) !important;
+.ps-button-preview:hover {
+  background: var(--ps-blue-bg-hover) !important;
 }
 
 @keyframes ps-spin {
@@ -417,7 +413,7 @@
 }
 
 .ps-select:hover {
-  border-color: #44444f !important;
+  border-color: color-mix(in srgb, var(--text) 28%, transparent) !important;
 }
 
 .ps-select option {
@@ -435,7 +431,7 @@
   padding: 12px 14px 14px;
   border-top: 1px solid var(--ps-border);
   border-radius: 0 0 var(--ps-r-card) var(--ps-r-card);
-  background: rgba(106, 168, 245, .045);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 
 .ps-applied-label {
@@ -458,7 +454,7 @@
   border-color: var(--ps-blue-line);
   border-radius: 8px;
   background: var(--ps-blue-bg);
-  color: #cfe3fb;
+  color: var(--ps-text);
   font-size: 12px;
 }
 
@@ -531,7 +527,7 @@
   inset: 0;
   border: 1px solid var(--ps-border-strong);
   border-radius: 999px;
-  background: #2b2b33;
+  background: var(--ps-surface-raised);
   transition: background .2s, border-color .2s;
 }
 
@@ -542,7 +538,7 @@
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #cfcfd8;
+  background: var(--ps-text-2);
   content: "";
   transition: transform .2s, background .2s;
 }
@@ -554,7 +550,7 @@
 
 .ps-switch input:checked + .ps-switch-track::after {
   transform: translateX(-18px);
-  background: #0e1624;
+  background: var(--ps-bg-backdrop);
 }
 
 .ps-switch input:focus-visible + .ps-switch-track {
@@ -623,7 +619,7 @@
   height: 6px;
   border: 0;
   border-radius: 999px;
-  background: linear-gradient(to left, var(--ps-blue-solid) var(--ps-fill), #34343c var(--ps-fill));
+  background: linear-gradient(to left, var(--ps-blue-solid) var(--ps-fill), var(--ps-border-strong) var(--ps-fill));
 }
 
 .prayer-settings input.ps-range::-webkit-slider-thumb {
@@ -639,7 +635,7 @@
 }
 
 .prayer-settings input.ps-range:hover::-webkit-slider-thumb {
-  box-shadow: 0 0 0 6px rgba(138, 180, 248, .16), 0 2px 8px rgba(0, 0, 0, .55);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--ps-blue-solid) 16%, transparent), 0 2px 8px rgba(0, 0, 0, .55);
 }
 
 .prayer-settings input.ps-range:active::-webkit-slider-thumb {
@@ -647,14 +643,14 @@
 }
 
 .prayer-settings input.ps-range:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 6px rgba(138, 180, 248, .28);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--ps-blue-solid) 28%, transparent);
 }
 
 .prayer-settings input.ps-range::-moz-range-track {
   height: 6px;
   border: 0;
   border-radius: 999px;
-  background: linear-gradient(to left, var(--ps-blue-solid) var(--ps-fill), #34343c var(--ps-fill));
+  background: linear-gradient(to left, var(--ps-blue-solid) var(--ps-fill), var(--ps-border-strong) var(--ps-fill));
 }
 
 .prayer-settings input.ps-range::-moz-range-thumb {

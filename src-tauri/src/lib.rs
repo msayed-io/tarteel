@@ -6,13 +6,13 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use tauri::webview::Color;
 use tauri::{Emitter, Listener, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_notification::NotificationExt;
 use walkdir::WalkDir;
 
 mod alarm;
@@ -24,8 +24,6 @@ mod geometry;
 mod hittest;
 mod island_diagnostics;
 mod tray;
-#[cfg(windows)]
-mod toast;
 
 #[derive(Serialize, Clone)]
 pub struct Track { pub path: String, pub file_name: String, pub title: String, pub artist: String, pub duration: Option<u64>, pub cover: Option<String> }
@@ -130,6 +128,74 @@ fn parse_range(value: &str) -> Option<(u64, u64)> {
 /// حالة التنبيهات المشتركة بين الواجهة وحلقة الإطلاق.
 struct AlarmHandle { state: alarm::SharedAlarm, path: PathBuf }
 
+/// طلبات مجدول Windows والأحداث الملتقطة التي تنتظر جاهزية الجزيرة.
+#[derive(Default)]
+struct PendingAlarms {
+  task_names: Mutex<Vec<String>>,
+  events: Mutex<Vec<alarm::AlarmEvent>>,
+  main_ready: AtomicBool,
+  island_ready: AtomicBool,
+}
+
+fn scheduled_task_argument(args: &[String]) -> Option<String> {
+  args.windows(2)
+    .find(|pair| pair[0] == "--adhan-task")
+    .map(|pair| pair[1].clone())
+}
+
+fn queue_scheduled_task(app: &tauri::AppHandle, task_name: String) {
+  let Some(pending) = app.try_state::<PendingAlarms>() else { return };
+  match pending.task_names.lock() {
+    Ok(mut queue) => queue.push(task_name),
+    Err(_) => { eprintln!("Tarteel scheduled-alarm queue is unavailable"); return; }
+  }
+  process_pending_scheduled_tasks(app);
+}
+
+fn process_pending_scheduled_tasks(app: &tauri::AppHandle) {
+  let Some(pending) = app.try_state::<PendingAlarms>() else { return };
+  let tasks = match pending.task_names.lock() {
+    Ok(mut queue) => std::mem::take(&mut *queue),
+    Err(_) => { eprintln!("Tarteel scheduled-alarm queue is unavailable"); return; }
+  };
+  if tasks.is_empty() {
+    flush_pending_alarms(app);
+    return;
+  }
+  let Some(handle) = app.try_state::<AlarmHandle>() else {
+    if let Ok(mut queue) = pending.task_names.lock() { queue.extend(tasks); }
+    return;
+  };
+
+  for task_name in tasks {
+    let event = {
+      let Ok(mut state) = handle.state.lock() else {
+        eprintln!("Tarteel alarm state lock is unavailable");
+        continue;
+      };
+      let event = alarm::claim_scheduled_task(&mut state, &task_name, now_ms());
+      if let Err(error) = alarm::write_state(&handle.path, &state) {
+        eprintln!("Tarteel scheduled-alarm persistence failed: {error}");
+      }
+      event
+    };
+    if let Some(event) = event {
+      if let Ok(mut events) = pending.events.lock() { events.push(event); }
+    }
+  }
+  flush_pending_alarms(app);
+}
+
+fn flush_pending_alarms(app: &tauri::AppHandle) {
+  let Some(pending) = app.try_state::<PendingAlarms>() else { return };
+  if !pending.main_ready.load(Ordering::SeqCst) || !pending.island_ready.load(Ordering::SeqCst) { return; }
+  let events = match pending.events.lock() {
+    Ok(mut events) => std::mem::take(&mut *events),
+    Err(_) => { eprintln!("Tarteel pending-alarm event queue is unavailable"); return; }
+  };
+  for event in events { deliver_alarm(app, event); }
+}
+
 /// حدث حان وقته، يُرسل إلى الواجهة لتعرضه في الجزيرة.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -138,7 +204,6 @@ struct AdhanPayload {
   key: String,
   name: String,
   at: i64,
-  notification_error: Option<String>,
 }
 
 /// ملخص الحالة، تستعلمه الواجهة بعد الإقلاع.
@@ -204,35 +269,16 @@ fn clear_windows_tasks() -> usize {
   task_scheduler::delete_all_tasks()
 }
 
-/// يُطلق تنبيهًا فورًا لأغراض الاختبار من الإعدادات.
-#[tauri::command]
-fn fire_alarm_now(app: tauri::AppHandle, handle: State<AlarmHandle>, key: Option<String>) -> Result<(), String> {
-  let state = handle.state.lock().map_err(|_| "تعذر قفل حالة التنبيهات".to_string())?;
-  let event = state.events.iter().find(|event| Some(&event.key) == key.as_ref())
-    .or_else(|| state.events.iter().find(|event| event.at > now_ms()))
-    .cloned();
-  drop(state);
-  if let Some(event) = event { deliver_alarm(&app, event); Ok(()) }
-  else { Err("لا يوجد موعد لإرسال تنبيهٍ عنه".to_string()) }
-}
-
 /// اللحظة الحالية بالمللي ثانية. دالة واحدة تستخدمها كل المنظومة.
 fn now_ms() -> i64 {
   SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default()
     .as_millis().min(i64::MAX as u128) as i64
 }
 
-/// يُرسل تنبيهًا واحدًا: إشعار ويندوز + حدث للواجهة.
-/// فشل الإشعار لا يمنع الحدث، ونجاح الاثنين لا يكرر أيًا منهما.
+/// يرسل حدث الصلاة إلى بطاقة التطبيق فقط؛ الإشعارات مخصصة للتنبيه المسبق.
 fn deliver_alarm(app: &tauri::AppHandle, event: alarm::AlarmEvent) {
-  let notification_error = app.notification().builder()
-    .title(format!("حان وقت صلاة {}", event.name))
-    .body(format!("حان موعد صلاة {} وفق موقعك وتوقيتك المحلي.", event.name))
-    .show()
-    .err()
-    .map(|error| { eprintln!("Tarteel alarm notification failed: {error}"); error.to_string() });
   let payload = AdhanPayload {
-    id: event.id, key: event.key, name: event.name, at: event.at, notification_error,
+    id: event.id, key: event.key, name: event.name, at: event.at,
   };
   if let Err(error) = app.emit("prayer-adhan", payload) {
     eprintln!("Tarteel alarm event delivery failed: {error}");
@@ -275,50 +321,18 @@ fn start_alarm_loop(app: tauri::AppHandle, state: alarm::SharedAlarm, path: Path
   if let Err(error) = spawned { eprintln!("Tarteel alarm loop failed to start: {error}"); }
 }
 
-/// الوضع الخفي: يُنفّذه مجدول مهام ويندوز عند موعد الأذان حين يكون التطبيق مغلقًا.
-/// لا يفتح أي نافذة؛ يُطلق التنبيه ويلعب الصوت ثم يخرج.
-fn run_headless_alarm(task_arg: &str) {
-  let state_path = match std::env::var("APPDATA") {
-    Ok(appdata) => PathBuf::from(appdata).join("com.tarteel.desktop").join("alarm-state.json"),
-    Err(_) => { eprintln!("Tarteel headless alarm cannot resolve APPDATA"); return; }
-  };
-  let mut state = alarm::read_state(&state_path);
-  let now = now_ms();
-  let target = state.events.iter()
-    .find(|event| task_scheduler::task_name_for(&event.id) == task_arg && !state.fired_ids.contains(&event.id))
-    .cloned();
-  let Some(event) = target else { return };
-  if now - event.at > alarm::LATE_ALARM_GRACE_MS {
-    /* متأخر جدًا: لا إزعاج. */
-    state.fired_ids.push(event.id.clone());
-    let _ = alarm::write_state(&state_path, &state);
-    return;
-  }
-  state.fired_ids.push(event.id.clone());
-  let _ = alarm::write_state(&state_path, &state);
-
-  /* الإشعار عبر PowerShell/Toast غير متاح بلا سياق تطبيق، لذا نُشغّل التطبيق
-     نفسه في وضع الأذان: يظهر ويُطلق المنبّه. هذا هو المسار الموثوق. */
-  if let Ok(exe) = std::env::current_exe() {
-    let _ = std::process::Command::new(exe)
-      .arg("--adhan-ring")
-      .arg(&event.id)
-      .spawn();
-  }
-}
-
 /* ------------------------------------------------------------------ *
- * منظومة الأذان: صوت أصلي في Rust + إشعار منبّه + كتم
+ * منظومة الأذان: صوت أصلي + بطاقة التطبيق + كتم
  * ------------------------------------------------------------------ */
 
-/// يضمن وجود ملف الأذان على القرص.
+/// يضمن وجود ملف الأذان المرفق `adhan-call.mpeg` على القرص.
 ///
 /// الملف مرفق بالحزمة كأصل (resource). في التشغيل التطويري لا يكون منسوخًا
 /// بعد، فنبحث في مسار المصدر كاحتياط حتى لا يفشل «تجربة التنبيه».
 fn resolve_adhan_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
   let candidates = [
-    app.path().resolve("assets/adhan.mp3", tauri::path::BaseDirectory::Resource).ok(),
-    Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets").join("adhan.mp3")),
+    app.path().resolve("assets/adhan-call.mpeg", tauri::path::BaseDirectory::Resource).ok(),
+    Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets").join("adhan-call.mpeg")),
   ];
   for candidate in candidates.into_iter().flatten() {
     if candidate.exists() {
@@ -332,12 +346,15 @@ fn resolve_adhan_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 fn play_adhan(app: tauri::AppHandle, engine: State<AudioEngine>, id: Option<String>) -> Result<(), String> {
   let path = resolve_adhan_file(&app)?;
   let key = id.unwrap_or_else(|| "manual".to_string());
-  engine.play(&key, &path, now_ms(), true)
+  engine.play(&key, &path, now_ms(), true)?;
+  let _ = app.emit("adhan-playback-state", serde_json::json!({ "playing": true, "id": key }));
+  Ok(())
 }
 
 #[tauri::command]
-fn stop_adhan(engine: State<AudioEngine>) -> Result<(), String> {
+fn stop_adhan(app: tauri::AppHandle, engine: State<AudioEngine>) -> Result<(), String> {
   engine.stop();
+  let _ = app.emit("adhan-playback-state", serde_json::json!({ "playing": false, "stopped": true }));
   Ok(())
 }
 
@@ -360,19 +377,6 @@ fn adhan_state(engine: State<AudioEngine>) -> serde_json::Value {
     "volume": engine.volume(),
     "playing": engine.is_playing(),
   })
-}
-
-/// يعرض إشعار منبّه ويندوز. فشله لا يُسقط الأذان الصوتي.
-#[tauri::command]
-#[cfg(windows)]
-fn show_alarm_notification(title: String, body: String) -> Result<(), String> {
-  toast::show_alarm_toast(&title, &body)
-}
-
-#[tauri::command]
-#[cfg(not(windows))]
-fn show_alarm_notification(_title: String, _body: String) -> Result<(), String> {
-  Err("إشعارات المنبّه متاحة على ويندوز فقط".into())
 }
 
 #[tauri::command]
@@ -590,12 +594,20 @@ fn apply_island_bounds_native(island: &tauri::WebviewWindow, left: i32, top: i32
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let server = start_audio_server().expect("error while starting local audio server");
+  let args: Vec<String> = std::env::args().collect();
+  let pending = PendingAlarms::default();
+  if let Some(task_name) = scheduled_task_argument(&args) {
+    if let Ok(mut queue) = pending.task_names.lock() { queue.push(task_name); }
+  }
   tauri::Builder::default()
+    .manage(pending)
     /* نسخة واحدة فقط. بلا هذا السطر يفتح المستخدم التطبيق مرتين فيجد
        نسختين لكل نافذة، وتتضاعف الجزيرة. الترتيب مقصود: يجب أن يُسجَّل
        القفل قبل أي نافذة. النقر على الاختصار مجددًا يُظهر النافذة القائمة. */
-    .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-      if let Some(window) = app.get_webview_window("main") {
+    .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+      if let Some(task_name) = scheduled_task_argument(&argv) {
+        queue_scheduled_task(app, task_name);
+      } else if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
@@ -614,6 +626,22 @@ pub fn run() {
       Some(vec!["--hidden"]),
     ))
     .setup(|app| {
+      /* طلب المهمة قد يصل قبل أو بعد جاهزية WebView؛ نخزنه حتى تصبح أحداث
+         البطاقة مسجلة، فلا يضيع الأذان عند بدء التطبيق في الخلفية. */
+      let main_ready_app = app.handle().clone();
+      let _main_ready_listener = app.listen_any("main-ready", move |_| {
+        if let Some(pending) = main_ready_app.try_state::<PendingAlarms>() {
+          pending.main_ready.store(true, Ordering::SeqCst);
+        }
+        process_pending_scheduled_tasks(&main_ready_app);
+      });
+      let island_ready_app = app.handle().clone();
+      let _island_ready_listener = app.listen_any("island-ready", move |_| {
+        if let Some(pending) = island_ready_app.try_state::<PendingAlarms>() {
+          pending.island_ready.store(true, Ordering::SeqCst);
+        }
+        process_pending_scheduled_tasks(&island_ready_app);
+      });
       /* اختبار Windows فقط: متغير عملية مؤقت يجهز حالة موسيقى اصطناعية عبر
          الحدث نفسه الذي تستخدمه الواجهة. لا يُفعّل هذا المسار في التشغيل العادي. */
       if std::env::var("TARTEEL_WINDOWS_SMOKE_TEST").ok().as_deref() == Some("1") {
@@ -703,6 +731,7 @@ pub fn run() {
       let alarm_path = alarm::state_path(&app.path().app_config_dir()?);
       let alarm_state = Arc::new(Mutex::new(alarm::read_state(&alarm_path)));
       app.manage(AlarmHandle { state: alarm_state.clone(), path: alarm_path.clone() });
+      process_pending_scheduled_tasks(app.handle());
       start_alarm_loop(app.handle().clone(), alarm_state, alarm_path);
 
       /* الصينية: تُبنى قبل إظهار النوافذ حتى يبقى التطبيق قابلًا للوصول
@@ -738,11 +767,11 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       scan_directory, set_audio_root, audio_url, resize_island,
       set_alarm_schedule, set_sleep_deadline, sync_windows_tasks, clear_windows_tasks,
-      alarm_status, fire_alarm_now,
+      alarm_status,
       set_island_hit_rect, set_island_pass_through,
       island_diagnostics::record_island_geometry,
       play_adhan, stop_adhan, set_adhan_volume, set_adhan_muted, adhan_state,
-      show_alarm_notification, set_next_prayer_label,
+      set_next_prayer_label,
       is_autostart_enabled, set_autostart
     ])
     .run(tauri::generate_context!())

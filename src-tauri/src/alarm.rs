@@ -4,16 +4,14 @@
 //! ثلاثة مستويات تعمل معًا حتى لا يضيع أذان:
 //!
 //! 1. **جدولة مقيمة** (هذا الملف): خيط داخل العملية يفحص المواعيد كل 250ms.
-//!    دقيق عندما يكون التطبيق أو أيقونة الصينية حيّة.
+//!    يُطلق الصوت وبطاقة التطبيق عندما تكون العملية حيّة.
 //!
 //! 2. **مهام ويندوز المجدولة** (`task_scheduler`): مهمة تُوقظ عملية خفيفة عند
-//!    كل موعد حتى لو كان التطبيق مغلقًا تمامًا، بأولوية عالية.
+//!    كل موعد حتى لو كان التطبيق مغلقًا تمامًا؛ تبدأ التطبيق مخفيًا وتشغّل
+//!    ملف الأذان وتعرض بطاقته دون إشعار Windows.
 //!
-//! 3. **إشعارات ويندوز التفاعلية**: تُصاغ من طبقة Tauri/Windows App SDK
-//!    بسِيناريو منبّه، فتظهر فوق النوافذ وتتجاوز وضع عدم الإزعاج.
-//!
-//! المبدأ الحاكم: **لا يُطلق تنبيه مرتين، ولا يُفقد تنبيه واحد**. تُحفظ
-//! المعرّفات المُطلقة على القرص قبل الإطلاق، ويُتحقَّق منها عند كل إقلاع.
+//! المبدأ الحاكم: **لا يُشغّل الأذان مرتين**. تُحفظ المعرّفات المُطلقة على القرص
+//! قبل الإطلاق، وتتشارك الحلقة المقيمة ومهمة Windows سجل منع التكرار نفسه.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -147,6 +145,24 @@ pub fn tick(state: &mut AlarmState, now_ms: i64) -> AlarmTick {
     }
 
     AlarmTick { due, skipped, sleep_due, changed }
+}
+
+/// يلتقط الموعد الذي أطلقته مهمة Windows، مع مشاركة سجل منع التكرار مع `tick`.
+/// المهمة المبكرة تُترك للحلقة المقيمة، والمتأخرة خارج نافذة السماح تُسجَّل بلا صوت.
+pub fn claim_scheduled_task(state: &mut AlarmState, task_name: &str, now_ms: i64) -> Option<AlarmEvent> {
+    let event = state.events.iter()
+        .find(|event| crate::task_scheduler::task_name_for(&event.id) == task_name)?
+        .clone();
+    if state.fired_ids.contains(&event.id) || event.at > now_ms {
+        return None;
+    }
+
+    state.fired_ids.push(event.id.clone());
+    if state.fired_ids.len() > MAX_FIRED_IDS {
+        let excess = state.fired_ids.len() - MAX_FIRED_IDS;
+        state.fired_ids.drain(0..excess);
+    }
+    (now_ms.saturating_sub(event.at) <= LATE_ALARM_GRACE_MS).then_some(event)
 }
 
 /// يستبدل الجدول كله بعد التحقق. يرفض المعرّفات المكررة أو الفارغة.
@@ -308,6 +324,33 @@ mod tests {
         let mut state = AlarmState { events, ..Default::default() };
         tick(&mut state, 100_000);
         assert!(state.fired_ids.len() <= MAX_FIRED_IDS);
+    }
+
+    #[test]
+    fn scheduled_task_claims_a_due_prayer_once_and_tick_cannot_repeat_it() {
+        const AT: i64 = 1_800_000_000_000;
+        let id = "2026-11-09|fajr";
+        let event = event(id, AT);
+        let task_name = crate::task_scheduler::task_name_for(id);
+        let mut state = AlarmState { events: vec![event.clone()], ..Default::default() };
+
+        assert!(claim_scheduled_task(&mut state, &task_name, AT - 1).is_none());
+        assert!(state.fired_ids.is_empty(), "an early task is left to the resident alarm loop");
+        assert_eq!(claim_scheduled_task(&mut state, &task_name, AT), Some(event.clone()));
+        assert!(claim_scheduled_task(&mut state, &task_name, AT + 1).is_none());
+        assert!(tick(&mut state, AT + 2).due.is_empty(), "the resident loop must not duplicate the task");
+    }
+
+    #[test]
+    fn scheduled_task_outside_grace_is_recorded_without_audio() {
+        const AT: i64 = 1_800_000_000_000;
+        let id = "2026-11-09|isha";
+        let task_name = crate::task_scheduler::task_name_for(id);
+        let mut state = AlarmState { events: vec![event(id, AT)], ..Default::default() };
+
+        assert!(claim_scheduled_task(&mut state, &task_name, AT + LATE_ALARM_GRACE_MS + 1).is_none());
+        assert_eq!(state.fired_ids, vec![id.to_string()]);
+        assert!(tick(&mut state, AT + LATE_ALARM_GRACE_MS + 2).due.is_empty());
     }
 
     #[test]

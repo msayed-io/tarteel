@@ -102,9 +102,11 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
       let granted = await isPermissionGranted();
       if (!granted) granted = (await requestPermission()) === 'granted';
       setNotificationsAllowed(granted);
-      setStatus(granted ? 'إشعارات ويندوز ممنوحة.' : 'لم يُمنح إذن الإشعارات. ستظهر البطاقة داخل التطبيق فقط.');
+      setStatus(granted
+        ? 'إذن إشعار التنبيه المسبق ممنوح. عند موعد الصلاة سيعمل الأذان الصوتي فقط.'
+        : 'لم يُمنح إذن التنبيه المسبق؛ الأذان الفعلي يعمل صوتًا فقط دون إشعار.');
     } catch (cause) {
-      setError(`تعذّر طلب إذن الإشعارات: ${String(cause)}`);
+      setError(`تعذّر طلب إذن إشعار التنبيه المسبق: ${String(cause)}`);
     }
   };
 
@@ -264,7 +266,7 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
             <div className="ps-card">
               <div className="ps-control-row">
                 <span className="ps-row-icon"><Icon name="bell" /></span>
-                <span className="ps-row-label" id="ps-notify-label">إشعارات ويندوز</span>
+                <span className="ps-row-label" id="ps-notify-label">إذن إشعار التنبيه المسبق</span>
                 <button id="ps-notify" type="button" className="ps-button ps-button-ghost ps-control" aria-labelledby="ps-notify-label" aria-pressed={notificationsAllowed} onClick={requestNotifications}>
                   {notificationsAllowed ? 'ممنوحة ✓' : 'طلب الإذن'}
                 </button>
@@ -328,8 +330,8 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
 
               {onPreviewAlarm && (
                 <div className="ps-card-foot">
-                  <button type="button" className="ps-button ps-button-violet" onClick={onPreviewAlarm}>
-                    <Icon name="play" /> تجربة التنبيه الآن
+                  <button type="button" className="ps-button ps-button-preview" onClick={onPreviewAlarm}>
+                    <Icon name="play" /> تجربة صوت الأذان
                   </button>
                 </div>
               )}
