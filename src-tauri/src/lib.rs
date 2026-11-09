@@ -6,7 +6,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use lofty::prelude::*;
@@ -135,6 +135,59 @@ struct PendingAlarms {
   events: Mutex<Vec<alarm::AlarmEvent>>,
   main_ready: AtomicBool,
   island_ready: AtomicBool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum IslandPositionMode { Auto, Manual }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+struct IslandPlacement {
+  mode: IslandPositionMode,
+  offset_x: f64,
+  offset_y: f64,
+}
+
+impl Default for IslandPositionMode {
+  fn default() -> Self { Self::Auto }
+}
+
+impl Default for IslandPlacement {
+  fn default() -> Self { Self { mode: IslandPositionMode::Auto, offset_x: 0.0, offset_y: 0.0 } }
+}
+
+const ISLAND_PLACEMENT_FILE: &str = "island-position.json";
+const MAX_STORED_ISLAND_OFFSET: f64 = 10_000.0;
+
+struct IslandPlacementHandle {
+  placement: Mutex<IslandPlacement>,
+  path: PathBuf,
+  animation_revision: Arc<AtomicU64>,
+}
+
+fn normalize_island_placement(mut placement: IslandPlacement) -> IslandPlacement {
+  placement.offset_x = if placement.offset_x.is_finite() { placement.offset_x.clamp(-MAX_STORED_ISLAND_OFFSET, MAX_STORED_ISLAND_OFFSET) } else { 0.0 };
+  placement.offset_y = if placement.offset_y.is_finite() { placement.offset_y.clamp(-MAX_STORED_ISLAND_OFFSET, MAX_STORED_ISLAND_OFFSET) } else { 0.0 };
+  placement
+}
+
+fn read_island_placement(path: &Path) -> IslandPlacement {
+  fs::read(path).ok()
+    .and_then(|bytes| serde_json::from_slice::<IslandPlacement>(&bytes).ok())
+    .map(normalize_island_placement)
+    .unwrap_or_default()
+}
+
+fn write_island_placement(path: &Path, placement: IslandPlacement) -> Result<(), String> {
+  let placement = normalize_island_placement(placement);
+  let parent = path.parent().ok_or_else(|| "مسار موضع الجزيرة لا يحتوي مجلدًا أبًا".to_string())?;
+  fs::create_dir_all(parent).map_err(|e| format!("تعذر إنشاء مجلد حفظ موضع الجزيرة: {e}"))?;
+  let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
+  let bytes = serde_json::to_vec(&placement).map_err(|e| format!("تعذر ترميز موضع الجزيرة: {e}"))?;
+  fs::write(&temporary, bytes).map_err(|e| format!("تعذر كتابة موضع الجزيرة المؤقت: {e}"))?;
+  if path.exists() { fs::remove_file(path).map_err(|e| format!("تعذر استبدال موضع الجزيرة المحفوظ: {e}"))?; }
+  fs::rename(&temporary, path).map_err(|e| format!("تعذر تثبيت موضع الجزيرة المحفوظ: {e}"))
 }
 
 fn scheduled_task_argument(args: &[String]) -> Option<String> {
@@ -488,7 +541,90 @@ async fn set_island_pass_through(enabled: bool, app: tauri::AppHandle) -> Result
 }
 
 #[tauri::command]
-fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), String> {
+fn get_island_placement(state: State<IslandPlacementHandle>) -> Result<IslandPlacement, String> {
+  state.placement.lock().map(|placement| *placement).map_err(|_| "تعذر قراءة موضع الجزيرة المحفوظ".to_string())
+}
+
+#[tauri::command]
+fn set_island_placement(
+  mode: String,
+  offset_x: f64,
+  offset_y: f64,
+  app: tauri::AppHandle,
+  state: State<IslandPlacementHandle>,
+) -> Result<IslandPlacement, String> {
+  let mode = match mode.as_str() {
+    "auto" => IslandPositionMode::Auto,
+    "manual" => IslandPositionMode::Manual,
+    _ => return Err("وضع موضع الجزيرة غير معروف".into()),
+  };
+  let mut placement = normalize_island_placement(IslandPlacement { mode, offset_x, offset_y });
+  let island = app.get_webview_window("island").ok_or_else(|| "نافذة الجزيرة غير متاحة".to_string())?;
+  let monitor = island.current_monitor().map_err(|e| format!("تعذر تحديد شاشة الجزيرة: {e}"))?
+    .or(island.primary_monitor().map_err(|e| format!("تعذر تحديد الشاشة الرئيسية: {e}"))?)
+    .ok_or_else(|| "لم يُرجع Windows شاشة صالحة لضبط موضع الجزيرة".to_string())?;
+  let area = monitor.size();
+  let origin = monitor.position();
+  let scale = island.scale_factor().map_err(|e| format!("تعذر قراءة مقياس الشاشة: {e}"))?;
+  if placement.mode == IslandPositionMode::Manual {
+    (placement.offset_x, placement.offset_y) = geometry::clamp_island_offsets_logical(
+      area.width as i32, area.height as i32, scale, true, placement.offset_x, placement.offset_y,
+    );
+  }
+  write_island_placement(&state.path, placement)?;
+  *state.placement.lock().map_err(|_| "تعذر تحديث موضع الجزيرة".to_string())? = placement;
+
+  let current = island.outer_position().map_err(|e| format!("تعذر قراءة موضع الجزيرة الحالي: {e}"))?;
+  let size = island.outer_size().map_err(|e| format!("تعذر قراءة حجم نافذة الجزيرة: {e}"))?;
+  let (left, top) = geometry::island_origin_with_placement(
+    origin.x, origin.y, area.width as i32, area.height as i32, size.width as i32, scale,
+    placement.mode == IslandPositionMode::Manual, placement.offset_x, placement.offset_y,
+  );
+  animate_island_bounds(island, current.x, current.y, left, top, size.width, size.height, state.animation_revision.clone())?;
+  Ok(placement)
+}
+
+/// يحرك النافذة الأصلية على خيطها في إطارات قصيرة، دون تغيير حجمها أو تنشيطها.
+fn animate_island_bounds(
+  island: tauri::WebviewWindow,
+  start_x: i32,
+  start_y: i32,
+  left: i32,
+  top: i32,
+  width: u32,
+  height: u32,
+  revision: Arc<AtomicU64>,
+) -> Result<(), String> {
+  let generation = revision.fetch_add(1, Ordering::SeqCst) + 1;
+  if start_x == left && start_y == top { return Ok(()); }
+  thread::Builder::new().name("tarteel-island-position".into()).spawn(move || {
+    const FRAMES: u32 = geometry::ISLAND_POSITION_ANIMATION_FRAMES;
+    for frame in 1..=FRAMES {
+      thread::sleep(Duration::from_millis(geometry::ISLAND_POSITION_ANIMATION_FRAME_MS));
+      if revision.load(Ordering::SeqCst) != generation { return; }
+      let progress = frame as f64 / FRAMES as f64;
+      let eased = geometry::island_position_motion_progress(progress);
+      let x = (start_x as f64 + (left - start_x) as f64 * eased).round() as i32;
+      let y = (start_y as f64 + (top - start_y) as f64 * eased).round() as i32;
+      let target = island.clone();
+      let frame_revision = revision.clone();
+      let _ = island.run_on_main_thread(move || {
+        if frame_revision.load(Ordering::SeqCst) != generation { return; }
+        if let Err(cause) = apply_island_bounds_native(&target, x, y, width, height) {
+          eprintln!("Tarteel smooth island movement failed: {cause}");
+          return;
+        }
+        if frame == FRAMES {
+          let _ = target.emit("island-geometry-recheck", serde_json::json!({}));
+        }
+      });
+    }
+  }).map_err(|e| format!("تعذر بدء الحركة السلسة لموضع الجزيرة: {e}"))?;
+  Ok(())
+}
+
+#[tauri::command]
+fn resize_island(app: tauri::AppHandle, state: State<IslandPlacementHandle>, width: f64, height: f64) -> Result<(), String> {
   /* أبعاد الأمر هي أبعاد النافذة الفعلية وتشمل هامش الرسم الشفاف. */
   if !geometry::is_supported_island_resize(width, height) {
     return Err(format!("رفضت أبعاد نافذة الجزيرة {width}×{height} CSS px: خارج الحدود الآمنة"));
@@ -508,8 +644,11 @@ fn resize_island(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), S
   let desired = (height * scale).round() as u32;
   let target_height = desired.max(floor);
 
-  let (left, top) = geometry::island_origin(origin.x, origin.y, area.width as i32, target_width as i32);
-  let _ = (target_width, target_height, &area);
+  let placement = *state.placement.lock().map_err(|_| "تعذر قراءة موضع الجزيرة".to_string())?;
+  let (left, top) = geometry::island_origin_with_placement(
+    origin.x, origin.y, area.width as i32, area.height as i32, target_width as i32, scale,
+    placement.mode == IslandPositionMode::Manual, placement.offset_x, placement.offset_y,
+  );
 
   let target = island.clone();
   island.run_on_main_thread(move || {
@@ -527,10 +666,20 @@ fn island_boot_size_logical() -> (f64, f64) {
   (geometry::compact_window_width_logical(), geometry::compact_window_height_logical())
 }
 
-fn island_bounds_from_monitor(monitor_left: i32, monitor_top: i32, monitor_width: i32, scale: f64) -> (i32, i32, i32, i32) {
+fn island_bounds_from_monitor(
+  monitor_left: i32,
+  monitor_top: i32,
+  monitor_width: i32,
+  monitor_height: i32,
+  scale: f64,
+  placement: IslandPlacement,
+) -> (i32, i32, i32, i32) {
   let width = geometry::compact_window_width_px(scale);
   let height = geometry::compact_window_height_px(scale);
-  let (x, y) = geometry::island_origin(monitor_left, monitor_top, monitor_width, width);
+  let (x, y) = geometry::island_origin_with_placement(
+    monitor_left, monitor_top, monitor_width, monitor_height, width, scale,
+    placement.mode == IslandPositionMode::Manual, placement.offset_x, placement.offset_y,
+  );
   (x, y, width, height)
 }
 
@@ -626,6 +775,13 @@ pub fn run() {
       Some(vec!["--hidden"]),
     ))
     .setup(|app| {
+      let placement_path = app.path().app_config_dir()?.join(ISLAND_PLACEMENT_FILE);
+      let initial_placement = read_island_placement(&placement_path);
+      app.manage(IslandPlacementHandle {
+        placement: Mutex::new(initial_placement),
+        path: placement_path,
+        animation_revision: Arc::new(AtomicU64::new(0)),
+      });
       /* طلب المهمة قد يصل قبل أو بعد جاهزية WebView؛ نخزنه حتى تصبح أحداث
          البطاقة مسجلة، فلا يضيع الأذان عند بدء التطبيق في الخلفية. */
       let main_ready_app = app.handle().clone();
@@ -694,6 +850,16 @@ pub fn run() {
       let area = monitor.size();
       let origin = monitor.position();
       let scale = island.scale_factor()?;
+      let mut placement = app.state::<IslandPlacementHandle>().placement.lock().map(|saved| *saved).unwrap_or_default();
+      if placement.mode == IslandPositionMode::Manual {
+        (placement.offset_x, placement.offset_y) = geometry::clamp_island_offsets_logical(
+          area.width as i32, area.height as i32, scale, true, placement.offset_x, placement.offset_y,
+        );
+        if let Ok(mut saved) = app.state::<IslandPlacementHandle>().placement.lock() { *saved = placement; }
+        if let Err(cause) = write_island_placement(&app.state::<IslandPlacementHandle>().path, placement) {
+          eprintln!("Tarteel could not persist the safe manual island position: {cause}");
+        }
+      }
 
       /* إزالة إطار Windows غير المرئي قبل ضبط الموضع حتى تطابق حدود النافذة
          المرئية الإحداثيات الفيزيائية التي سنطبقها. */
@@ -710,7 +876,7 @@ pub fn run() {
       }
 
       /* الجزيرة نافذة شفافة مستقلة؛ لا تنشئ شريطًا ولا تعدّل مساحة عمل Windows. */
-      let (x, y, w, h) = island_bounds_from_monitor(origin.x, origin.y, area.width as i32, scale);
+      let (x, y, w, h) = island_bounds_from_monitor(origin.x, origin.y, area.width as i32, area.height as i32, scale, placement);
       /* الحجم والموضع في نداء واحد: `SetWindowPos` تُطبّق الاثنين معًا، فلا
          يُرى إطار واحد بالحجم القديم في الموضع الجديد. */
       island.set_size(tauri::PhysicalSize::new(w as u32, h as u32))?;
@@ -746,7 +912,7 @@ pub fn run() {
     })
     .on_window_event(|window, event| {
       if window.label() == "island" {
-        if matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } | tauri::WindowEvent::Focused(true)) {
+        if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } | tauri::WindowEvent::Focused(true)) {
           let _ = window.emit("island-geometry-recheck", serde_json::json!({}));
         }
         return;
@@ -765,7 +931,7 @@ pub fn run() {
       }
     })
     .invoke_handler(tauri::generate_handler![
-      scan_directory, set_audio_root, audio_url, resize_island,
+      scan_directory, set_audio_root, audio_url, resize_island, get_island_placement, set_island_placement,
       set_alarm_schedule, set_sleep_deadline, sync_windows_tasks, clear_windows_tasks,
       alarm_status,
       set_island_hit_rect, set_island_pass_through,
@@ -785,7 +951,7 @@ mod island_tests {
   #[test]
   fn island_bounds_are_derived_from_the_actual_monitor_origin() {
     for scale in [1.0, 1.25, 1.5] {
-      let (x, y, w, h) = island_bounds_from_monitor(0, 0, 1920, scale);
+      let (x, y, w, h) = island_bounds_from_monitor(0, 0, 1920, 1080, scale, IslandPlacement::default());
       assert_eq!(y, 0, "الجزيرة تبدأ من أصل الشاشة المختارة");
       assert_eq!(w, geometry::compact_window_width_px(scale), "النافذة تشمل الهامش الشفاف");
       assert_eq!(h, geometry::compact_window_height_px(scale), "النافذة تشمل الهامش الشفاف");
@@ -806,15 +972,46 @@ mod island_tests {
   fn transparent_window_gutter_preserves_css_stage_at_every_scale() {
     for dpi in [96u32, 120, 144, 192] {
       let scale = geometry::scale_from_dpi(dpi);
-      let (_, _, _, h) = island_bounds_from_monitor(0, 0, 1920, scale);
+      let (_, _, _, h) = island_bounds_from_monitor(0, 0, 1920, 1080, scale, IslandPlacement::default());
       assert_eq!(h, (42.0 * scale).round() as i32, "dpi {dpi}");
     }
   }
 
   #[test]
   fn a_second_monitor_is_centred_on_its_own_origin() {
-    let (x, y, w, _) = island_bounds_from_monitor(1920, -1080, 1920, 1.25);
+    let (x, y, w, _) = island_bounds_from_monitor(1920, -1080, 1920, 1080, 1.25, IslandPlacement::default());
     assert_eq!(x, 1920 + (1920 - w) / 2);
     assert_eq!(y, -1080);
+  }
+
+  #[test]
+  fn a_manual_offset_is_restored_from_disk_and_survives_switching_back_to_auto() {
+    let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let root = std::env::temp_dir().join(format!("tarteel-island-position-{}-{unique}", std::process::id()));
+    let path = root.join(ISLAND_PLACEMENT_FILE);
+    let manual = IslandPlacement { mode: IslandPositionMode::Manual, offset_x: -28.0, offset_y: 42.0 };
+    write_island_placement(&path, manual).expect("يحفظ الإزاحة اليدوية");
+    assert_eq!(read_island_placement(&path), manual, "تُستعاد بعد إعادة إنشاء الحالة");
+
+    let auto = IslandPlacement { mode: IslandPositionMode::Auto, ..manual };
+    write_island_placement(&path, auto).expect("يحفظ الرجوع إلى Auto");
+    assert_eq!(read_island_placement(&path), auto, "لا يمسح Auto الإزاحة اليدوية المحفوظة");
+    let _ = fs::remove_dir_all(root);
+  }
+
+  #[test]
+  fn malformed_or_non_finite_position_data_falls_back_safely() {
+    let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let root = std::env::temp_dir().join(format!("tarteel-island-position-bad-{}-{unique}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join(ISLAND_PLACEMENT_FILE);
+    fs::write(&path, b"not-json").unwrap();
+    assert_eq!(read_island_placement(&path), IslandPlacement::default());
+    let normalized = normalize_island_placement(IslandPlacement {
+      mode: IslandPositionMode::Manual, offset_x: f64::NAN, offset_y: 1.0e30,
+    });
+    assert_eq!(normalized.offset_x, 0.0);
+    assert_eq!(normalized.offset_y, MAX_STORED_ISLAND_OFFSET);
+    let _ = fs::remove_dir_all(root);
   }
 }

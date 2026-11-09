@@ -9,7 +9,7 @@ import {
   screenNormal,
   specularRimIntensity,
 } from '../src/lib/specular-rim.js';
-import { applyRimIntensity, normalizeRimIntensity, readRimIntensity, storeRimIntensity } from '../src/lib/rim-preference.js';
+import { applyRimIntensity, normalizeRimIntensity, readRimIntensity, RIM_INTENSITY_KEY } from '../src/lib/rim-preference.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const rootFile = path => readFileSync(resolve(here, '..', path), 'utf8');
@@ -229,17 +229,16 @@ describe('الحافة اللامعة — البكسلات والهندسة', ()
     expect(island).toContain('background-size:100% 100%');
   });
 
-  it('يحفظ إعداد الشدة من صفر إلى واحد ويحدّث الخاصية العامة فورًا مع إرسال حدث إعادة الرسم', () => {
-    const values = new Map();
+  it('يثبت شدة الحافة عند 100% ويتجاهل قيمة المنزلق القديم ويحذفها', () => {
+    const values = new Map([[RIM_INTENSITY_KEY, '0.35']]);
     const storage = {
       getItem: key => values.get(key) ?? null,
-      setItem: (key, value) => values.set(key, value),
+      removeItem: key => values.delete(key),
     };
     expect(readRimIntensity(storage)).toBe(1);
-    expect(normalizeRimIntensity(-0.5)).toBe(0);
-    expect(storeRimIntensity(1.5, storage)).toBe(1);
-    expect(storeRimIntensity(0.65, storage)).toBeCloseTo(0.65);
-    expect(readRimIntensity(storage)).toBeCloseTo(0.65);
+    expect(values.has(RIM_INTENSITY_KEY)).toBe(false);
+    expect(normalizeRimIntensity(0)).toBe(1);
+    expect(readRimIntensity({ removeItem: () => { throw new Error('storage blocked'); } })).toBe(1);
 
     const styles = {};
     const events = [];
@@ -248,14 +247,12 @@ describe('الحافة اللامعة — البكسلات والهندسة', ()
       defaultView: { Event: class { constructor(type) { this.type = type; } } },
       dispatchEvent: event => events.push(event.type),
     };
-    expect(applyRimIntensity(0.4, documentRef)).toBe(0.4);
-    expect(styles['--rim']).toBe('0.4');
+    expect(applyRimIntensity(0, documentRef)).toBe(1);
+    expect(styles['--rim']).toBe('1');
     expect(events).toEqual(['tarteel-rim-change']);
-    expect(settings).toContain('id="ps-rim-intensity"');
-    expect(settings).toContain('min="0"');
-    expect(settings).toContain('max="1"');
-    expect(settings).toContain('storeRimIntensity(event.target.value)');
-    expect(settings).toContain('applyRimIntensity(value, document)');
+    expect(settings).not.toContain('ps-rim-intensity');
+    expect(settings).not.toContain('شدة الحافة اللامعة');
+    expect(settings).toContain('ps-placement-remote');
   });
 
   it('يرسم حلقة SDF واحدة بلا قناع متراكب ويحافظ على العناصر المؤهلة فقط', () => {

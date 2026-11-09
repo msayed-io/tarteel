@@ -8,6 +8,7 @@ $outDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts/island-ui-smoke'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $statusPath = Join-Path $outDir 'status.txt'
 $logPath = Join-Path $env:APPDATA 'com.tarteel.desktop/island-geometry.jsonl'
+$placementPath = Join-Path $env:APPDATA 'com.tarteel.desktop/island-position.json'
 $process = $null
 $previousSmokeFlag = $env:TARTEEL_WINDOWS_SMOKE_TEST
 
@@ -93,23 +94,40 @@ function Assert-BlackCapsuleCenter($Record, [string]$ScreenshotPath) {
 }
 
 function Assert-Anchor($Record) {
+  Assert-PlacementAnchor $Record
   $rect = $Record.capsule_rect_screen
   $anchor = $Record.capsule_anchor_center_screen
-  $monitor = $Record.monitor_rc_monitor
-  if ($null -eq $rect -or $null -eq $anchor -or $null -eq $monitor) { throw 'Geometry record is missing a capsule, anchor, or monitor rectangle.' }
+  if ($null -eq $rect -or $null -eq $anchor) { throw 'Geometry record is missing a capsule or placement anchor.' }
   $cx = ([double]$rect.left + [double]$rect.right) / 2.0
   $cy = ([double]$rect.top + [double]$rect.bottom) / 2.0
   $dx = $cx - [double]$anchor.x
   $dy = $cy - [double]$anchor.y
-  $expectedX = ([double]$monitor.left + [double]$monitor.right) / 2.0
-  $expectedY = [double]$monitor.top + 19.0 * [double]$Record.scale_factor
-  if ([Math]::Abs([double]$anchor.x - $expectedX) -gt 0.01 -or [Math]::Abs([double]$anchor.y - $expectedY) -gt 0.01) {
-    throw "The collapsed anchor is not the monitor-origin stage center. Expected ($expectedX,$expectedY), measured ($($anchor.x),$($anchor.y))."
-  }
   if ([Math]::Abs($dx) -gt 0.5 -or [Math]::Abs($dy) -gt 0.5) {
     throw "Capsule center is outside the 0.5 physical-pixel monitor-anchor tolerance: dx=$dx, dy=$dy."
   }
-  Write-Host "Verified capsule center against monitor-origin anchor ($($anchor.x),$($anchor.y)): dx=$dx, dy=$dy."
+  Write-Host "Verified collapsed capsule center against the saved placement anchor ($($anchor.x),$($anchor.y)): dx=$dx, dy=$dy."
+}
+
+function Assert-PlacementAnchor($Record) {
+  $anchor = $Record.capsule_anchor_center_screen
+  $monitor = $Record.monitor_rc_monitor
+  if ($null -eq $anchor -or $null -eq $monitor) { throw 'Geometry record is missing a placement anchor or monitor rectangle.' }
+  if ($Record.placement_mode -ne 'manual') { throw "Expected the persisted manual mode, got '$($Record.placement_mode)' in '$($Record.state)'." }
+  $expectedX = ([double]$monitor.left + [double]$monitor.right) / 2.0 + [double]$Record.placement_offset_x_px
+  $expectedY = [double]$monitor.top + 19.0 * [double]$Record.scale_factor + [double]$Record.placement_offset_y_px
+  if ([Math]::Abs([double]$anchor.x - $expectedX) -gt 0.01 -or [Math]::Abs([double]$anchor.y - $expectedY) -gt 0.01) {
+    throw "The measured anchor disagrees with the saved manual offset. Expected ($expectedX,$expectedY), measured ($($anchor.x),$($anchor.y))."
+  }
+  Write-Host "Verified $($Record.state) placement anchor at ($($anchor.x),$($anchor.y)) from saved physical offsets ($($Record.placement_offset_x_px),$($Record.placement_offset_y_px))."
+}
+
+function Assert-SamePlacementAnchor($First, $Next) {
+  Assert-PlacementAnchor $Next
+  $dx = [double]$Next.capsule_anchor_center_screen.x - [double]$First.capsule_anchor_center_screen.x
+  $dy = [double]$Next.capsule_anchor_center_screen.y - [double]$First.capsule_anchor_center_screen.y
+  if ([Math]::Abs($dx) -gt 0.5 -or [Math]::Abs($dy) -gt 0.5) {
+    throw "The placement anchor changed between '$($First.state)' and '$($Next.state)': dx=$dx, dy=$dy."
+  }
 }
 
 function Assert-RenderGutter($Record) {
@@ -148,6 +166,11 @@ function Assert-ExpandedBoundsContained($Record) {
   if ($scale -le 0) { throw "Expanded '$($Record.state)' geometry has an invalid scale factor." }
   $bottomGap = ([double]$size.height - $bottom) / $scale
   if ($bottomGap -lt 2.0) { throw "Expanded '$($Record.state)' surface has only $bottomGap CSS px of lower viewport gutter; at least 2 CSS px are required." }
+  $screen = $Record.capsule_rect_screen
+  $monitor = $Record.monitor_rc_monitor
+  if ($null -eq $screen -or $null -eq $monitor -or [double]$screen.left -lt [double]$monitor.left -or [double]$screen.top -lt [double]$monitor.top -or [double]$screen.right -gt [double]$monitor.right -or [double]$screen.bottom -gt [double]$monitor.bottom) {
+    throw "Expanded '$($Record.state)' surface leaves the selected monitor: screen=$($screen | ConvertTo-Json -Compress), monitor=$($monitor | ConvertTo-Json -Compress)."
+  }
   Write-Host "Verified expanded '$($Record.state)' bounds stay inside the WebView client with $bottomGap CSS px of lower viewport gutter."
 }
 
@@ -298,6 +321,9 @@ try {
   if ([TarteelUiSmokeNative]::GetSystemMetrics(0) -le 0 -or [TarteelUiSmokeNative]::GetSystemMetrics(1) -le 0) {
     throw 'Windows runner exposes no interactive display; refusing to mark native geometry verification as passed.'
   }
+  New-Item -ItemType Directory -Force -Path (Split-Path $placementPath) | Out-Null
+  $placementJson = @{ mode = 'manual'; offsetX = 28; offsetY = 32 } | ConvertTo-Json -Compress
+  [System.IO.File]::WriteAllText($placementPath, $placementJson, [System.Text.UTF8Encoding]::new($false))
   if (Test-Path $logPath) { Remove-Item -Force $logPath }
   $env:TARTEEL_WINDOWS_SMOKE_TEST = '1'
   try {
@@ -317,11 +343,14 @@ try {
   Copy-Item -Force $logPath (Join-Path $outDir 'geometry-after-idle.jsonl')
 
   $music = Wait-ForRow 'compact' 25 ([long]$idle.timestamp_unix_ms)
+  Assert-SamePlacementAnchor $idle $music
   Assert-MusicCompactBounds $music
+  Assert-Anchor $music
   $musicShot = Capture-Top 'music-compact-before-full'
   Assert-MusicRoundedCorners $music $musicShot
   Click-RectCenter $music
   $full = Wait-ForRow 'full' 15 ([long]$music.timestamp_unix_ms) -Expanded
+  Assert-SamePlacementAnchor $idle $full
   Assert-FullStateBounds $full
   if ($full.aligned_within_half_pixel -ne $true) { throw "Full player window origin did not align to the monitor origin: $($full.aligned_within_half_pixel)" }
   if ($null -eq $full.motion_top_min_screen_css_px -or $null -eq $full.motion_top_max_screen_css_px -or [int]$full.motion_sample_count -lt 4) { throw 'Full player state did not include enough measured animation frames.' }
@@ -344,6 +373,7 @@ try {
 
   Click-RectCenter $idleAfterMusic
   $prayer = Wait-ForRow 'prayer' 15 ([long]$idleAfterMusic.timestamp_unix_ms) -Expanded
+  Assert-SamePlacementAnchor $idle $prayer
   if ($prayer.client_size.width -lt 300 -or $prayer.client_size.height -lt 100) { throw "Prayer state did not expand the native window as expected: $($prayer.client_size.width)x$($prayer.client_size.height)" }
   Assert-ExpandedBoundsContained $prayer
   if ($prayer.aligned_within_half_pixel -ne $true) { throw "Expanded window origin did not align to the monitor origin: $($prayer.aligned_within_half_pixel)" }
@@ -364,6 +394,25 @@ try {
   Assert-BlackCapsuleCenter $collapsed $collapsedShot
   Copy-Item -Force $logPath (Join-Path $outDir 'geometry-final.jsonl')
 
+  $savedAnchor = $collapsed.capsule_anchor_center_screen
+  if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+  if ($process) { $process.WaitForExit() }
+  Remove-Item -Force $logPath -ErrorAction SilentlyContinue
+  $previousSmokeFlag = $env:TARTEEL_WINDOWS_SMOKE_TEST
+  $env:TARTEEL_WINDOWS_SMOKE_TEST = '1'
+  try {
+    $process = Start-Process -FilePath (Resolve-Path $ExePath) -WorkingDirectory (Split-Path (Resolve-Path $ExePath)) -PassThru
+  } finally {
+    if ($null -eq $previousSmokeFlag) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_TEST -ErrorAction SilentlyContinue }
+    else { $env:TARTEEL_WINDOWS_SMOKE_TEST = $previousSmokeFlag }
+  }
+  $restored = Wait-ForRow 'idle' 35
+  Assert-Anchor $restored
+  $restoreDx = [double]$restored.capsule_anchor_center_screen.x - [double]$savedAnchor.x
+  $restoreDy = [double]$restored.capsule_anchor_center_screen.y - [double]$savedAnchor.y
+  if ([Math]::Abs($restoreDx) -gt 0.5 -or [Math]::Abs($restoreDy) -gt 0.5) { throw "The manual anchor did not survive a process restart: dx=$restoreDx, dy=$restoreDy." }
+  Write-Host "Verified saved manual placement after relaunch: anchor delta=($restoreDx,$restoreDy)."
+
   $summary = @(
     'PASS: launched the built Tarteel Windows executable.',
     "PASS: measured idle capsule offset before correction=$($idle.pre_alignment.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress); after correction=$($collapsed.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress).",
@@ -371,7 +420,8 @@ try {
     'PASS: music compact rounded rectangle remains 112x24 CSS px with radius 11; all four screenshot corners and antialiased edge pixels pass, and outside hit-testing reaches the window behind.',
     "PASS: physical click expanded the full player to 384x210 CSS px with a measured lower gutter; top-anchor range=$fullMotionSpan CSS px across $($full.motion_sample_count) frames.",
     "PASS: physical click expanded prayer state without clipping its bottom edge; lower gutter verified; top-anchor range=$motionSpan CSS px across $($prayer.motion_sample_count) frames.",
-    'PASS: physical mouse click returned to idle, the island remained centered, and native hit-testing passed through outside its rounded corner and edge.',
+    'PASS: physical mouse click returned to idle, the island retained the same manual anchor, and native hit-testing passed through outside its rounded corner and edge.',
+    'PASS: manual mode and offsets were restored from disk after terminating and relaunching the Windows process.',
     "Display: $($collapsed.monitor_rc_monitor.right - $collapsed.monitor_rc_monitor.left)x$($collapsed.monitor_rc_monitor.bottom - $collapsed.monitor_rc_monitor.top); scale_factor=$($collapsed.scale_factor); native_dpi=$($collapsed.native_dpi)."
   )
   Set-Content -Path (Join-Path $outDir 'summary.txt') -Value $summary -Encoding UTF8

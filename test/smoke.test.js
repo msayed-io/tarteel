@@ -99,6 +99,34 @@ describe('Tarteel production surface', () => {
     expect(settings).not.toContain('إظهار الضبط الدقيق');
   });
 
+  it('adds a persistent Auto/Manual remote for Dynamic position and removes the rim intensity control', async () => {
+    const settings = await read('src/PrayerSettings.jsx');
+    const css = await read('src/PrayerSettings.css');
+    const placement = await read('src/engine/island-placement.js');
+    const rust = await read('src-tauri/src/lib.rs');
+    const diagnostics = await read('src-tauri/src/island_diagnostics.rs');
+
+    expect(settings).toContain('ps-placement-remote');
+    expect(settings).toContain("chooseIslandPlacementMode('auto')");
+    expect(settings).toContain("chooseIslandPlacementMode('manual')");
+    expect(settings).toContain("invoke('get_island_placement')");
+    expect(settings).toContain("invoke('set_island_placement'");
+    for (const direction of ['up', 'right', 'down', 'left']) expect(settings).toContain(`nudgeIsland('${direction}')`);
+    expect(placement).toContain('ISLAND_PLACEMENT_STEP = 2');
+    expect(placement).toContain("mode: 'auto', offsetX: 0, offsetY: 0");
+    expect(css).toContain('.ps-dpad-button:active:not(:disabled)');
+    expect(css).toContain('.ps-placement-mode[aria-pressed="true"]');
+    expect(rust).toContain('const ISLAND_PLACEMENT_FILE: &str = "island-position.json"');
+    expect(rust).toContain('fn get_island_placement(');
+    expect(rust).toContain('fn set_island_placement(');
+    expect(rust).toContain('geometry::island_origin_with_placement');
+    expect(rust).toContain('island_position_motion_progress(progress)');
+    expect(diagnostics).toContain('placement_offset_x_px');
+    expect(diagnostics).toContain('placement_offset_y_px');
+    expect(settings).not.toContain('ps-rim-intensity');
+    expect(settings).not.toContain('شدة الحافة اللامعة');
+  });
+
   it('uses one permission-gated system notification for the pre-alert and keeps prayer-time adhan separate', async () => {
     const main = await read('src/main.jsx');
     const start = main.indexOf("const preAlarmFiredRef = useRef(new Set(readJson('tarteel.prayer.pre-alerts', [])));");

@@ -33,6 +33,9 @@ struct Snapshot {
   coordinate_unit: &'static str,
   window_handle: isize,
   state: String,
+  placement_mode: String,
+  placement_offset_x_px: i32,
+  placement_offset_y_px: i32,
   scale_factor: f64,
   native_dpi: Option<u32>,
   monitor_rc_monitor: Rect,
@@ -86,7 +89,8 @@ pub fn record_startup(app: &AppHandle) -> Result<(), String> {
     let scale = island.scale_factor().map_err(|e| format!("تعذر قراءة مقياس الجزيرة: {e}"))?;
     let hwnd = island.hwnd().map_err(|e| format!("تعذر قراءة مقبض الجزيرة: {e}"))?;
     let anchor_offset = crate::geometry::compact_anchor_offset_px(scale);
-    let snapshot = unsafe { measure(hwnd, scale, anchor_offset, "startup".to_string(), None, 0)? };
+    let placement = *app.state::<crate::IslandPlacementHandle>().placement.lock().map_err(|_| "تعذر قراءة موضع الجزيرة عند الإقلاع".to_string())?;
+    let snapshot = unsafe { measure(hwnd, scale, anchor_offset, placement, "startup".to_string(), None, 0)? };
     append_record(app, &snapshot)?;
     Ok(())
   }
@@ -121,6 +125,7 @@ pub async fn record_island_geometry(
   if motion_samples > 120 || ![motion_top_min, motion_top_max].into_iter().flatten().all(|value| value.is_finite()) {
     return Err("قياسات حركة الجزيرة غير صالحة".into());
   }
+  let placement = *app.state::<crate::IslandPlacementHandle>().placement.lock().map_err(|_| "تعذر قراءة موضع الجزيرة أثناء القياس".to_string())?;
   match (motion_top_min, motion_top_max) {
     (Some(min), Some(max)) if min <= max && motion_samples > 0 => {},
     (None, None) if motion_samples == 0 => {},
@@ -146,10 +151,11 @@ pub async fn record_island_geometry(
     let hwnd = island.hwnd().map_err(|e| format!("تعذر قراءة مقبض الجزيرة: {e}"))?;
     let raw_hwnd = hwnd.0 as isize;
     let state_for_main = state.clone();
+    let placement_for_main = placement;
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     island.run_on_main_thread(move || {
       let hwnd = windows::Win32::Foundation::HWND(raw_hwnd as *mut core::ffi::c_void);
-      let result = unsafe { align_and_measure(hwnd, scale, compact_anchor_offset * scale, state_for_main, Some(local)) };
+      let result = unsafe { align_and_measure(hwnd, scale, compact_anchor_offset * scale, placement_for_main, state_for_main, Some(local)) };
       let _ = tx.send(result);
     }).map_err(|e| format!("تعذر جدولة قياس الجزيرة على خيط النافذة: {e}"))?;
     let mut snapshot = tauri::async_runtime::spawn_blocking(move || rx.recv())
@@ -166,7 +172,7 @@ pub async fn record_island_geometry(
   }
 
   #[cfg(not(windows))]
-  { let _ = (app, state, x, y, width, height, hit_x, hit_y, hit_width, hit_height, compact_anchor_offset, motion_top_min, motion_top_max, motion_samples); Ok(serde_json::json!({"supported": false, "reason": "قياس هندسة نافذة Windows غير متاح على هذا النظام"})) }
+  { let _ = (app, state, x, y, width, height, hit_x, hit_y, hit_width, hit_height, compact_anchor_offset, motion_top_min, motion_top_max, motion_samples, placement); Ok(serde_json::json!({"supported": false, "reason": "قياس هندسة نافذة Windows غير متاح على هذا النظام"})) }
 }
 
 #[cfg(windows)]
@@ -174,6 +180,7 @@ unsafe fn measure(
   hwnd: windows::Win32::Foundation::HWND,
   scale: f64,
   anchor_offset_y_px: f64,
+  placement: crate::IslandPlacement,
   state: String,
   capsule_local: Option<Rect>,
   attempts: u8,
@@ -204,23 +211,30 @@ unsafe fn measure(
   let client_size = SizePx { width: (client.right - client.left).max(0) as u32, height: (client.bottom - client.top).max(0) as u32 };
   let client_origin = PointPx { x: origin.x as f64, y: origin.y as f64 };
   let capsule_screen = capsule_local.map(|r| Rect { left: origin.x + r.left, top: origin.y + r.top, right: origin.x + r.right, bottom: origin.y + r.bottom });
-  let anchor_center_x = (monitor_rect.left as f64 + monitor_rect.right as f64) / 2.0;
-  let anchor_center_y = monitor_rect.top as f64 + anchor_offset_y_px;
+  let (placement_x_px, placement_y_px) = crate::geometry::island_offset_px(
+    monitor_rect.width(), monitor_rect.height(), scale,
+    placement.mode == crate::IslandPositionMode::Manual, placement.offset_x, placement.offset_y,
+  );
+  let anchor_center_x = (monitor_rect.left as f64 + monitor_rect.right as f64) / 2.0 + placement_x_px as f64;
+  let anchor_center_y = monitor_rect.top as f64 + anchor_offset_y_px + placement_y_px as f64;
   let capsule_error = capsule_screen.map(|r| PointErrorPx {
     x: (r.left as f64 + r.right as f64) / 2.0 - anchor_center_x,
     y: (r.top as f64 + r.bottom as f64) / 2.0 - anchor_center_y,
   });
   let monitor_center_x = (monitor_rect.left as f64 + monitor_rect.right as f64) / 2.0;
-  let target_client_x = monitor_center_x - client_size.width as f64 / 2.0;
-  let target_client_y = monitor_rect.top as f64;
+  let target_client_x = monitor_center_x + placement_x_px as f64 - client_size.width as f64 / 2.0;
+  let target_client_y = monitor_rect.top as f64 + placement_y_px as f64;
   let origin_error = PointErrorPx { x: origin.x as f64 - target_client_x, y: origin.y as f64 - target_client_y };
   let native_dpi = match unsafe { GetDpiForWindow(hwnd) } { 0 => None, dpi => Some(dpi) };
   Ok(Snapshot {
-    schema: 4,
+    schema: 5,
     timestamp_unix_ms: now_ms(),
     coordinate_unit: "physical virtual-desktop pixels",
     window_handle: hwnd.0 as isize,
     state,
+    placement_mode: format!("{:?}", placement.mode).to_lowercase(),
+    placement_offset_x_px: placement_x_px,
+    placement_offset_y_px: placement_y_px,
     scale_factor: scale,
     native_dpi,
     monitor_rc_monitor: monitor_rect,
@@ -247,6 +261,7 @@ unsafe fn align_and_measure(
   hwnd: windows::Win32::Foundation::HWND,
   scale: f64,
   anchor_offset_y_px: f64,
+  placement: crate::IslandPlacement,
   state: String,
   capsule_local: Option<Rect>,
 ) -> Result<Snapshot, String> {
@@ -254,10 +269,10 @@ unsafe fn align_and_measure(
   use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER};
 
   let collapsed = matches!(state.as_str(), "idle" | "compact");
-  let pre = unsafe { measure(hwnd, scale, anchor_offset_y_px, state.clone(), capsule_local, 0)? };
+  let pre = unsafe { measure(hwnd, scale, anchor_offset_y_px, placement, state.clone(), capsule_local, 0)? };
   let mut corrections = 0u8;
   for _ in 0..3 {
-    let before = unsafe { measure(hwnd, scale, anchor_offset_y_px, state.clone(), capsule_local, corrections)? };
+    let before = unsafe { measure(hwnd, scale, anchor_offset_y_px, placement, state.clone(), capsule_local, corrections)? };
     let (dx, dy) = if collapsed {
       let error = before.capsule_center_error_from_anchor_px.ok_or_else(|| "لم تصل حدود الكبسولة إلى مسجل الهندسة".to_string())?;
       (-error.x, -error.y)
@@ -275,7 +290,7 @@ unsafe fn align_and_measure(
     corrections += 1;
   }
 
-  let mut final_snapshot = unsafe { measure(hwnd, scale, anchor_offset_y_px, state, capsule_local, corrections)? };
+  let mut final_snapshot = unsafe { measure(hwnd, scale, anchor_offset_y_px, placement, state, capsule_local, corrections)? };
   final_snapshot.pre_alignment = Some(PreAlignment {
     window_rect_outer: pre.window_rect_outer,
     capsule_rect_screen: pre.capsule_rect_screen,

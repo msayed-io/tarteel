@@ -11,7 +11,8 @@ const html = readFileSync(resolve(__dirname, '../island.html'), 'utf8');
 describe('تموضع الجزيرة عند أصل الشاشة', () => {
   it('يستخدم أصل الشاشة الحقيقي ولا يضيف إزاحة ثابتة', () => {
     expect(lib).not.toContain('(10.0 * scale)');
-    expect(lib).toContain('geometry::island_origin(origin.x, origin.y');
+    expect(lib).toContain('geometry::island_origin_with_placement(');
+    expect(geo).toContain('if !manual { return (0, 0); }');
     expect(geo).toContain('fn island_origin(monitor_left: i32, monitor_top: i32');
   });
 
@@ -34,9 +35,11 @@ describe('تموضع الجزيرة عند أصل الشاشة', () => {
       'compact_stage_and_anchor_scale_with_dpi',
       'island_is_centered_on_the_selected_monitor_and_uses_its_true_origin',
       'centering_stays_whole_pixels_with_odd_widths',
+      'manual_horizontal_clamping_is_safe_on_odd_monitor_widths',
     ]) expect(geo).toContain(name);
     for (const name of [
       'island_bounds_are_derived_from_the_actual_monitor_origin',
+      'a_manual_offset_is_restored_from_disk_and_survives_switching_back_to_auto',
       'island_boot_size_includes_the_transparent_gutter',
       'transparent_window_gutter_preserves_css_stage_at_every_scale',
       'a_second_monitor_is_centred_on_its_own_origin',

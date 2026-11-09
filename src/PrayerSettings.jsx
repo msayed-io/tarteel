@@ -4,7 +4,7 @@ import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notif
 import { invoke } from '@tauri-apps/api/core';
 import { resolveLocation, describeLocationError } from './engine/location.js';
 import { METHODS, methodForTimeZone } from './engine/astro.js';
-import { applyRimIntensity, readRimIntensity, storeRimIntensity } from './lib/rim-preference.js';
+import { DEFAULT_ISLAND_PLACEMENT, normalizeIslandPlacement, nudgeIslandPlacement, setIslandPlacementMode } from './engine/island-placement.js';
 import './PrayerSettings.css';
 
 /**
@@ -12,6 +12,10 @@ import './PrayerSettings.css';
  * تغيّر هذا المكوّن بصري فقط؛ تبقى الخدمات والحفظ التلقائي وجدولة Rust كما هي.
  */
 const SAVE_DELAY_MS = 400;
+const formatPlacementOffset = value => {
+  const sign = value > 0 ? '+' : value < 0 ? '−' : '';
+  return `${sign}${new Intl.NumberFormat('ar-EG', { maximumFractionDigits: 1 }).format(Math.abs(value))}`;
+};
 
 const METHOD_ORDER = [
   'auto', 'egyptian', 'umm_al_qura', 'muslim_world_league', 'karachi',
@@ -37,7 +41,11 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
   const [adhanVolume, setAdhanVolume] = useState(config.adhanVolume ?? 80);
   const [adhanMuted, setAdhanMuted] = useState(Boolean(config.adhanMuted ?? false));
   const [autostart, setAutostart] = useState(false);
-  const [rimIntensity, setRimIntensity] = useState(() => readRimIntensity());
+  const [islandPlacement, setIslandPlacement] = useState(DEFAULT_ISLAND_PLACEMENT);
+  const [placementLoading, setPlacementLoading] = useState(true);
+  const [placementError, setPlacementError] = useState('');
+  const placementRef = useRef(DEFAULT_ISLAND_PLACEMENT);
+  const placementRequestRef = useRef(0);
   const [methodId, setMethodId] = useState(config.methodId || 'auto');
   const [school, setSchool] = useState(config.school ?? 'auto');
   /* تبقى الإزاحات المحفوظة داخليًا وفي حساب الجدول حتى من دون إظهار بطاقة الضبط. */
@@ -49,11 +57,48 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
   const lastSavedRef = useRef('');
   const timerRef = useRef(0);
 
-  const handleRimIntensityChange = event => {
-    const value = storeRimIntensity(event.target.value);
-    setRimIntensity(value);
-    applyRimIntensity(value, document);
+  useEffect(() => {
+    let active = true;
+    invoke('get_island_placement').then(value => {
+      if (!active) return;
+      const normalized = normalizeIslandPlacement(value);
+      placementRef.current = normalized;
+      setIslandPlacement(normalized);
+      setPlacementError('');
+    }).catch(cause => {
+      if (active) setPlacementError(`تعذّر قراءة موضع Dynamic: ${String(cause?.message || cause)}`);
+    }).finally(() => { if (active) setPlacementLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  const persistIslandPlacement = next => {
+    const normalized = normalizeIslandPlacement(next);
+    const request = ++placementRequestRef.current;
+    placementRef.current = normalized;
+    setIslandPlacement(normalized);
+    setPlacementError('');
+    invoke('set_island_placement', { mode: normalized.mode, offsetX: normalized.offsetX, offsetY: normalized.offsetY })
+      .then(value => {
+        if (request !== placementRequestRef.current) return;
+        const saved = normalizeIslandPlacement(value);
+        placementRef.current = saved;
+        setIslandPlacement(saved);
+      })
+      .catch(cause => {
+        if (request === placementRequestRef.current) {
+          setPlacementError(`تعذّر حفظ موضع Dynamic: ${String(cause?.message || cause)}`);
+          invoke('get_island_placement').then(value => {
+            if (request !== placementRequestRef.current) return;
+            const saved = normalizeIslandPlacement(value);
+            placementRef.current = saved;
+            setIslandPlacement(saved);
+          }).catch(() => {});
+        }
+      });
   };
+
+  const chooseIslandPlacementMode = mode => persistIslandPlacement(setIslandPlacementMode(placementRef.current, mode));
+  const nudgeIsland = direction => persistIslandPlacement(nudgeIslandPlacement(placementRef.current, direction));
 
   const snapshot = useCallback(() => ({
     location,
@@ -200,6 +245,10 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
           <symbol id="ps-icon-clock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></g></symbol>
           <symbol id="ps-icon-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor" /></symbol>
           <symbol id="ps-icon-tray" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></g></symbol>
+          <symbol id="ps-icon-arrow-up" viewBox="0 0 24 24"><path d="m6 14 6-6 6 6M12 8v11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></symbol>
+          <symbol id="ps-icon-arrow-down" viewBox="0 0 24 24"><path d="m6 10 6 6 6-6M12 16V5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></symbol>
+          <symbol id="ps-icon-arrow-left" viewBox="0 0 24 24"><path d="m10 6-6 6 6 6M4 12h15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></symbol>
+          <symbol id="ps-icon-arrow-right" viewBox="0 0 24 24"><path d="m14 6 6 6-6 6m6-6H5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></symbol>
         </defs>
       </svg>
 
@@ -364,35 +413,29 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
             </div>
           </section>
 
-          <section className="ps-section" aria-labelledby="ps-rim-title">
-            <h3 className="ps-section-title" id="ps-rim-title">المظهر</h3>
-            <div className="ps-card">
-              <div className="ps-control-row ps-volume-row">
-                <div className="ps-volume-heading">
-                  <span className="ps-row-icon"><Icon name="sun" /></span>
-                  <span className="ps-row-label" id="ps-rim-label">شدة الحافة اللامعة</span>
-                  <bdi className="ps-volume-badge" dir="ltr">{Math.round(rimIntensity * 100)}%</bdi>
-                </div>
-                <div className="ps-slider-line">
-                  <span className="ps-rim-endpoint" aria-hidden="true">٠</span>
-                  <input
-                    className="ps-range"
-                    id="ps-rim-intensity"
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={rimIntensity}
-                    aria-labelledby="ps-rim-label"
-                    aria-valuetext={`${Math.round(rimIntensity * 100)}%`}
-                    style={{ '--ps-range-progress': `${rimIntensity * 100}%` }}
-                    onChange={handleRimIntensityChange}
-                  />
-                  <span className="ps-rim-endpoint" aria-hidden="true">١٠٠٪</span>
+          <section className="ps-section" aria-labelledby="ps-placement-title">
+            <h3 className="ps-section-title" id="ps-placement-title">موضع Dynamic</h3>
+            <div className="ps-card ps-placement-card" aria-busy={placementLoading}>
+              <p className="ps-placement-intro">اختر موضع العرض التلقائي أو اضبطه يدويًا بدقة.</p>
+              <div className="ps-placement-modes" role="group" aria-label="طريقة تحديد الموضع">
+                <button type="button" className="ps-placement-mode" aria-pressed={islandPlacement.mode === 'auto'} disabled={placementLoading} onClick={() => chooseIslandPlacementMode('auto')}>Auto</button>
+                <button type="button" className="ps-placement-mode" aria-pressed={islandPlacement.mode === 'manual'} disabled={placementLoading} onClick={() => chooseIslandPlacementMode('manual')}>يدوي</button>
+              </div>
+              <div className={`ps-placement-remote${islandPlacement.mode === 'manual' ? ' is-manual' : ''}`}>
+                <div className="ps-dpad" role="group" aria-label="تحريك نافذة Dynamic">
+                  <button type="button" className="ps-dpad-button ps-dpad-up rim" aria-label="تحريك لأعلى بمقدار ٢ بكسل" disabled={placementLoading || islandPlacement.mode !== 'manual' || islandPlacement.offsetY <= 0} onClick={() => nudgeIsland('up')}><Icon name="arrow-up" /></button>
+                  <button type="button" className="ps-dpad-button ps-dpad-left rim" aria-label="تحريك لليسار بمقدار ٢ بكسل" disabled={placementLoading || islandPlacement.mode !== 'manual'} onClick={() => nudgeIsland('left')}><Icon name="arrow-left" /></button>
+                  <output className="ps-dpad-center" aria-live="polite" aria-label="الإزاحة اليدوية المحفوظة">
+                    <span>{islandPlacement.mode === 'manual' ? 'الموضع اليدوي' : 'الإزاحة المحفوظة'}</span>
+                    <bdi dir="ltr">X {formatPlacementOffset(islandPlacement.offsetX)} · Y {formatPlacementOffset(islandPlacement.offsetY)} px</bdi>
+                  </output>
+                  <button type="button" className="ps-dpad-button ps-dpad-right rim" aria-label="تحريك لليمين بمقدار ٢ بكسل" disabled={placementLoading || islandPlacement.mode !== 'manual'} onClick={() => nudgeIsland('right')}><Icon name="arrow-right" /></button>
+                  <button type="button" className="ps-dpad-button ps-dpad-down rim" aria-label="تحريك لأسفل بمقدار ٢ بكسل" disabled={placementLoading || islandPlacement.mode !== 'manual'} onClick={() => nudgeIsland('down')}><Icon name="arrow-down" /></button>
                 </div>
               </div>
+              <p className="ps-placement-hint">كل ضغطة تحرّك الجزيرة ٢ بكسل منطقيًا بحركة سلسة. وضع Auto يعيد الحساب الافتراضي دون حذف إزاحتك اليدوية.</p>
+              {placementError && <p className="ps-feedback" role="alert">{placementError}</p>}
             </div>
-            <p className="ps-hint">خفّف اللمعة أو أوقفها عند ٠٪؛ لا يتغيّر شكل الحافة أو سماكتها.</p>
           </section>
 
           {error && <p className="ps-feedback" role="alert">{error}</p>}

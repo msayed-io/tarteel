@@ -21,6 +21,17 @@ pub const COLLAPSED_CAPSULE_LOGICAL_WIDTH: f64 = 44.0;
 pub const CAPSULE_LOGICAL_HEIGHT: f64 = 24.0;
 pub const WINDOW_ANTIALIAS_GUTTER_LOGICAL: f64 = 2.0;
 pub const ISLAND_MAX_LOGICAL_HEIGHT: f64 = 430.0;
+/// أوسع وأطول حاوية مسموح بها، لتبقى الإزاحة صالحة أيضًا في الحالة الموسعة.
+pub const ISLAND_MAX_WINDOW_LOGICAL_WIDTH: f64 = 436.0;
+pub const ISLAND_MAX_WINDOW_LOGICAL_HEIGHT: f64 = ISLAND_MAX_LOGICAL_HEIGHT + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL;
+pub const ISLAND_POSITION_ANIMATION_FRAMES: u32 = 9;
+pub const ISLAND_POSITION_ANIMATION_FRAME_MS: u64 = 16;
+
+/// منحنى smoothstep لحركة المرساة؛ يخفف البداية والنهاية بدل القفز إلى الإحداثي الجديد.
+pub fn island_position_motion_progress(progress: f64) -> f64 {
+  let t = if progress.is_finite() { progress.clamp(0.0, 1.0) } else { 0.0 };
+  t * t * (3.0 - 2.0 * t)
+}
 
 pub fn compact_window_width_logical() -> f64 {
   COLLAPSED_CAPSULE_LOGICAL_WIDTH + 2.0 * WINDOW_ANTIALIAS_GUTTER_LOGICAL
@@ -97,6 +108,65 @@ pub fn island_origin(monitor_left: i32, monitor_top: i32, monitor_width: i32, is
   (centred as i32, monitor_top)
 }
 
+/// يقيد الإزاحة اليدوية المنطقية وفق الشاشة، مع ترك بكسلات الحافة المطلوبة لظهور الكبسولة.
+pub fn clamp_island_offsets_logical(
+  monitor_width: i32,
+  monitor_height: i32,
+  scale: f64,
+  manual: bool,
+  offset_x: f64,
+  offset_y: f64,
+) -> (f64, f64) {
+  let x = if offset_x.is_finite() { offset_x } else { 0.0 };
+  let y = if offset_y.is_finite() { offset_y } else { 0.0 };
+  if !manual { return (x, y); }
+  let scale = safe_scale(scale);
+  let safe_width = (ISLAND_MAX_WINDOW_LOGICAL_WIDTH * scale).round().max(1.0) as i32;
+  /* استخدم نصفًا صحيحًا محافظًا: التقريب لأقرب قيمة قد يخرج الحافة اليسرى بكسلًا عند عرض فردي. */
+  let horizontal_limit = ((monitor_width.max(0) - safe_width).max(0) / 2) as f64 / scale;
+  let maximum_window_height = (ISLAND_MAX_WINDOW_LOGICAL_HEIGHT * scale).round().max(1.0) as i32;
+  let safe_height = maximum_window_height.min(monitor_height.max(0));
+  let vertical_limit = (monitor_height.max(0) - safe_height).max(0) as f64 / scale;
+  /* نافذة التوسّع تبدأ من المرساة نفسها، لذا لا نسمح بإزاحة رأسية سالبة تخرج بأصلها عن الشاشة. */
+  let minimum_y = 0.0;
+  (x.clamp(-horizontal_limit, horizontal_limit), y.clamp(minimum_y, vertical_limit))
+}
+
+/// يحسب إزاحة فعلية بالبكسل وتُقيد بحيث تبقى الحاوية الأكبر داخل حدود الشاشة.
+/// Auto يعيد دائمًا صفرًا؛ الإزاحة اليدوية بوحدات CSS وتُطبّق على المرساة لا على حالة بعينها.
+pub fn island_offset_px(
+  monitor_width: i32,
+  monitor_height: i32,
+  scale: f64,
+  manual: bool,
+  offset_x: f64,
+  offset_y: f64,
+) -> (i32, i32) {
+  if !manual { return (0, 0); }
+  let scale = safe_scale(scale);
+  let (offset_x, offset_y) = clamp_island_offsets_logical(monitor_width, monitor_height, scale, true, offset_x, offset_y);
+  let x = (offset_x * scale).round() as i32;
+  let y = (offset_y * scale).round() as i32;
+  (x, y)
+}
+
+/// يطبق الإزاحة نفسها على كل عرض وارتفاع، حتى تبقى المرساة ثابتة عبر idle/music/expanded.
+pub fn island_origin_with_placement(
+  monitor_left: i32,
+  monitor_top: i32,
+  monitor_width: i32,
+  monitor_height: i32,
+  island_width: i32,
+  scale: f64,
+  manual: bool,
+  offset_x: f64,
+  offset_y: f64,
+) -> (i32, i32) {
+  let (left, top) = island_origin(monitor_left, monitor_top, monitor_width, island_width);
+  let (dx, dy) = island_offset_px(monitor_width, monitor_height, scale, manual, offset_x, offset_y);
+  (left.saturating_add(dx), top.saturating_add(dy))
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -164,10 +234,69 @@ mod tests {
   }
 
   #[test]
+  fn manual_anchor_is_shared_across_collapsed_music_and_expanded_window_widths() {
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+      let mut anchors = Vec::new();
+      let mut tops = Vec::new();
+      for width in [compact_window_width_px(scale), (116.0 * scale).round() as i32, (388.0 * scale).round() as i32, (404.0 * scale).round() as i32, (436.0 * scale).round() as i32] {
+        let (left, top) = island_origin_with_placement(-1920, -1080, 1920, 1080, width, scale, true, 24.0, 32.0);
+        anchors.push(left as f64 + width as f64 / 2.0);
+        tops.push(top);
+      }
+      assert!(anchors.windows(2).all(|pair| (pair[0] - pair[1]).abs() <= 1.0), "DPI {scale}: {anchors:?}");
+      assert!(tops.iter().all(|top| *top == -1080 + (32.0 * scale).round() as i32), "DPI {scale}: {tops:?}");
+    }
+  }
+
+  #[test]
+  fn manual_offsets_are_clamped_to_keep_the_widest_and_tallest_surface_on_screen() {
+    let (x, y) = island_offset_px(1920, 1080, 1.0, true, 10_000.0, 10_000.0);
+    assert_eq!(x, (1920 - ISLAND_MAX_WINDOW_LOGICAL_WIDTH as i32) / 2);
+    assert_eq!(y, 1080 - ISLAND_MAX_WINDOW_LOGICAL_HEIGHT as i32);
+    let (x, y) = island_offset_px(1920, 1080, 1.0, true, -10_000.0, -10_000.0);
+    assert_eq!(x, -(1920 - ISLAND_MAX_WINDOW_LOGICAL_WIDTH as i32) / 2);
+    assert_eq!(y, 0);
+    assert_eq!(island_offset_px(1920, 1080, 1.0, false, 50.0, 50.0), (0, 0));
+  }
+
+  #[test]
+  fn manual_horizontal_clamping_is_safe_on_odd_monitor_widths() {
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+      let monitor_width = 1921;
+      let window_width = (ISLAND_MAX_WINDOW_LOGICAL_WIDTH * scale).round() as i32;
+      let (left, _) = island_origin_with_placement(0, 0, monitor_width, 1080, window_width, scale, true, -10_000.0, 0.0);
+      assert_eq!(left, 0, "DPI {scale}");
+      let (left, _) = island_origin_with_placement(0, 0, monitor_width, 1080, window_width, scale, true, 10_000.0, 0.0);
+      assert!(left + window_width <= monitor_width, "DPI {scale}: right={}", left + window_width);
+    }
+  }
+
+  #[test]
+  fn expanded_anchor_stays_within_monitor_bounds_after_vertical_clamping() {
+    let (_, top) = island_origin_with_placement(0, 0, 1366, 768, 436, 1.0, true, 0.0, 10_000.0);
+    assert_eq!(top + ISLAND_MAX_WINDOW_LOGICAL_HEIGHT as i32, 768);
+    let (_, top) = island_origin_with_placement(0, 0, 1366, 768, 48, 1.0, true, 0.0, -10_000.0);
+    assert_eq!(top, 0);
+  }
+
+  #[test]
   fn expanded_states_have_room_without_changing_compact_stage() {
     assert_eq!(compact_stage_height_px(1.25), 48);
     assert_eq!(compact_window_height_px(1.25), 53);
     assert!(island_max_height_px(1.25) >= 537);
+  }
+
+  #[test]
+  fn manual_position_animation_is_smooth_bounded_and_monotonic() {
+    let samples: Vec<_> = (0..=ISLAND_POSITION_ANIMATION_FRAMES)
+      .map(|frame| island_position_motion_progress(frame as f64 / ISLAND_POSITION_ANIMATION_FRAMES as f64))
+      .collect();
+    assert_eq!(samples.first(), Some(&0.0));
+    assert_eq!(samples.last(), Some(&1.0));
+    assert!(samples.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!((island_position_motion_progress(0.5) - 0.5).abs() < f64::EPSILON);
+    assert_eq!(island_position_motion_progress(f64::NAN), 0.0);
+    assert!(ISLAND_POSITION_ANIMATION_FRAMES as u64 * ISLAND_POSITION_ANIMATION_FRAME_MS >= 120);
   }
 
   #[test]

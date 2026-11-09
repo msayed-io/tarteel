@@ -31,7 +31,8 @@ describe('السبب الجذري: النافذة تُولد بحجمها الص
   });
 
   it('العرض والارتفاع يشملان مقياس العرض', () => {
-    expect(lib).toContain('island_bounds_from_monitor(origin.x, origin.y, area.width as i32, scale)');
+    expect(lib).toContain('island_bounds_from_monitor(origin.x, origin.y, area.width as i32, area.height as i32, scale, placement)');
+    expect(geo).toContain('island_origin_with_placement');
     expect(geo).toContain('fn island_origin');
     expect(geo).toContain('fn compact_stage_height_px');
     expect(geo).toContain('fn compact_window_height_px');
