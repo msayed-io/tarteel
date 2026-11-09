@@ -989,11 +989,13 @@ mod island_tests {
     let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
     let root = std::env::temp_dir().join(format!("tarteel-island-position-{}-{unique}", std::process::id()));
     let path = root.join(ISLAND_PLACEMENT_FILE);
-    let manual = IslandPlacement { mode: IslandPositionMode::Manual, offset_x: -28.0, offset_y: 42.0 };
+    let manual = IslandPlacement { mode: IslandPositionMode::Manual, offset_x: -28.0, offset_y: -2.0 };
     write_island_placement(&path, manual).expect("يحفظ الإزاحة اليدوية");
     assert_eq!(read_island_placement(&path), manual, "تُستعاد بعد إعادة إنشاء الحالة");
+    assert_eq!(geometry::island_offset_px(1920, 1080, 1.0, true, manual.offset_x, manual.offset_y), (-28, -2));
 
     let auto = IslandPlacement { mode: IslandPositionMode::Auto, ..manual };
+    assert_eq!(geometry::island_offset_px(1920, 1080, 1.0, false, auto.offset_x, auto.offset_y), (0, 0), "Auto يعيد الموضع المحسوب تلقائيًا");
     write_island_placement(&path, auto).expect("يحفظ الرجوع إلى Auto");
     assert_eq!(read_island_placement(&path), auto, "لا يمسح Auto الإزاحة اليدوية المحفوظة");
     let _ = fs::remove_dir_all(root);

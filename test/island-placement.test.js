@@ -21,6 +21,13 @@ describe('تحكم موضع Dynamic اليدوي', () => {
     expect(nudgeIslandPlacement(manual, 'left')).toEqual({ mode: 'manual', offsetX: 8, offsetY: 20 });
   });
 
+  it('continues moving upward through the former top limit and keeps Manual mode', () => {
+    const atTop = { mode: 'manual', offsetX: 0, offsetY: 0 };
+    const aboveTop = nudgeIslandPlacement(atTop, 'up');
+    expect(aboveTop).toEqual({ mode: 'manual', offsetX: 0, offsetY: -2 });
+    expect(nudgeIslandPlacement(aboveTop, 'up')).toEqual({ mode: 'manual', offsetX: 0, offsetY: -4 });
+  });
+
   it('لا تحرك الجزيرة في Auto ولا تمسح الإزاحة اليدوية المحفوظة عند العودة إليه', () => {
     const manual = { mode: 'manual', offsetX: -14, offsetY: 32 };
     expect(nudgeIslandPlacement({ ...manual, mode: 'auto' }, 'right')).toEqual({ mode: 'auto', offsetX: -14, offsetY: 32 });

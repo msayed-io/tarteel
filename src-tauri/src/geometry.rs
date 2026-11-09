@@ -108,7 +108,7 @@ pub fn island_origin(monitor_left: i32, monitor_top: i32, monitor_width: i32, is
   (centred as i32, monitor_top)
 }
 
-/// يقيد الإزاحة اليدوية المنطقية وفق الشاشة، مع ترك بكسلات الحافة المطلوبة لظهور الكبسولة.
+/// يقيد الإزاحة الأفقيّة وحدّ الأسفل، ويسمح بتجاوز الإزاحة اليدوية للحافة العلوية.
 pub fn clamp_island_offsets_logical(
   monitor_width: i32,
   monitor_height: i32,
@@ -127,9 +127,8 @@ pub fn clamp_island_offsets_logical(
   let maximum_window_height = (ISLAND_MAX_WINDOW_LOGICAL_HEIGHT * scale).round().max(1.0) as i32;
   let safe_height = maximum_window_height.min(monitor_height.max(0));
   let vertical_limit = (monitor_height.max(0) - safe_height).max(0) as f64 / scale;
-  /* نافذة التوسّع تبدأ من المرساة نفسها، لذا لا نسمح بإزاحة رأسية سالبة تخرج بأصلها عن الشاشة. */
-  let minimum_y = 0.0;
-  (x.clamp(-horizontal_limit, horizontal_limit), y.clamp(minimum_y, vertical_limit))
+  /* يبقى الحد السفلي آمنًا؛ لا يوجد حد أدنى رأسي، فيمكن للجزيرة الصعود خارج الشاشة. */
+  (x.clamp(-horizontal_limit, horizontal_limit), y.min(vertical_limit))
 }
 
 /// يحسب إزاحة فعلية بالبكسل وتُقيد بحيث تبقى الحاوية الأكبر داخل حدود الشاشة.
@@ -249,14 +248,30 @@ mod tests {
   }
 
   #[test]
-  fn manual_offsets_are_clamped_to_keep_the_widest_and_tallest_surface_on_screen() {
+  fn manual_offsets_keep_horizontal_and_bottom_bounds_but_allow_top_overflow() {
     let (x, y) = island_offset_px(1920, 1080, 1.0, true, 10_000.0, 10_000.0);
     assert_eq!(x, (1920 - ISLAND_MAX_WINDOW_LOGICAL_WIDTH as i32) / 2);
     assert_eq!(y, 1080 - ISLAND_MAX_WINDOW_LOGICAL_HEIGHT as i32);
     let (x, y) = island_offset_px(1920, 1080, 1.0, true, -10_000.0, -10_000.0);
     assert_eq!(x, -(1920 - ISLAND_MAX_WINDOW_LOGICAL_WIDTH as i32) / 2);
-    assert_eq!(y, 0);
+    assert_eq!(y, -10_000);
     assert_eq!(island_offset_px(1920, 1080, 1.0, false, 50.0, 50.0), (0, 0));
+  }
+
+  #[test]
+  fn negative_manual_y_is_not_clamped_to_monitor_bounds_across_dynamic_states() {
+    for scale in [1.0_f64, 1.25, 1.5, 2.0] {
+      let expected_y = (-10_000.0 * scale).round() as i32;
+      assert_eq!(island_offset_px(1920, 1080, scale, true, 0.0, -10_000.0), (0, expected_y), "DPI {scale}");
+      let mut tops = Vec::new();
+      for width in [48.0, 116.0, 388.0, 400.0, 404.0, 436.0] {
+        let window_width = (width * scale).round() as i32;
+        let (_, top) = island_origin_with_placement(0, 0, 1920, 1080, window_width, scale, true, 0.0, -10_000.0);
+        tops.push(top);
+      }
+      assert!(tops.iter().all(|top| *top == expected_y), "DPI {scale}: {tops:?}");
+      assert!(tops[0] < 0, "the saved manual placement can move above the monitor: {tops:?}");
+    }
   }
 
   #[test]
@@ -272,11 +287,11 @@ mod tests {
   }
 
   #[test]
-  fn expanded_anchor_stays_within_monitor_bounds_after_vertical_clamping() {
+  fn expanded_anchor_keeps_bottom_bound_but_may_move_above_monitor() {
     let (_, top) = island_origin_with_placement(0, 0, 1366, 768, 436, 1.0, true, 0.0, 10_000.0);
     assert_eq!(top + ISLAND_MAX_WINDOW_LOGICAL_HEIGHT as i32, 768);
     let (_, top) = island_origin_with_placement(0, 0, 1366, 768, 48, 1.0, true, 0.0, -10_000.0);
-    assert_eq!(top, 0);
+    assert_eq!(top, -10_000);
   }
 
   #[test]

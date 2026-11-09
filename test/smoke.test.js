@@ -112,6 +112,9 @@ describe('Tarteel production surface', () => {
     expect(settings).toContain("invoke('get_island_placement')");
     expect(settings).toContain("invoke('set_island_placement'");
     for (const direction of ['up', 'right', 'down', 'left']) expect(settings).toContain(`nudgeIsland('${direction}')`);
+    const upButton = settings.split('\n').find(line => line.includes('ps-dpad-up')) ?? '';
+    expect(upButton).toContain("disabled={placementLoading || islandPlacement.mode !== 'manual'}");
+    expect(upButton).not.toContain('islandPlacement.offsetY <= 0');
     expect(placement).toContain('ISLAND_PLACEMENT_STEP = 2');
     expect(placement).toContain("mode: 'auto', offsetX: 0, offsetY: 0");
     expect(css).toContain('.ps-dpad-button:active:not(:disabled)');

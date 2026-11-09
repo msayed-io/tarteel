@@ -423,7 +423,7 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
               </div>
               <div className={`ps-placement-remote${islandPlacement.mode === 'manual' ? ' is-manual' : ''}`}>
                 <div className="ps-dpad" role="group" aria-label="تحريك نافذة Dynamic">
-                  <button type="button" className="ps-dpad-button ps-dpad-up rim" aria-label="تحريك لأعلى بمقدار ٢ بكسل" disabled={placementLoading || islandPlacement.mode !== 'manual' || islandPlacement.offsetY <= 0} onClick={() => nudgeIsland('up')}><Icon name="arrow-up" /></button>
+                  <button type="button" className="ps-dpad-button ps-dpad-up rim" aria-label="تحريك لأعلى بمقدار ٢ بكسل" disabled={placementLoading || islandPlacement.mode !== 'manual'} onClick={() => nudgeIsland('up')}><Icon name="arrow-up" /></button>
                   <button type="button" className="ps-dpad-button ps-dpad-left rim" aria-label="تحريك لليسار بمقدار ٢ بكسل" disabled={placementLoading || islandPlacement.mode !== 'manual'} onClick={() => nudgeIsland('left')}><Icon name="arrow-left" /></button>
                   <output className="ps-dpad-center" aria-live="polite" aria-label="الإزاحة اليدوية المحفوظة">
                     <span>{islandPlacement.mode === 'manual' ? 'الموضع اليدوي' : 'الإزاحة المحفوظة'}</span>

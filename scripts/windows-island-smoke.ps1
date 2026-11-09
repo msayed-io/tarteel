@@ -113,6 +113,7 @@ function Assert-PlacementAnchor($Record) {
   $monitor = $Record.monitor_rc_monitor
   if ($null -eq $anchor -or $null -eq $monitor) { throw 'Geometry record is missing a placement anchor or monitor rectangle.' }
   if ($Record.placement_mode -ne 'manual') { throw "Expected the persisted manual mode, got '$($Record.placement_mode)' in '$($Record.state)'." }
+  if ([double]$Record.placement_offset_y_px -ge 0) { throw "Expected the persisted manual anchor to cross the former top limit, got Y offset $($Record.placement_offset_y_px) px." }
   $expectedX = ([double]$monitor.left + [double]$monitor.right) / 2.0 + [double]$Record.placement_offset_x_px
   $expectedY = [double]$monitor.top + 19.0 * [double]$Record.scale_factor + [double]$Record.placement_offset_y_px
   if ([Math]::Abs([double]$anchor.x - $expectedX) -gt 0.01 -or [Math]::Abs([double]$anchor.y - $expectedY) -gt 0.01) {
@@ -323,7 +324,7 @@ try {
   }
   New-Item -ItemType Directory -Force -Path (Split-Path $placementPath) | Out-Null
   # Keep a non-centered manual anchor while the capsule remains in the bright title-bar band used by the rim-corner probes.
-  $placementJson = @{ mode = 'manual'; offsetX = 28; offsetY = 0 } | ConvertTo-Json -Compress
+  $placementJson = @{ mode = 'manual'; offsetX = 28; offsetY = -2 } | ConvertTo-Json -Compress
   [System.IO.File]::WriteAllText($placementPath, $placementJson, [System.Text.UTF8Encoding]::new($false))
   if (Test-Path $logPath) { Remove-Item -Force $logPath }
   $env:TARTEEL_WINDOWS_SMOKE_TEST = '1'
@@ -422,7 +423,7 @@ try {
     "PASS: physical click expanded the full player to 384x210 CSS px with a measured lower gutter; top-anchor range=$fullMotionSpan CSS px across $($full.motion_sample_count) frames.",
     "PASS: physical click expanded prayer state without clipping its bottom edge; lower gutter verified; top-anchor range=$motionSpan CSS px across $($prayer.motion_sample_count) frames.",
     'PASS: physical mouse click returned to idle, the island retained the same manual anchor, and native hit-testing passed through outside its rounded corner and edge.',
-    'PASS: manual mode and offsets were restored from disk after terminating and relaunching the Windows process.',
+    'PASS: a negative Manual Y offset crossed the former top limit across idle, music, prayer, and full states, then restored after process relaunch.',
     "Display: $($collapsed.monitor_rc_monitor.right - $collapsed.monitor_rc_monitor.left)x$($collapsed.monitor_rc_monitor.bottom - $collapsed.monitor_rc_monitor.top); scale_factor=$($collapsed.scale_factor); native_dpi=$($collapsed.native_dpi)."
   )
   Set-Content -Path (Join-Path $outDir 'summary.txt') -Value $summary -Encoding UTF8
