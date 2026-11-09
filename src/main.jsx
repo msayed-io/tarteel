@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
+import { sendNotification } from '@tauri-apps/plugin-notification';
 import PrayerSettings from './PrayerSettings.jsx';
 import { displayPlaceName } from './engine/display.js';
 import { resolveLocation, readDevicePosition, locationNeedsRefresh, describeLocationError } from './engine/location.js';
@@ -441,9 +442,8 @@ function App() {
   }, []);
 
   /*
-   * التنبيه المسبق: نافذة لطيفة قبل الصلاة بـ N دقيقة (١٠ افتراضيًا في
-   * الإعدادات). لا يُشغّل صوت أذان — فقط إشعار هادئ للاستعداد، ويُسجّل
-   * المعرّف فلا يتكرر لنفس الصلاة.
+   * التنبيه المسبق إشعار نظام عادي واحد بصوت ويندوز الافتراضي؛ لا يستخدم
+   * ملف الأذان ولا مسار toast المنبّه الحلقي المستخدم عند دخول وقت الصلاة.
    */
   const preAlarmFiredRef = useRef(new Set());
   useEffect(() => {
@@ -461,10 +461,14 @@ function App() {
         const firedId = `pre|${event.id}`;
         if (preAlarmFiredRef.current.has(firedId)) continue;
         preAlarmFiredRef.current.add(firedId);
-        invoke('show_alarm_notification', {
-          title: `بعد ${minutes} دقائق: صلاة ${event.name}`,
-          body: 'استعد لصلاة الفريضة.',
-        }).catch(cause => console.error('Tarteel pre-alarm failed', cause));
+        try {
+          sendNotification({
+            title: `بعد ${minutes} دقائق: صلاة ${event.name}`,
+            body: 'استعد لصلاة الفريضة.',
+          });
+        } catch (cause) {
+          console.error('Tarteel pre-alarm notification failed', cause);
+        }
       }
     };
     tick();

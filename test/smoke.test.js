@@ -85,6 +85,33 @@ describe('Tarteel production surface', () => {
     expect(settings).toContain('تنبيه مسبق');
   });
 
+  it('keeps the settings modal scrollable without a visible scrollbar', async () => {
+    const css = await read('src/PrayerSettings.css');
+    const settings = await read('src/PrayerSettings.jsx');
+    expect(css).toContain('width: min(500px, 100%)');
+    expect(css).toContain('max-height: min(680px, calc(100vh - 32px))');
+    expect(css).toContain('overflow-y: auto;');
+    expect(css).toContain('scrollbar-width: none;');
+    expect(css).toContain('.ps-body::-webkit-scrollbar');
+    expect(settings).toContain('تحديث موقعي الآن');
+    expect(settings).toContain('تجربة التنبيه الآن');
+    expect(settings).toContain('البدء مع تشغيل ويندوز');
+    expect(settings).not.toContain('إظهار الضبط الدقيق');
+  });
+
+  it('uses one default system notification for the pre-alert and keeps prayer-time adhan separate', async () => {
+    const main = await read('src/main.jsx');
+    const start = main.indexOf('const preAlarmFiredRef = useRef(new Set());');
+    const end = main.indexOf('  const handleAdhan = payload => {', start);
+    const preAlert = main.slice(start, end);
+    expect(start).toBeGreaterThan(-1);
+    expect(preAlert).toContain('preAlarmFiredRef.current.add(firedId)');
+    expect(preAlert).toContain('sendNotification({');
+    expect(preAlert).not.toContain('show_alarm_notification');
+    expect(preAlert).not.toContain('play_adhan');
+    expect(main).toContain("invoke('play_adhan'");
+  });
+
   it('passes PrayerSettings exactly the props it destructures', async () => {
     /* عطل حقيقي: المكوّن قُرئ منه { config } بينما الأب كان يمرّر value،
        فصار config غير معرّف ورمى استثناء أثناء الرسم أفرغ الشجرة كلها

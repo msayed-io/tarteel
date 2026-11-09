@@ -317,8 +317,7 @@ fn run_headless_alarm(task_arg: &str) {
 /// بعد، فنبحث في مسار المصدر كاحتياط حتى لا يفشل «تجربة التنبيه».
 fn resolve_adhan_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
   let candidates = [
-    app.path().resolve("assets/adhan.wav", tauri::path::BaseDirectory::Resource).ok(),
-    app.path().resolve("assets/adhan.wav", tauri::path::BaseDirectory::Resource).ok(),
+    app.path().resolve("assets/adhan.mp3", tauri::path::BaseDirectory::Resource).ok(),
     Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets").join("adhan.mp3")),
   ];
   for candidate in candidates.into_iter().flatten() {

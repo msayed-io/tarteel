@@ -219,6 +219,15 @@ mod tests {
   }
 
   #[test]
+  fn bundled_adhan_mp3_decodes_with_the_expected_duration() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+      .join("assets")
+      .join("adhan.mp3");
+    let duration = probe_duration_secs(&path).expect("the bundled adhan MP3 must decode");
+    assert!((220..=235).contains(&duration), "unexpected bundled adhan duration: {duration}s");
+  }
+
+  #[test]
   fn missing_file_fails_without_panicking() {
     let engine = AudioEngine::new();
     assert!(engine.play("x", std::path::Path::new("no-such-file.mp3"), 0, false).is_err());

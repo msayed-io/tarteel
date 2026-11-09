@@ -3,18 +3,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
 import { invoke } from '@tauri-apps/api/core';
 import { resolveLocation, describeLocationError } from './engine/location.js';
-import { METHODS, MANUAL_ADJUST_LIMIT, ARABIC_NAMES, methodForTimeZone } from './engine/astro.js';
+import { METHODS, methodForTimeZone } from './engine/astro.js';
 import './PrayerSettings.css';
 
 /**
  * إعدادات الصلاة والتنبيهات.
- *
- * قرارات التصميم:
- *   • لا زر حفظ. كل تغيير يُحفظ ويُعاد بناء الجدول ويُنشر إلى Rust فورًا
- *     (debounce قصير لتفادي عشرات الاستدعاءات أثناء تحريك المؤشر).
- *   • الموقع من ويندوز فقط. لا بحث مدن ولا إدخال إحداثيات.
- *   • الطريقة والمذهب لهما قيمة تلقائية مشتقة من الدولة، مع إمكانية التغيير.
- *   • كل نص للمستخدم عربي صريح: اسم المدينة والمحافظة لا إحداثيات جافة.
+ * تغيّر هذا المكوّن بصري فقط؛ تبقى الخدمات والحفظ التلقائي وجدولة Rust كما هي.
  */
 const SAVE_DELAY_MS = 400;
 
@@ -22,6 +16,14 @@ const METHOD_ORDER = [
   'auto', 'egyptian', 'umm_al_qura', 'muslim_world_league', 'karachi',
   'dubai', 'kuwait', 'turkey', 'singapore', 'isna',
 ];
+
+function Icon({ name, className = '' }) {
+  return (
+    <svg className={`ps-icon ${className}`.trim()} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <use href={`#ps-icon-${name}`} />
+    </svg>
+  );
+}
 
 export default function PrayerSettings({ config, schedule, onSave, onClose, onPreviewAlarm }) {
   const [location, setLocation] = useState(config.location || null);
@@ -36,8 +38,10 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
   const [autostart, setAutostart] = useState(false);
   const [methodId, setMethodId] = useState(config.methodId || 'auto');
   const [school, setSchool] = useState(config.school ?? 'auto');
-  const [adjust, setAdjust] = useState(config.adjust || {});
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  /* تبقى الإزاحات المحفوظة داخليًا وفي حساب الجدول حتى من دون إظهار بطاقة الضبط. */
+  const [adjust] = useState(config.adjust || {});
+  const bodyRef = useRef(null);
+  const headRef = useRef(null);
 
   /* آخر إعدادات أُرسلت، لمنع حلقة حفظ لا نهائية عند تحديث الأب. */
   const lastSavedRef = useRef('');
@@ -104,8 +108,7 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
     }
   };
 
-  /* مستوى الصوت والكتم يُبثّان إلى محرك الصوت في Rust فورًا، لأن الأذان
-     يُشغّل هناك لا في الصفحة — يعمل والنافذة مخفية في الصينية. */
+  /* مستوى الصوت والكتم يُبثّان إلى محرك الصوت في Rust فورًا. */
   useEffect(() => {
     invoke('set_adhan_volume', { volume: Number(adhanVolume) }).catch(() => {});
   }, [adhanVolume]);
@@ -136,138 +139,224 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
     ? (schedule?.shadowFactor === 2 ? 'الحنفي (ظل ×٢)' : 'الجمهور (ظل ×١)')
     : (Number(school) === 2 ? 'الحنفي (ظل ×٢)' : 'الجمهور (ظل ×١)');
 
+  /* تمرير داخلي بلا شريط ظاهر، مع تلاشي للحواف ورأس ثابت. */
+  useEffect(() => {
+    const body = bodyRef.current;
+    const head = headRef.current;
+    if (!body || !head) return undefined;
+    const updateEdges = () => {
+      const top = body.scrollTop > 4;
+      const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 4;
+      body.style.setProperty('--ps-fade-top', top ? '18px' : '0px');
+      body.style.setProperty('--ps-fade-bottom', atBottom ? '0px' : '26px');
+      head.classList.toggle('is-scrolled', top);
+    };
+    body.addEventListener('scroll', updateEdges, { passive: true });
+    window.addEventListener('resize', updateEdges);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateEdges);
+    observer?.observe(body);
+    updateEdges();
+    return () => {
+      body.removeEventListener('scroll', updateEdges);
+      window.removeEventListener('resize', updateEdges);
+      observer?.disconnect();
+    };
+  }, []);
+
+  /* زر Esc يستخدم الإغلاق نفسه المستخدم في زر X والخلفية. */
+  useEffect(() => {
+    const closeOnEscape = event => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+
   return (
-    <div className="prayer-settings-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <section className="prayer-settings glass" role="dialog" aria-modal="true" aria-labelledby="ps-title" dir="rtl">
-        <header className="prayer-settings-head">
-          <div>
+    <div className="prayer-settings-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+      <svg className="ps-icon-sprite" aria-hidden="true" focusable="false">
+        <defs>
+          <symbol id="ps-icon-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></symbol>
+          <symbol id="ps-icon-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></symbol>
+          <symbol id="ps-icon-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></symbol>
+          <symbol id="ps-icon-pin" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 21s-7-5.2-7-11a7 7 0 0 1 14 0c0 5.8-7 11-7 11z" /><circle cx="12" cy="10" r="2.5" /></g></symbol>
+          <symbol id="ps-icon-refresh" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M20 11a8 8 0 0 0-14.9-3M4 5v4h4" /><path d="M4 13a8 8 0 0 0 14.9 3M20 19v-4h-4" /></g></symbol>
+          <symbol id="ps-icon-compass" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M15.5 8.5l-2 5-5 2 2-5z" /></g></symbol>
+          <symbol id="ps-icon-sun" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="4" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4" /></g></symbol>
+          <symbol id="ps-icon-bell" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8" /><path d="M10.3 20a2 2 0 0 0 3.4 0" /></g></symbol>
+          <symbol id="ps-icon-volume" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5z" /><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" /></g></symbol>
+          <symbol id="ps-icon-volume-low" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5z" /><path d="M15.5 9a4 4 0 0 1 0 6" /></g></symbol>
+          <symbol id="ps-icon-volume-mute" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5z" /><path d="m22 9-6 6m0-6 6 6" /></g></symbol>
+          <symbol id="ps-icon-clock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></g></symbol>
+          <symbol id="ps-icon-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor" /></symbol>
+          <symbol id="ps-icon-tray" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></g></symbol>
+        </defs>
+      </svg>
+
+      <section className="prayer-settings" role="dialog" aria-modal="true" aria-labelledby="ps-title" dir="rtl">
+        <header className="ps-head" ref={headRef}>
+          <div className="ps-head-icon"><Icon name="moon" /></div>
+          <div className="ps-head-copy">
             <h2 id="ps-title">إعدادات الصلاة والتنبيهات</h2>
-            <p>يُحفظ كل تغيير تلقائيًا. يُحدَّد موقعك من ويندوز وتُشتق طريقة الحساب من دولتك.</p>
+            <p className="ps-head-sub"><Icon name="check" /> يُحفظ كل تغيير تلقائيًا</p>
           </div>
-          <button type="button" className="ps-close" aria-label="إغلاق الإعدادات" onClick={onClose}>×</button>
+          <button type="button" className="ps-close" aria-label="إغلاق" onClick={onClose}>
+            <Icon name="x" />
+          </button>
         </header>
 
-        {/* ---------- الموقع ---------- */}
-        <div className="ps-section">
-          <h3>الموقع</h3>
-          <div className="ps-current" aria-live="polite">
-            {location ? (
-              <>
-                <b>{placeLabel}</b>
-                <span>
-                  {location.timeZone}
-                  {Number.isFinite(location.accuracy) ? ` · دقة ${Math.round(location.accuracy)} م` : ''}
-                </span>
-              </>
-            ) : 'لم يُحدَّد الموقع بعد.'}
-          </div>
-          <button type="button" className="ps-action" onClick={requestDeviceLocation} disabled={busy}>
-            {location ? 'تحديث موقعي الآن' : 'استخدام موقع الجهاز وطلب الإذن'}
-          </button>
-        </div>
-
-        {/* ---------- طريقة الحساب ---------- */}
-        <div className="ps-section">
-          <h3>طريقة الحساب</h3>
-          <div className="ps-row">
-            <label htmlFor="ps-method">الطريقة</label>
-            <select id="ps-method" value={methodId} onChange={e => setMethodId(e.target.value)}>
-              <option value="auto">تلقائي حسب الدولة — {methodForTimeZone(location?.timeZone).method.name}</option>
-              {METHOD_ORDER.filter(id => id !== 'auto').map(id => (
-                <option key={id} value={id}>{METHODS[id].name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="ps-row">
-            <label htmlFor="ps-school">حساب العصر</label>
-            <select id="ps-school" value={String(school)} onChange={e => setSchool(e.target.value === 'auto' ? 'auto' : Number(e.target.value))}>
-              <option value="auto">تلقائي حسب الدولة</option>
-              <option value="1">جمهور الفقهاء (ظل ×١)</option>
-              <option value="2">المذهب الحنفي (ظل ×٢)</option>
-            </select>
-          </div>
-          <p className="ps-hint">المطبَّق الآن: <b>{effectiveMethod}</b> · <b>{effectiveSchool}</b></p>
-        </div>
-
-        {/* ---------- التنبيهات ---------- */}
-        <div className="ps-section">
-          <h3>التنبيهات</h3>
-          <div className="ps-row">
-            <label htmlFor="ps-notify">إشعارات ويندوز</label>
-            <button id="ps-notify" type="button" className="ps-toggle" aria-pressed={notificationsAllowed} onClick={requestNotifications}>
-              {notificationsAllowed ? 'ممنوحة ✓' : 'طلب الإذن'}
-            </button>
-          </div>
-          <div className="ps-row">
-            <label htmlFor="ps-sound">صوت الأذان عند الموعد</label>
-            <input id="ps-sound" type="checkbox" checked={adhanSound} onChange={e => setAdhanSound(e.target.checked)} />
-          </div>
-          <div className="ps-row">
-            <label htmlFor="ps-volume">مستوى صوت الأذان: {adhanVolume}%</label>
-            <input id="ps-volume" type="range" min="0" max="100" step="5" value={adhanVolume} onChange={e => setAdhanVolume(Number(e.target.value))} disabled={!adhanSound} />
-          </div>
-          <div className="ps-row">
-            <label htmlFor="ps-mute">كتم الأذان مؤقتًا</label>
-            <input id="ps-mute" type="checkbox" checked={adhanMuted} onChange={e => setAdhanMuted(e.target.checked)} />
-          </div>
-          <div className="ps-row">
-            <label htmlFor="ps-pre">تنبيه مسبق</label>
-            <select id="ps-pre" value={preAlarmMinutes} onChange={e => setPreAlarmMinutes(Number(e.target.value))}>
-              <option value={0}>بدون</option>
-              <option value={5}>قبل 5 دقائق</option>
-              <option value={10}>قبل 10 دقائق</option>
-              <option value={15}>قبل 15 دقيقة</option>
-              <option value={30}>قبل 30 دقيقة</option>
-            </select>
-          </div>
-          {onPreviewAlarm && (
-            <button type="button" className="ps-preview" onClick={onPreviewAlarm}>تجربة التنبيه الآن</button>
-          )}
-        </div>
-
-        {/* ---------- التطبيق في الخلفية ---------- */}
-        <div className="ps-section">
-          <h3>التطبيق في الخلفية</h3>
-          <p className="ps-hint">
-            إغلاق النافذة لا يُنهي التطبيق: يبقى في صينية النظام بجانب الساعة
-            ليُطلق الأذان في موعده. الخروج النهائي من قائمة الصينية.
-          </p>
-          <div className="ps-row">
-            <label htmlFor="ps-autostart">البدء مع تشغيل ويندوز (مصغّرًا في الصينية)</label>
-            <input id="ps-autostart" type="checkbox" checked={autostart} onChange={e => toggleAutostart(e.target.checked)} />
-          </div>
-        </div>
-
-        {/* ---------- الضبط الدقيق (اختياري، مطوي) ---------- */}
-        <div className="ps-section">
-          <button type="button" className="ps-disclosure" aria-expanded={showAdvanced} onClick={() => setShowAdvanced(v => !v)}>
-            {showAdvanced ? 'إخفاء' : 'إظهار'} الضبط الدقيق للمواقيت (اختياري)
-          </button>
-          {showAdvanced && (
-            <div className="ps-adjust">
-              {Object.entries(ARABIC_NAMES).filter(([key]) => key !== 'sunrise').map(([key, name]) => (
-                <label key={key}>
-                  <span>{name}</span>
-                  <input
-                    type="number" min={-MANUAL_ADJUST_LIMIT} max={MANUAL_ADJUST_LIMIT} step={1}
-                    value={adjust[key] ?? 0}
-                    onChange={e => setAdjust({
-                      ...adjust,
-                      [key]: Math.max(-MANUAL_ADJUST_LIMIT, Math.min(MANUAL_ADJUST_LIMIT, Number(e.target.value) || 0)),
-                    })}
-                  />
-                </label>
-              ))}
+        <div className="ps-body" ref={bodyRef}>
+          <section className="ps-section" aria-labelledby="ps-location-title">
+            <h3 className="ps-section-title" id="ps-location-title">الموقع</h3>
+            <div className="ps-card ps-location" aria-live="polite">
+              <div className="ps-location-icon"><Icon name="pin" /></div>
+              <div className="ps-location-main">
+                <div className="ps-location-name">{location ? placeLabel : 'لم يُحدَّد الموقع بعد.'}</div>
+                {location && (
+                  <div className="ps-chips">
+                    {location.timeZone && <span className="ps-chip"><bdi dir="ltr">{location.timeZone}</bdi></span>}
+                    {Number.isFinite(location.accuracy) && <span className="ps-chip">دقة {Math.round(location.accuracy)} م</span>}
+                  </div>
+                )}
+              </div>
+              <button type="button" className={`ps-button ps-button-blue${busy ? ' is-spinning' : ''}`} onClick={requestDeviceLocation} disabled={busy} aria-busy={busy}>
+                <Icon name="refresh" /> {location ? 'تحديث موقعي الآن' : 'استخدام موقع الجهاز وطلب الإذن'}
+              </button>
             </div>
-          )}
+            <p className="ps-hint">يُحدَّد موقعك من ويندوز.</p>
+          </section>
+
+          <section className="ps-section" aria-labelledby="ps-method-title">
+            <h3 className="ps-section-title" id="ps-method-title">طريقة الحساب</h3>
+            <div className="ps-card">
+              <div className="ps-fields">
+                <label className="ps-field" htmlFor="ps-method">
+                  <span className="ps-field-label">الطريقة</span>
+                  <select className="ps-select" id="ps-method" value={methodId} onChange={event => setMethodId(event.target.value)}>
+                    <option value="auto">تلقائي حسب الدولة — {methodForTimeZone(location?.timeZone).method.name}</option>
+                    {METHOD_ORDER.filter(id => id !== 'auto').map(id => (
+                      <option key={id} value={id}>{METHODS[id].name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="ps-field" htmlFor="ps-school">
+                  <span className="ps-field-label">حساب العصر</span>
+                  <select className="ps-select" id="ps-school" value={String(school)} onChange={event => setSchool(event.target.value === 'auto' ? 'auto' : Number(event.target.value))}>
+                    <option value="auto">تلقائي حسب الدولة</option>
+                    <option value="1">جمهور الفقهاء (ظل ×١)</option>
+                    <option value="2">المذهب الحنفي (ظل ×٢)</option>
+                  </select>
+                </label>
+              </div>
+              <div className="ps-applied">
+                <div className="ps-applied-label"><Icon name="check" /> المطبّق الآن</div>
+                <div className="ps-chips">
+                  <span className="ps-chip ps-chip-applied">{effectiveMethod}</span>
+                  <span className="ps-chip ps-chip-applied">{effectiveSchool}</span>
+                </div>
+              </div>
+            </div>
+            <p className="ps-hint">تُشتق طريقة الحساب من دولتك.</p>
+          </section>
+
+          <section className="ps-section" aria-labelledby="ps-alerts-title">
+            <h3 className="ps-section-title" id="ps-alerts-title">التنبيهات</h3>
+            <div className="ps-card">
+              <div className="ps-control-row">
+                <span className="ps-row-icon"><Icon name="bell" /></span>
+                <span className="ps-row-label" id="ps-notify-label">إشعارات ويندوز</span>
+                <button id="ps-notify" type="button" className="ps-button ps-button-ghost ps-control" aria-labelledby="ps-notify-label" aria-pressed={notificationsAllowed} onClick={requestNotifications}>
+                  {notificationsAllowed ? 'ممنوحة ✓' : 'طلب الإذن'}
+                </button>
+              </div>
+
+              <div className="ps-control-row">
+                <span className="ps-row-icon"><Icon name="volume" /></span>
+                <span className="ps-row-label" id="ps-sound-label">صوت الأذان عند الموعد</span>
+                <label className="ps-switch ps-control" aria-label="صوت الأذان عند الموعد">
+                  <input id="ps-sound" type="checkbox" role="switch" aria-labelledby="ps-sound-label" checked={adhanSound} onChange={event => setAdhanSound(event.target.checked)} />
+                  <span className="ps-switch-track" />
+                </label>
+              </div>
+
+              <div className="ps-control-row ps-volume-row">
+                <div className="ps-volume-heading">
+                  <span className="ps-row-icon"><Icon name="volume-low" /></span>
+                  <label className="ps-row-label" id="ps-volume-label" htmlFor="ps-volume">مستوى صوت الأذان</label>
+                  <bdi className="ps-volume-badge" dir="ltr">{adhanVolume}%</bdi>
+                </div>
+                <div className="ps-slider-line">
+                  <Icon name="volume-low" />
+                  <input
+                    className="ps-range"
+                    id="ps-volume"
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="5"
+                    value={adhanVolume}
+                    aria-labelledby="ps-volume-label"
+                    aria-valuetext={`${adhanVolume}%`}
+                    style={{ '--ps-range-progress': `${Math.max(0, Math.min(100, Number(adhanVolume) || 0))}%` }}
+                    onChange={event => setAdhanVolume(Number(event.target.value))}
+                    disabled={!adhanSound}
+                  />
+                  <Icon name="volume" />
+                </div>
+              </div>
+
+              <div className="ps-control-row">
+                <span className="ps-row-icon"><Icon name="volume-mute" /></span>
+                <span className="ps-row-label" id="ps-mute-label">كتم الأذان مؤقتًا</span>
+                <label className="ps-switch ps-control" aria-label="كتم الأذان مؤقتًا">
+                  <input id="ps-mute" type="checkbox" role="switch" aria-labelledby="ps-mute-label" checked={adhanMuted} onChange={event => setAdhanMuted(event.target.checked)} />
+                  <span className="ps-switch-track" />
+                </label>
+              </div>
+
+              <div className="ps-control-row">
+                <span className="ps-row-icon"><Icon name="clock" /></span>
+                <span className="ps-row-label" id="ps-pre-label">تنبيه مسبق</span>
+                <select className="ps-select ps-select-sm ps-control" id="ps-pre" aria-labelledby="ps-pre-label" value={preAlarmMinutes} onChange={event => setPreAlarmMinutes(Number(event.target.value))}>
+                  <option value={0}>بدون</option>
+                  <option value={5}>قبل 5 دقائق</option>
+                  <option value={10}>قبل 10 دقائق</option>
+                  <option value={15}>قبل 15 دقيقة</option>
+                  <option value={30}>قبل 30 دقيقة</option>
+                </select>
+              </div>
+
+              {onPreviewAlarm && (
+                <div className="ps-card-foot">
+                  <button type="button" className="ps-button ps-button-violet" onClick={onPreviewAlarm}>
+                    <Icon name="play" /> تجربة التنبيه الآن
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="ps-section" aria-labelledby="ps-background-title">
+            <h3 className="ps-section-title" id="ps-background-title">التطبيق في الخلفية</h3>
+            <div className="ps-card ps-background-card">
+              <div className="ps-background-note">
+                <span className="ps-row-icon"><Icon name="tray" /></span>
+                <p><strong>إغلاق النافذة لا يُنهي التطبيق:</strong> يبقى في صينية النظام بجانب الساعة ليُطلق الأذان في موعده. الخروج النهائي من قائمة الصينية.</p>
+              </div>
+              <div className="ps-control-row ps-autostart-row">
+                <span className="ps-row-icon"><Icon name="tray" /></span>
+                <span className="ps-row-label" id="ps-autostart-label">البدء مع تشغيل ويندوز (مصغّرًا في الصينية)</span>
+                <label className="ps-switch ps-control" aria-label="البدء مع تشغيل ويندوز">
+                  <input id="ps-autostart" type="checkbox" role="switch" aria-labelledby="ps-autostart-label" checked={autostart} onChange={event => toggleAutostart(event.target.checked)} />
+                  <span className="ps-switch-track" />
+                </label>
+              </div>
+            </div>
+          </section>
+
+          {error && <p className="ps-feedback" role="alert">{error}</p>}
+          {status && <p className="ps-feedback" role="status">{status}</p>}
         </div>
-
-        {error && <p className="ps-error" role="alert">{error}</p>}
-        {status && <p className="ps-status" role="status">{status}</p>}
-
-        <footer className="ps-actions">
-          <button type="button" className="ps-save" onClick={onClose}>تم</button>
-        </footer>
       </section>
     </div>
   );

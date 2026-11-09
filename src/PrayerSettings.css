@@ -1,53 +1,753 @@
-.prayer-settings-backdrop{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:24px;background:rgba(0,0,0,.58);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
-.prayer-settings{position:relative;width:min(620px,100%);max-height:min(760px,calc(100vh - 48px));overflow:auto;padding:26px;border-radius:28px;color:var(--text);direction:rtl}
-.prayer-settings-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;padding-bottom:18px;border-bottom:1px solid var(--hairline)}
-.prayer-settings-head h2{font-size:21px;line-height:1.35}
-.prayer-settings-head p,.ps-source{margin-top:6px;color:var(--text-2);font-size:13px;line-height:1.7}
-.ps-close{width:34px;height:34px;flex:none;border-radius:50%;background:rgba(255,255,255,.08);font-size:24px;line-height:1;color:var(--text-2)}
-.ps-section{margin-top:20px}
-.ps-section h3{font-size:15px;margin-bottom:10px}
-.ps-current{display:flex;flex-direction:column;gap:3px;min-height:54px;padding:11px 13px;border:1px solid var(--hairline);border-radius:14px;background:rgba(255,255,255,.035)}
-.ps-current b{font-size:14px}.ps-current span{font-size:12px;color:var(--text-2);direction:ltr;text-align:right}
-.ps-action,.ps-city-search button,.ps-save,.ps-cancel{min-height:40px;padding:0 16px;border-radius:12px;font-weight:600}
-.ps-action{margin-top:10px;background:var(--accent-soft);color:var(--accent)}
-.ps-city-search{margin-top:14px}.ps-city-search label,.ps-grid label{display:block;color:var(--text-2);font-size:13px;font-weight:600}
-.ps-city-search>div{display:flex;gap:8px;margin-top:7px}
-.ps-city-search input,.ps-grid select{width:100%;height:42px;padding:0 12px;border:1px solid var(--hairline);border-radius:12px;background:rgba(255,255,255,.055);color:var(--text);font:inherit;outline:none}
-.ps-city-search input:focus,.ps-grid select:focus{border-color:var(--accent)}
-.ps-city-search input::placeholder{color:var(--text-3)}
-.ps-city-search button,.ps-save{background:var(--text);color:var(--bg)}
-.ps-city-search button:disabled,.ps-action:disabled,.ps-save:disabled,.ps-cancel:disabled{opacity:.5;cursor:not-allowed}
-.ps-results{display:flex;flex-direction:column;max-height:190px;margin-top:8px;overflow:auto;border:1px solid var(--hairline);border-radius:14px;background:#17191e}
-.ps-results button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 13px;text-align:right;border-bottom:1px solid var(--hairline)}
-.ps-results button:last-child{border-bottom:0}.ps-results button:hover,.ps-results button[aria-selected=true]{background:rgba(255,255,255,.08)}
-.ps-results b{font-size:13px}.ps-results span{font-size:11px;color:var(--text-2)}
-.ps-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}
-.ps-grid select{display:block;margin-top:7px;font-size:13px}.ps-grid option{background:#17191e;color:#fff}
-.ps-source{margin-top:14px}
-.ps-error,.ps-status{margin-top:10px;padding:10px 12px;border-radius:12px;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
-.ps-error{background:rgba(255,80,80,.11);color:#ffaaa5}.ps-status{background:rgba(90,169,255,.1);color:#c4e0ff}
-.ps-actions{display:flex;justify-content:flex-start;gap:10px;margin-top:18px}
-.ps-cancel{background:rgba(255,255,255,.08);color:var(--text)}
-@media(max-width:620px){.prayer-settings-backdrop{padding:12px}.prayer-settings{padding:20px}.ps-grid{grid-template-columns:1fr}.ps-actions{flex-wrap:wrap}.ps-save{flex:1}}
+:root {
+  color-scheme: dark;
+}
 
-/* عناصر الإعدادات الجديدة */
-.prayer-settings .ps-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0}
-.prayer-settings .ps-row label{font:600 13px/1.5 var(--font,system-ui);opacity:.9}
-.prayer-settings .ps-row select,
-.prayer-settings .ps-row input[type=range]{max-width:58%}
-.prayer-settings .ps-hint{margin:8px 0 0;font:500 12px/1.7 var(--font,system-ui);opacity:.66}
-.prayer-settings .ps-disclosure{
-  width:100%;padding:10px 14px;border:0;border-radius:12px;cursor:pointer;
-  background:rgba(255,255,255,.07);color:inherit;
-  font:600 13px/1.4 var(--font,system-ui);text-align:start;
+.prayer-settings-backdrop {
+  --ps-bg-backdrop: #060608;
+  --ps-surface-modal: #131316;
+  --ps-surface-card: #18181c;
+  --ps-surface-raised: #1f1f24;
+  --ps-surface-hover: #26262c;
+  --ps-border: #26262d;
+  --ps-border-strong: #34343d;
+  --ps-text: #f5f5f7;
+  --ps-text-2: #b9b9c2;
+  --ps-text-3: #878791;
+  --ps-blue: #6aa8f5;
+  --ps-blue-solid: #8ab4f8;
+  --ps-blue-bg: rgba(106, 168, 245, .12);
+  --ps-blue-bg-hover: rgba(106, 168, 245, .19);
+  --ps-blue-line: rgba(106, 168, 245, .28);
+  --ps-violet: #cdb9ee;
+  --ps-violet-bg: #2a2237;
+  --ps-violet-bg-hover: #342a43;
+  --ps-violet-line: rgba(205, 185, 238, .26);
+  --ps-r-card: 16px;
+  --ps-r-control: 12px;
+
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--ps-bg-backdrop);
+  background: rgba(6, 6, 8, .72);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
 }
-.prayer-settings .ps-disclosure:hover{background:rgba(255,255,255,.11)}
-.prayer-settings .ps-adjust{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-top:12px}
-.prayer-settings .ps-adjust label{display:flex;align-items:center;justify-content:space-between;gap:8px;font:600 12px/1 var(--font,system-ui)}
-.prayer-settings .ps-adjust input{width:56px;padding:6px;border-radius:8px;border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.32);color:inherit;text-align:center;font:600 12px/1 var(--font,system-ui)}
-.prayer-settings .ps-preview{
-  margin-top:10px;padding:9px 16px;border:0;border-radius:999px;cursor:pointer;
-  background:rgba(184,138,216,.22);color:#e9d9f5;
-  font:600 12px/1 var(--font,system-ui);
+
+.prayer-settings-backdrop,
+.prayer-settings-backdrop * {
+  box-sizing: border-box;
 }
-.prayer-settings .ps-preview:hover{background:rgba(184,138,216,.34)}
+
+.ps-icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.prayer-settings {
+  width: min(500px, 100%);
+  max-height: min(680px, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--ps-border);
+  border-radius: 22px;
+  background: var(--ps-surface-modal);
+  color: var(--ps-text);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, .65), 0 0 0 1px rgba(255, 255, 255, .015) inset;
+  direction: rtl;
+  font-family: "Segoe UI", "Segoe UI Variable Text", Tahoma, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.prayer-settings button,
+.prayer-settings select,
+.prayer-settings input {
+  color: inherit;
+  font: inherit;
+}
+
+.prayer-settings button {
+  border: 0;
+  cursor: pointer;
+}
+
+.prayer-settings :focus-visible {
+  outline: 2px solid var(--ps-blue-solid);
+  outline-offset: 2px;
+}
+
+.ps-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* الرأس ثابت، ولا يتحرك مع الجسم */
+.ps-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid transparent;
+  transition: border-color .2s;
+}
+
+.ps-head.is-scrolled {
+  border-bottom-color: var(--ps-border);
+}
+
+.ps-head-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--ps-blue-line);
+  border-radius: 12px;
+  background: var(--ps-blue-bg);
+  color: var(--ps-blue);
+}
+
+.ps-head-icon .ps-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.ps-head-copy {
+  min-width: 0;
+}
+
+.ps-head h2 {
+  margin: 0;
+  color: var(--ps-text);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.ps-head-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0;
+  color: var(--ps-text-3);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+
+.ps-head-sub .ps-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--ps-blue);
+}
+
+.ps-close {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  margin-inline-start: auto;
+  border: 1px solid var(--ps-border) !important;
+  border-radius: 50%;
+  background: var(--ps-surface-raised) !important;
+  color: var(--ps-text-2) !important;
+  transition: background .15s, color .15s, transform .1s;
+}
+
+.ps-close:hover {
+  background: var(--ps-surface-hover) !important;
+  color: var(--ps-text) !important;
+}
+
+.ps-close:active {
+  transform: scale(.94);
+}
+
+.ps-close .ps-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* الجسم يتمرر بعجلة الفأرة واللمس ولوحة المفاتيح، بلا أي شريط مرئي */
+.ps-body {
+  --ps-fade-top: 0px;
+  --ps-fade-bottom: 0px;
+  min-height: 0;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 20px 22px;
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--ps-fade-top), #000 calc(100% - var(--ps-fade-bottom)), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--ps-fade-top), #000 calc(100% - var(--ps-fade-bottom)), transparent 100%);
+}
+
+.ps-body::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.ps-section {
+  min-width: 0;
+}
+
+.ps-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 9px;
+  color: var(--ps-text-2);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ps-section-title::before {
+  width: 3px;
+  height: 14px;
+  flex: none;
+  border-radius: 2px;
+  background: var(--ps-blue);
+  content: "";
+}
+
+.ps-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ps-border);
+  border-radius: var(--ps-r-card);
+  background: var(--ps-surface-card);
+}
+
+.ps-hint {
+  margin: 8px 0 0;
+  padding-inline: 4px;
+  color: var(--ps-text-3);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+/* الأزرار */
+.ps-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid transparent !important;
+  border-radius: var(--ps-r-control);
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background .15s, border-color .15s, transform .1s;
+}
+
+.ps-button:active {
+  transform: scale(.975);
+}
+
+.ps-button:disabled {
+  opacity: .5;
+  pointer-events: none;
+}
+
+.ps-button-blue {
+  flex: none;
+  border-color: var(--ps-blue-line) !important;
+  background: var(--ps-blue-bg) !important;
+  color: var(--ps-blue) !important;
+}
+
+.ps-button-blue:hover {
+  background: var(--ps-blue-bg-hover) !important;
+}
+
+.ps-button-blue.is-spinning .ps-icon {
+  animation: ps-spin .8s linear;
+}
+
+.ps-button-ghost {
+  height: 32px;
+  padding: 0 12px;
+  border-color: var(--ps-border-strong) !important;
+  background: var(--ps-surface-raised) !important;
+  color: var(--ps-text) !important;
+  font-size: 12.5px !important;
+}
+
+.ps-button-ghost:hover {
+  background: var(--ps-surface-hover) !important;
+}
+
+.ps-button-violet {
+  width: 100%;
+  height: 42px;
+  border-color: var(--ps-violet-line) !important;
+  background: var(--ps-violet-bg) !important;
+  color: var(--ps-violet) !important;
+}
+
+.ps-button-violet:hover {
+  background: var(--ps-violet-bg-hover) !important;
+}
+
+@keyframes ps-spin {
+  to { transform: rotate(-360deg); }
+}
+
+/* الموقع */
+.ps-location {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+}
+
+.ps-location-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--ps-blue-line);
+  border-radius: 50%;
+  background: var(--ps-blue-bg);
+  color: var(--ps-blue);
+}
+
+.ps-location-icon .ps-icon {
+  width: 21px;
+  height: 21px;
+}
+
+.ps-location-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.ps-location-name {
+  color: var(--ps-text);
+  font-size: 14.5px;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+.ps-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.ps-chip {
+  max-width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--ps-border);
+  border-radius: 6px;
+  background: var(--ps-surface-raised);
+  color: var(--ps-text-2);
+  font-size: 11.5px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+/* طريقة الحساب والقوائم */
+.ps-fields {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.ps-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--ps-text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.ps-field-label {
+  color: var(--ps-text-2);
+}
+
+.ps-select {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  appearance: none;
+  padding: 0 12px 0 36px;
+  border: 1px solid var(--ps-border-strong) !important;
+  border-radius: var(--ps-r-control);
+  background-color: var(--ps-surface-raised) !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a9aa3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-position: left 12px center;
+  background-repeat: no-repeat;
+  background-size: 14px;
+  color: var(--ps-text) !important;
+  color-scheme: dark;
+  font-size: 13px !important;
+  cursor: pointer;
+  transition: border-color .15s, background-color .15s;
+}
+
+.ps-select:hover {
+  border-color: #44444f !important;
+}
+
+.ps-select option {
+  background: var(--ps-surface-raised);
+  color: var(--ps-text);
+}
+
+.ps-select-sm {
+  width: 132px;
+  height: 36px;
+  flex: none;
+}
+
+.ps-applied {
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--ps-border);
+  border-radius: 0 0 var(--ps-r-card) var(--ps-r-card);
+  background: rgba(106, 168, 245, .045);
+}
+
+.ps-applied-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--ps-blue);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.ps-applied-label .ps-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.ps-chip-applied {
+  padding: 6px 10px;
+  border-color: var(--ps-blue-line);
+  border-radius: 8px;
+  background: var(--ps-blue-bg);
+  color: #cfe3fb;
+  font-size: 12px;
+}
+
+/* صفوف التنبيهات */
+.ps-control-row {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+}
+
+.ps-control-row + .ps-control-row {
+  border-top: 1px solid var(--ps-border);
+}
+
+.ps-row-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--ps-surface-raised);
+  color: var(--ps-text-2);
+}
+
+.ps-row-icon .ps-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.ps-row-label {
+  min-width: 0;
+  flex: 1;
+  color: var(--ps-text);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.ps-control {
+  flex: none;
+  margin-inline-start: auto;
+}
+
+/* مفتاح تشغيل فعلي: checkbox يبقى قابلًا للوحة المفاتيح وقارئ الشاشة */
+.ps-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 26px;
+  flex: none;
+  cursor: pointer;
+}
+
+.ps-switch input {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.ps-switch-track {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--ps-border-strong);
+  border-radius: 999px;
+  background: #2b2b33;
+  transition: background .2s, border-color .2s;
+}
+
+.ps-switch-track::after {
+  position: absolute;
+  top: 3px;
+  inset-inline-start: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #cfcfd8;
+  content: "";
+  transition: transform .2s, background .2s;
+}
+
+.ps-switch input:checked + .ps-switch-track {
+  border-color: var(--ps-blue-solid);
+  background: var(--ps-blue-solid);
+}
+
+.ps-switch input:checked + .ps-switch-track::after {
+  transform: translateX(-18px);
+  background: #0e1624;
+}
+
+.ps-switch input:focus-visible + .ps-switch-track {
+  outline: 2px solid var(--ps-blue-solid);
+  outline-offset: 2px;
+}
+
+/* شريط الصوت: قيمة حقيقية من الحالة، مع تعبئة ومقبض قابلين للتحكم */
+.ps-volume-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding-block: 12px;
+}
+
+.ps-volume-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ps-volume-badge {
+  min-width: 48px;
+  padding: 4px 10px;
+  border: 1px solid var(--ps-blue-line);
+  border-radius: 999px;
+  background: var(--ps-blue-bg);
+  color: var(--ps-blue);
+  font-size: 12.5px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.ps-slider-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-inline: 2px;
+  color: var(--ps-text-3);
+}
+
+.ps-slider-line > .ps-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.prayer-settings input.ps-range {
+  --ps-fill: var(--ps-range-progress, 0%);
+  width: auto;
+  min-width: 0;
+  height: 22px;
+  flex: 1;
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  direction: rtl;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+.prayer-settings input.ps-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(to left, var(--ps-blue-solid) var(--ps-fill), #34343c var(--ps-fill));
+}
+
+.prayer-settings input.ps-range::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  appearance: none;
+  margin-top: -6px;
+  border: 4px solid var(--ps-blue-solid);
+  border-radius: 50%;
+  background: var(--ps-surface-modal);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .55);
+  transition: box-shadow .15s, transform .15s;
+}
+
+.prayer-settings input.ps-range:hover::-webkit-slider-thumb {
+  box-shadow: 0 0 0 6px rgba(138, 180, 248, .16), 0 2px 8px rgba(0, 0, 0, .55);
+}
+
+.prayer-settings input.ps-range:active::-webkit-slider-thumb {
+  transform: scale(1.08);
+}
+
+.prayer-settings input.ps-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 6px rgba(138, 180, 248, .28);
+}
+
+.prayer-settings input.ps-range::-moz-range-track {
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(to left, var(--ps-blue-solid) var(--ps-fill), #34343c var(--ps-fill));
+}
+
+.prayer-settings input.ps-range::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 4px solid var(--ps-blue-solid);
+  border-radius: 50%;
+  background: var(--ps-surface-modal);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .55);
+}
+
+.prayer-settings input.ps-range:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+/* تذييل تجربة التنبيه */
+.ps-card-foot {
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--ps-border);
+}
+
+.ps-card-foot .ps-icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* التطبيق في الخلفية مع الحفاظ على خيار البدء الحالي */
+.ps-background-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+}
+
+.ps-background-note p {
+  margin: 0;
+  color: var(--ps-text-3);
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.75;
+}
+
+.ps-background-note strong {
+  color: var(--ps-text);
+  font-weight: 700;
+}
+
+.ps-autostart-row {
+  border-top: 1px solid var(--ps-border);
+}
+
+.ps-feedback {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ps-blue-line);
+  border-radius: var(--ps-r-control);
+  background: var(--ps-blue-bg);
+  color: var(--ps-text-2);
+  font-size: 12.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 520px) {
+  .prayer-settings-backdrop {
+    padding: 12px;
+  }
+
+  .prayer-settings {
+    max-height: min(680px, calc(100vh - 24px));
+  }
+
+  .ps-body {
+    padding-inline: 14px;
+  }
+
+  .ps-head {
+    padding-inline: 14px;
+  }
+
+  .ps-location {
+    flex-wrap: wrap;
+  }
+
+  .ps-location .ps-button-blue {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prayer-settings * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
