@@ -322,7 +322,8 @@ try {
     throw 'Windows runner exposes no interactive display; refusing to mark native geometry verification as passed.'
   }
   New-Item -ItemType Directory -Force -Path (Split-Path $placementPath) | Out-Null
-  $placementJson = @{ mode = 'manual'; offsetX = 28; offsetY = 32 } | ConvertTo-Json -Compress
+  # Keep a non-centered manual anchor while the capsule remains in the bright title-bar band used by the rim-corner probes.
+  $placementJson = @{ mode = 'manual'; offsetX = 28; offsetY = 0 } | ConvertTo-Json -Compress
   [System.IO.File]::WriteAllText($placementPath, $placementJson, [System.Text.UTF8Encoding]::new($false))
   if (Test-Path $logPath) { Remove-Item -Force $logPath }
   $env:TARTEEL_WINDOWS_SMOKE_TEST = '1'
