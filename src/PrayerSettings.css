@@ -247,6 +247,10 @@
   padding: 14px;
 }
 
+.ps-appearance-card {
+  padding: 14px;
+}
+
 .ps-placement-intro {
   margin: 0 0 2px;
   color: var(--ps-text-2);
@@ -376,6 +380,13 @@
 
 .ps-placement-hint {
   margin: 11px 2px 0;
+  color: var(--ps-text-3);
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+
+.ps-appearance-hint {
+  margin: 10px 2px 0;
   color: var(--ps-text-3);
   font-size: 11.5px;
   line-height: 1.65;

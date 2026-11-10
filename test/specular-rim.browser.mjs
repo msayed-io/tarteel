@@ -107,6 +107,56 @@ function pngInfo(cssValue) {
   return `${image.width}x${image.height}/${createHash('sha256').update(bytes).digest('hex').slice(0, 12)}`;
 }
 
+async function verifyIslandAppearance(browser) {
+  const source = await readFile(resolve(root, 'island.html'), 'utf8');
+  const staticHtml = source.replace(/<script type="module">[\s\S]*?<\/script>/, '');
+  const context = await browser.newContext({ viewport: { width: 1200, height: 900 } });
+  const page = await context.newPage();
+  await page.setContent(staticHtml, { waitUntil: 'load' });
+  await page.locator('#isl').evaluate(element => {
+    element.dataset.state = 'tools';
+    element.style.width = '480px';
+    element.style.height = '430px';
+    element.style.borderRadius = '28px';
+  });
+  await page.waitForTimeout(500);
+  const measure = () => page.evaluate(() => {
+    const selectors = ['#isl', '.island-surface', '.layer.tools', '#tb', '#tback', '#chSpeed button', '#chSleep button'];
+    const geometry = selectors.map(selector => {
+      const element = document.querySelector(selector);
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return [selector, rect.x, rect.y, rect.width, rect.height, style.transform, style.borderRadius];
+    });
+    return {
+      background: getComputedStyle(document.querySelector('.island-surface')).backgroundColor,
+      glassDisplay: getComputedStyle(document.querySelector('.island-surface > .glass')).display,
+      blur: getComputedStyle(document.querySelector('.g-blur')).backdropFilter,
+      geometry,
+      toolsButtonHasRim: document.querySelector('#tb').classList.contains('rim'),
+      toolsRimCount: document.querySelectorAll('.tools .rim').length,
+      glassLayers: [...document.querySelector('.glass').children].map(element => element.className),
+    };
+  });
+  const glass = await measure();
+  assert.equal(glass.background, 'rgba(0, 0, 0, 0)', 'glass mode preserves the original transparent surface');
+  assert.notEqual(glass.glassDisplay, 'none', 'glass mode keeps the original layer visible');
+  assert.match(glass.blur, /blur\(6px\)/, 'the existing glass blur rule remains active in expanded mode');
+  assert.deepEqual(glass.glassLayers, ['g-blur', 'g-tint', 'g-black'], 'the original layered glass stack is intact');
+  assert.equal(glass.toolsButtonHasRim, false, 'the tools button has no specular rim');
+  assert.equal(glass.toolsRimCount, 0, 'no internal tools control has a specular rim');
+
+  await page.locator('html').evaluate(element => { element.dataset.islandAppearance = 'black'; });
+  const black = await measure();
+  assert.equal(black.background, 'rgb(0, 0, 0)', 'black mode uses a solid black surface');
+  assert.equal(black.glassDisplay, 'none', 'black mode hides the glass layer rather than restyling it');
+  assert.equal(black.blur, glass.blur, 'switching material does not alter the original glass CSS');
+  assert.deepEqual(black.geometry, glass.geometry, 'switching material preserves island, tools, and control geometry');
+  assert.deepEqual(black.glassLayers, glass.glassLayers, 'the hidden layer remains the same original stack');
+  await context.close();
+  console.log('PASS browser Dynamic appearance: original CSS glass remains intact; black mode changes material only; tool rims are absent.');
+}
+
 async function run() {
   await new Promise((resolveListen, reject) => server.listen(0, '127.0.0.1', error => error ? reject(error) : resolveListen()));
   const address = server.address();
@@ -117,6 +167,7 @@ async function run() {
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   });
   try {
+    await verifyIslandAppearance(browser);
     for (const dpr of [1, 2, 3]) {
       const context = await browser.newContext({ viewport: { width: 1100, height: 1000 }, deviceScaleFactor: dpr });
       const page = await context.newPage();

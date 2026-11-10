@@ -202,7 +202,9 @@ describe('الحافة اللامعة — البكسلات والهندسة', ()
     expect(island).toContain('installSpecularRim(document)');
     expect(island).toContain('class="idle-prayer rim"');
     expect(island).toContain('class="pill main rim"');
-    expect(island).toContain('button class="rim" data-v=');
+    expect(island).toContain('<button class="tbtn" id="tb"');
+    const toolsMarkup = island.match(/<div class="layer tools"[\s\S]*?(?=<div class="layer alert")/)?.[0] ?? '';
+    expect(toolsMarkup).not.toMatch(/class="[^"]*\brim\b/);
     expect(rimRule).toContain('--rim-effective');
     expect(engine).toContain('styles.rotate');
     expect(engine).toContain('GEOMETRY_ANIMATION_KEYS');

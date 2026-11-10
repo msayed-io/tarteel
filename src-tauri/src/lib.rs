@@ -166,6 +166,21 @@ struct IslandPlacementHandle {
   animation_revision: Arc<AtomicU64>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum IslandAppearance { Glass, Black }
+
+impl Default for IslandAppearance {
+  fn default() -> Self { Self::Glass }
+}
+
+const ISLAND_APPEARANCE_FILE: &str = "island-appearance.json";
+
+struct IslandAppearanceHandle {
+  appearance: Mutex<IslandAppearance>,
+  path: PathBuf,
+}
+
 fn normalize_island_placement(mut placement: IslandPlacement) -> IslandPlacement {
   placement.offset_x = if placement.offset_x.is_finite() { placement.offset_x.clamp(-MAX_STORED_ISLAND_OFFSET, MAX_STORED_ISLAND_OFFSET) } else { 0.0 };
   placement.offset_y = if placement.offset_y.is_finite() { placement.offset_y.clamp(-MAX_STORED_ISLAND_OFFSET, MAX_STORED_ISLAND_OFFSET) } else { 0.0 };
@@ -188,6 +203,22 @@ fn write_island_placement(path: &Path, placement: IslandPlacement) -> Result<(),
   fs::write(&temporary, bytes).map_err(|e| format!("تعذر كتابة موضع الجزيرة المؤقت: {e}"))?;
   if path.exists() { fs::remove_file(path).map_err(|e| format!("تعذر استبدال موضع الجزيرة المحفوظ: {e}"))?; }
   fs::rename(&temporary, path).map_err(|e| format!("تعذر تثبيت موضع الجزيرة المحفوظ: {e}"))
+}
+
+fn read_island_appearance(path: &Path) -> IslandAppearance {
+  fs::read(path).ok()
+    .and_then(|bytes| serde_json::from_slice::<IslandAppearance>(&bytes).ok())
+    .unwrap_or_default()
+}
+
+fn write_island_appearance(path: &Path, appearance: IslandAppearance) -> Result<(), String> {
+  let parent = path.parent().ok_or_else(|| "مسار مظهر الجزيرة لا يحتوي مجلدًا أبًا".to_string())?;
+  fs::create_dir_all(parent).map_err(|e| format!("تعذر إنشاء مجلد حفظ مظهر الجزيرة: {e}"))?;
+  let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
+  let bytes = serde_json::to_vec(&appearance).map_err(|e| format!("تعذر ترميز مظهر الجزيرة: {e}"))?;
+  fs::write(&temporary, bytes).map_err(|e| format!("تعذر كتابة مظهر الجزيرة المؤقت: {e}"))?;
+  if path.exists() { fs::remove_file(path).map_err(|e| format!("تعذر استبدال مظهر الجزيرة المحفوظ: {e}"))?; }
+  fs::rename(&temporary, path).map_err(|e| format!("تعذر تثبيت مظهر الجزيرة المحفوظ: {e}"))
 }
 
 fn scheduled_task_argument(args: &[String]) -> Option<String> {
@@ -584,6 +615,29 @@ fn set_island_placement(
   Ok(placement)
 }
 
+#[tauri::command]
+fn get_island_appearance(state: State<IslandAppearanceHandle>) -> Result<IslandAppearance, String> {
+  state.appearance.lock().map(|appearance| *appearance).map_err(|_| "تعذر قراءة مظهر الجزيرة المحفوظ".to_string())
+}
+
+#[tauri::command]
+fn set_island_appearance(
+  appearance: String,
+  app: tauri::AppHandle,
+  state: State<IslandAppearanceHandle>,
+) -> Result<IslandAppearance, String> {
+  let appearance = match appearance.as_str() {
+    "glass" => IslandAppearance::Glass,
+    "black" => IslandAppearance::Black,
+    _ => return Err("مظهر الجزيرة غير معروف".into()),
+  };
+  let mut stored = state.appearance.lock().map_err(|_| "تعذر تحديث مظهر الجزيرة".to_string())?;
+  write_island_appearance(&state.path, appearance)?;
+  *stored = appearance;
+  let _ = app.emit("island-appearance-changed", serde_json::json!({ "appearance": appearance }));
+  Ok(appearance)
+}
+
 /// يحرك النافذة الأصلية على خيطها في إطارات قصيرة، دون تغيير حجمها أو تنشيطها.
 fn animate_island_bounds(
   island: tauri::WebviewWindow,
@@ -782,6 +836,12 @@ pub fn run() {
         path: placement_path,
         animation_revision: Arc::new(AtomicU64::new(0)),
       });
+      let appearance_path = app.path().app_config_dir()?.join(ISLAND_APPEARANCE_FILE);
+      let initial_appearance = read_island_appearance(&appearance_path);
+      app.manage(IslandAppearanceHandle {
+        appearance: Mutex::new(initial_appearance),
+        path: appearance_path,
+      });
       /* طلب المهمة قد يصل قبل أو بعد جاهزية WebView؛ نخزنه حتى تصبح أحداث
          البطاقة مسجلة، فلا يضيع الأذان عند بدء التطبيق في الخلفية. */
       let main_ready_app = app.handle().clone();
@@ -956,6 +1016,7 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       scan_directory, set_audio_root, audio_url, resize_island, get_island_placement, set_island_placement,
+      get_island_appearance, set_island_appearance,
       set_alarm_schedule, set_sleep_deadline, sync_windows_tasks, clear_windows_tasks,
       alarm_status,
       set_island_hit_rect, set_island_pass_through,
@@ -1038,6 +1099,30 @@ mod island_tests {
     });
     assert_eq!(normalized.offset_x, 0.0);
     assert_eq!(normalized.offset_y, MAX_STORED_ISLAND_OFFSET);
+    let _ = fs::remove_dir_all(root);
+  }
+
+  #[test]
+  fn island_appearance_defaults_to_glass_and_persists_both_choices() {
+    let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let root = std::env::temp_dir().join(format!("tarteel-island-appearance-{}-{unique}", std::process::id()));
+    let path = root.join(ISLAND_APPEARANCE_FILE);
+    assert_eq!(read_island_appearance(&path), IslandAppearance::Glass);
+    write_island_appearance(&path, IslandAppearance::Black).expect("يحفظ المظهر الأسود");
+    assert_eq!(read_island_appearance(&path), IslandAppearance::Black, "يُستعاد الاختيار بعد إعادة إنشاء الحالة");
+    write_island_appearance(&path, IslandAppearance::Glass).expect("يحفظ الرجوع إلى الزجاج");
+    assert_eq!(read_island_appearance(&path), IslandAppearance::Glass);
+    let _ = fs::remove_dir_all(root);
+  }
+
+  #[test]
+  fn malformed_island_appearance_data_falls_back_to_glass() {
+    let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let root = std::env::temp_dir().join(format!("tarteel-island-appearance-bad-{}-{unique}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join(ISLAND_APPEARANCE_FILE);
+    fs::write(&path, b"not-json").unwrap();
+    assert_eq!(read_island_appearance(&path), IslandAppearance::Glass);
     let _ = fs::remove_dir_all(root);
   }
 }

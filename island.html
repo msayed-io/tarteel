@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ar" dir="ltr">
+<html lang="ar" dir="ltr" data-island-appearance="glass">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -89,6 +89,8 @@
 .pr.nxt{background:rgba(255,255,255,.22);background:linear-gradient(90deg,color-mix(in srgb,var(--t2) 46%,transparent),color-mix(in srgb,var(--t1) 24%,transparent))}
 .pr.nxt em{color:var(--t1)}.pr.nxt span{color:#fff}
 @media(prefers-reduced-transparency:reduce){.island-surface{--gs:100%!important;--gf:0%!important}}
+html[data-island-appearance="black"] .island-surface{background:#000}
+html[data-island-appearance="black"] .island-surface>.glass{display:none}
 </style>
 </head>
 <body>
@@ -104,7 +106,7 @@
     <button class="ctl" id="bk" aria-label="المقطع السابق" title="اضغط مطولًا للتلاوة السابقة"><svg width="48" height="30" viewBox="0 0 48 30" stroke-width="4"><path d="M23 3 4 15l19 12ZM45 3 26 15l19 12Z"/></svg></button>
     <button class="ctl pp" id="pp" aria-label="تشغيل"><svg class="ico pause" width="36" height="48" viewBox="0 0 36 48" stroke="none"><rect width="14" height="48" rx="4"/><rect x="22" width="14" height="48" rx="4"/></svg><svg class="ico play" width="38" height="48" viewBox="0 0 38 48" stroke-width="8"><path d="M6 6 33 24 6 42Z"/></svg></button>
     <button class="ctl" id="fw" aria-label="المقطع التالي" title="اضغط مطولًا للتلاوة التالية"><svg width="48" height="30" viewBox="0 0 48 30" stroke-width="4"><path d="M3 3l19 12L3 27ZM25 3l19 12-19 12Z"/></svg></button>
-    <button class="tbtn rim" id="tb" aria-label="الأدوات"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 12h3M13 12h7M4 17h11M21 17h-1"/><circle cx="16" cy="7" r="2.5"/><circle cx="10" cy="12" r="2.5"/><circle cx="18" cy="17" r="2.5"/></svg></button>
+    <button class="tbtn" id="tb" aria-label="الأدوات"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 12h3M13 12h7M4 17h11M21 17h-1"/><circle cx="16" cy="7" r="2.5"/><circle cx="10" cy="12" r="2.5"/><circle cx="18" cy="17" r="2.5"/></svg></button>
   </div>
   <div class="layer prayer" data-s="prayer" dir="rtl" aria-hidden="true" role="group" aria-label="مواقيت الصلاة">
     <section class="ph" aria-label="الصلاة القادمة">
@@ -119,9 +121,9 @@
     <div class="plist" id="plist" aria-label="جدول اليوم"></div>
   </div>
   <div class="layer tools" data-s="tools" dir="rtl" aria-hidden="true">
-    <div class="th"><b>الأدوات</b><button class="tbtn rim" id="tback" aria-label="رجوع"><svg width="22" height="22" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></button></div>
-    <div class="sec"><label>السرعة</label><div class="chips" id="chSpeed"><button class="rim" data-v="0.75" aria-pressed="false">0.75×</button><button class="rim" data-v="1" aria-pressed="true">1×</button><button class="rim" data-v="1.25" aria-pressed="false">1.25×</button><button class="rim" data-v="1.5" aria-pressed="false">1.5×</button></div></div>
-    <div class="sec"><label>مؤقت النوم</label><div class="chips" id="chSleep"><button class="rim" data-v="0" aria-pressed="true">إيقاف</button><button class="rim" data-v="15" aria-pressed="false">15 د</button><button class="rim" data-v="30" aria-pressed="false">30 د</button><button class="rim" data-v="60" aria-pressed="false">60 د</button><button class="rim" data-v="end" aria-pressed="false">نهاية السورة</button></div></div>
+    <div class="th"><b>الأدوات</b><button class="tbtn" id="tback" aria-label="رجوع"><svg width="22" height="22" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg></button></div>
+    <div class="sec"><label>السرعة</label><div class="chips" id="chSpeed"><button data-v="0.75" aria-pressed="false">0.75×</button><button data-v="1" aria-pressed="true">1×</button><button data-v="1.25" aria-pressed="false">1.25×</button><button data-v="1.5" aria-pressed="false">1.5×</button></div></div>
+    <div class="sec"><label>مؤقت النوم</label><div class="chips" id="chSleep"><button data-v="0" aria-pressed="true">إيقاف</button><button data-v="15" aria-pressed="false">15 د</button><button data-v="30" aria-pressed="false">30 د</button><button data-v="60" aria-pressed="false">60 د</button><button data-v="end" aria-pressed="false">نهاية السورة</button></div></div>
     <div class="sec"><label>إعدادات الصلاة</label><div class="rows"><button class="sw" id="swCount" role="switch" aria-checked="false"><span>عرض الصلاة القادمة</span><i></i></button><button class="sw" id="swPause" role="switch" aria-checked="true"><span>إيقاف التلاوة عند الأذان</span><i></i></button></div></div>
   </div>
   <div class="layer alert" data-s="alert" dir="rtl" aria-hidden="true" role="alert"><div class="tx"><h3 id="alT"></h3><p id="alS"></p></div><button class="pill stop rim" id="alStop" hidden>إيقاف الأذان</button><button class="pill rim" id="alR" hidden>استئناف</button><button class="pill main rim" id="alD">تم</button></div>
@@ -133,6 +135,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { compactTopInset, contentViewportSize, nativeWindowSize, requiredViewportHeight } from './src/engine/island-geometry.js';
 import { installSpecularRim } from './src/lib/specular-rim.js';
 import { applyRimIntensity, readRimIntensity } from './src/lib/rim-preference.js';
+import { applyIslandAppearance } from './src/lib/island-appearance.js';
 applyRimIntensity(readRimIntensity(), document);
 installSpecularRim(document);
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)],isl=$('#isl'),fill=$('#fill'),tc=$('#tc'),rem=$('#tr'),bar=$('#bar'),pp=$('#pp'),toolsEl=$('.layer.tools');
@@ -141,6 +144,11 @@ const fmt=s=>{s=Math.max(0,Math.floor(Number(s)||0));return toArabic(Math.floor(
 const countdown=ms=>{const n=Math.max(0,Math.ceil(ms/1000)),h=Math.floor(n/3600),m=Math.floor(n%3600/60),s=n%60;return toArabic(h?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`)};
 const control=(action,extra={})=>emit('island-control',{action,...extra}).catch(cause=>console.error('Tarteel island control event failed',cause));
 listen('island-rim-intensity',event=>applyRimIntensity(event.payload?.value,document)).catch(cause=>console.error('Tarteel island rim listener failed',cause));
+let islandAppearanceRevision=0;
+listen('island-appearance-changed',event=>{islandAppearanceRevision++;applyIslandAppearance(event.payload?.appearance,document)}).then(()=>{
+  const revision=islandAppearanceRevision;
+  return invoke('get_island_appearance').then(value=>{if(islandAppearanceRevision===revision)applyIslandAppearance(value,document)});
+}).catch(cause=>console.error('Tarteel island appearance could not be loaded',cause));
 const RM=matchMedia('(prefers-reduced-motion:reduce)').matches,mk=(x,k,c)=>({x,v:0,t:x,k,c:RM?2*Math.sqrt(k):c}),S={w:mk(44,300,28),h:mk(24,260,25),r:mk(12,320,30)};
 /*
  * صُغّرت الحالتان المدمجتان، وأُزيل الامتداد السفلي المنفصل.

@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { resolveLocation, describeLocationError } from './engine/location.js';
 import { METHODS, methodForTimeZone } from './engine/astro.js';
 import { DEFAULT_ISLAND_PLACEMENT, normalizeIslandPlacement, nudgeIslandPlacement, setIslandPlacementMode } from './engine/island-placement.js';
+import { normalizeIslandAppearance } from './lib/island-appearance.js';
 import './PrayerSettings.css';
 
 /**
@@ -44,8 +45,12 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
   const [islandPlacement, setIslandPlacement] = useState(DEFAULT_ISLAND_PLACEMENT);
   const [placementLoading, setPlacementLoading] = useState(true);
   const [placementError, setPlacementError] = useState('');
+  const [islandAppearance, setIslandAppearance] = useState('glass');
+  const [appearanceLoading, setAppearanceLoading] = useState(true);
+  const [appearanceError, setAppearanceError] = useState('');
   const placementRef = useRef(DEFAULT_ISLAND_PLACEMENT);
   const placementRequestRef = useRef(0);
+  const appearanceRequestRef = useRef(0);
   const [methodId, setMethodId] = useState(config.methodId || 'auto');
   const [school, setSchool] = useState(config.school ?? 'auto');
   /* تبقى الإزاحات المحفوظة داخليًا وفي حساب الجدول حتى من دون إظهار بطاقة الضبط. */
@@ -68,6 +73,18 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
     }).catch(cause => {
       if (active) setPlacementError(`تعذّر قراءة موضع Dynamic: ${String(cause?.message || cause)}`);
     }).finally(() => { if (active) setPlacementLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    invoke('get_island_appearance').then(value => {
+      if (!active) return;
+      setIslandAppearance(normalizeIslandAppearance(value));
+      setAppearanceError('');
+    }).catch(cause => {
+      if (active) setAppearanceError(`تعذّر قراءة مظهر Dynamic: ${String(cause?.message || cause)}`);
+    }).finally(() => { if (active) setAppearanceLoading(false); });
     return () => { active = false; };
   }, []);
 
@@ -99,6 +116,21 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
 
   const chooseIslandPlacementMode = mode => persistIslandPlacement(setIslandPlacementMode(placementRef.current, mode));
   const nudgeIsland = direction => persistIslandPlacement(nudgeIslandPlacement(placementRef.current, direction));
+  const chooseIslandAppearance = appearance => {
+    const next = normalizeIslandAppearance(appearance);
+    const request = ++appearanceRequestRef.current;
+    setIslandAppearance(next);
+    setAppearanceError('');
+    invoke('set_island_appearance', { appearance: next }).then(value => {
+      if (request === appearanceRequestRef.current) setIslandAppearance(normalizeIslandAppearance(value));
+    }).catch(cause => {
+      if (request !== appearanceRequestRef.current) return;
+      setAppearanceError(`تعذّر حفظ مظهر Dynamic: ${String(cause?.message || cause)}`);
+      invoke('get_island_appearance').then(value => {
+        if (request === appearanceRequestRef.current) setIslandAppearance(normalizeIslandAppearance(value));
+      }).catch(() => {});
+    });
+  };
 
   const snapshot = useCallback(() => ({
     location,
@@ -435,6 +467,19 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
               </div>
               <p className="ps-placement-hint">كل ضغطة تحرّك الجزيرة ٢ بكسل منطقيًا بحركة سلسة. وضع Auto يعيد الحساب الافتراضي دون حذف إزاحتك اليدوية.</p>
               {placementError && <p className="ps-feedback" role="alert">{placementError}</p>}
+            </div>
+          </section>
+
+          <section className="ps-section" aria-labelledby="ps-appearance-title">
+            <h3 className="ps-section-title" id="ps-appearance-title">مظهر Dynamic</h3>
+            <div className="ps-card ps-appearance-card" aria-busy={appearanceLoading}>
+              <p className="ps-placement-intro">اختر مادة الجزيرة؛ يتغير السطح فقط وتبقى بقية تفاصيل التصميم كما هي.</p>
+              <div className="ps-placement-modes" role="group" aria-label="مظهر Dynamic">
+                <button type="button" className="ps-placement-mode" aria-pressed={islandAppearance === 'glass'} disabled={appearanceLoading} onClick={() => chooseIslandAppearance('glass')}>زجاج</button>
+                <button type="button" className="ps-placement-mode" aria-pressed={islandAppearance === 'black'} disabled={appearanceLoading} onClick={() => chooseIslandAppearance('black')}>أسود صلب</button>
+              </div>
+              <p className="ps-appearance-hint">وضع الزجاج يستخدم طبقة CSS الحالية دون تغيير. تمويه سطح المكتب خلف الجزيرة غير مضمون مع إبقاء النافذة غير مفعّلة وتمرير النقرات كما هو.</p>
+              {appearanceError && <p className="ps-feedback" role="alert">{appearanceError}</p>}
             </div>
           </section>
 
