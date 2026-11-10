@@ -8,13 +8,12 @@
 :root{--black:#000;--rim:1;--rim-system:1;--text:#fff;--sub:rgba(235,235,245,.6);--track:rgba(235,235,245,.3);--fill:#9d9da1;--ctl:#dcdce1;--accent:#5AA9FF;--chip:rgba(255,255,255,.1);--chip-on:rgba(255,255,255,.22);--green:var(--accent);--font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;--ease-out:cubic-bezier(.2,.9,.3,1)}
 *{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}html,body{height:100%;overflow:hidden;background:transparent;color:var(--text);-webkit-font-smoothing:antialiased}body{font-family:var(--font)}button{font-family:inherit}
 .island{position:fixed;top:7px;left:0;translate:0 0;width:44px;height:24px;border-radius:12px;background:transparent;overflow:visible;cursor:pointer;transform-origin:50% 0;user-select:none;scale:var(--fit,1);will-change:width,height,border-radius;transition:scale .28s var(--ease-out);z-index:1}
-.island-surface{position:absolute;inset:0;overflow:hidden;border-radius:inherit;background:var(--black);z-index:1}
+.island-surface{position:absolute;inset:0;overflow:hidden;border-radius:inherit;background:transparent;z-index:1}
 .island.press{scale:calc(var(--fit,1)*.965)}.island:focus-visible{outline:2px solid #5aa9ff;outline-offset:3px}
 .layer{position:absolute;top:0;left:50%;opacity:0;filter:blur(14px);pointer-events:none;transform-origin:50% 0;transition:opacity .14s ease-in,filter .14s ease-in,transform .22s ease-in}
 .idle{left:0;width:100%;height:24px;margin-left:0;transform:scale(.8);display:flex;align-items:center;justify-content:center}
 .compact{left:0;width:100%;height:24px;margin-left:0;transform:scale(.8)}
 .full{width:480px;height:262px;margin-left:-240px;transform:scale(.72)}
-.prayer{width:444px;height:188px;margin-left:-222px;transform:scale(.9);padding:18px 22px;display:flex;gap:14px}
 .tools{width:480px;height:auto;max-height:var(--tmax,430px);margin-left:-240px;transform:scale(.9);padding:0 24px 24px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
 .tools::-webkit-scrollbar{display:none}
 .alert{width:440px;height:92px;margin-left:-220px;transform:scale(.9);padding:0 22px;display:flex;align-items:center;gap:14px}
@@ -35,12 +34,6 @@
 .bar{position:absolute;left:73px;width:322px;top:134px;height:30px;touch-action:none;cursor:pointer}.bar .track{position:absolute;left:0;right:0;top:12px;height:8px;border-radius:4px;background:var(--track);overflow:hidden;transition:top .25s var(--ease-out),height .25s var(--ease-out),border-radius .25s}.bar .fill{height:100%;width:0;background:var(--fill);border-radius:inherit}.bar.on .track{top:10px;height:12px;border-radius:6px}.bar.on .fill{background:#e6e6ea}
 .ctl{position:absolute;top:164px;width:96px;height:96px;display:grid;place-items:center;background:none;border:0;color:var(--ctl);cursor:pointer;transition:scale .2s var(--ease-out),opacity .2s;touch-action:manipulation;-webkit-tap-highlight-color:transparent}.ctl:active{scale:.88;opacity:.7}.ctl:focus-visible,.tbtn:focus-visible,.chips button:focus-visible,.sw:focus-visible,.pill:focus-visible{outline:2px solid #5aa9ff;outline-offset:1px}.ctl svg{display:block;fill:currentColor;stroke:currentColor;stroke-linejoin:round}#bk{left:60px}#pp{left:192px}#fw{left:322px}.pp .ico{grid-area:1/1;transition:opacity .22s,scale .3s var(--ease-out)}.pp .play{opacity:0;scale:.6}.paused .pp .play{opacity:1;scale:1}.paused .pp .pause{opacity:0;scale:.6}
 .tbtn{position:relative;display:grid;place-items:center;width:40px;height:40px;border:0;background:none;color:var(--sub);cursor:pointer;border-radius:12px;transition:color .2s,scale .2s var(--ease-out)}.tbtn:active{scale:.88;color:#fff}.tbtn svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}#tb{position:absolute;left:412px;top:192px}
-.pmain{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:space-between;padding:2px 4px}.pmain .lab{display:block;font:600 13px/18px var(--font);color:var(--sub)}.pmain h2{font:600 32px/38px var(--font);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.prayer-count-wrap{display:flex;align-items:center;justify-content:center;min-height:82px;flex:none}
-.prayer-count-ring{--progress:0%;position:relative;width:82px;height:82px;flex:0 0 82px;padding:2.5px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(from -90deg,var(--accent) 0 var(--progress),rgba(235,235,245,.18) var(--progress) 100%);box-shadow:0 0 0 1px rgba(255,255,255,.045),0 6px 18px rgba(0,0,0,.22),0 0 18px rgba(90,169,255,.10)}
-.prayer-count-ring::before{content:"";position:absolute;inset:5px;border:1px solid rgba(255,255,255,.075);border-radius:50%;pointer-events:none}.prayer-count-core{position:relative;z-index:1;width:100%;height:100%;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:radial-gradient(circle at 50% 30%,#23262B 0%,#141619 66%,#0A0B0D 100%);box-shadow:inset 0 1px 4px rgba(255,255,255,.07),inset 0 -3px 8px rgba(0,0,0,.28)}
-.pcd{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;font-variant-numeric:tabular-nums}.pcd b{font:700 18px/22px var(--font);letter-spacing:.015em;color:#fff;white-space:nowrap}.pcd small{font:600 11px/15px var(--font);color:var(--sub)}
-.plist{flex:none;width:216px;padding:6px;background:var(--chip);border-radius:18px;display:flex;flex-direction:column}.pr{height:28px;display:flex;align-items:center;gap:6px;padding:0 10px;border-radius:12px;font:600 14px/1 var(--font);transition:background .25s,opacity .25s}.pr b{flex:none;font-weight:600}.pr em{flex:1;font:600 10px/1 var(--font);color:var(--sub)}.pr span{font-size:13px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}.pr.past{opacity:.5}.pr.nxt{background:var(--chip-on)}.pr.nxt span{color:#fff}
-.pmain{flex:1;min-width:0;display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:7px;padding:0}.next-info{flex:0 0 auto;min-width:0;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:6px;white-space:nowrap;direction:rtl;text-align:right}.pmain .lab{display:block;flex:none;max-width:100%;overflow:visible;text-overflow:clip;font:600 12px/16px var(--font);color:var(--sub);white-space:nowrap;text-align:right}.pmain h2{flex:none;margin:0;font:600 23px/30px var(--font);letter-spacing:-.01em;white-space:nowrap;overflow:visible;text-overflow:clip;text-align:right}.prayer-count-wrap{display:flex;align-items:center;justify-content:center;width:82px;min-width:82px;height:82px;min-height:82px;flex:0 0 82px}.pmain{flex:0 0 max-content;width:max-content}
 .th{position:relative;height:52px;display:flex;align-items:center;justify-content:center}.th b{position:absolute;left:0;right:auto;top:50%;transform:translateY(-50%);font-size:17px;font-weight:600;text-align:left;white-space:nowrap}.th .tbtn{position:absolute;right:-10px;top:6px;color:var(--ctl)}.sec{margin-top:14px}.th+.sec{margin-top:6px}.sec>label{display:block;font-size:13px;line-height:19px;font-weight:600;color:var(--sub);margin:0 4px 7px}.chips{display:flex;gap:6px}.chips button{flex:1;height:32px;border:0;border-radius:10px;background:var(--chip);color:var(--sub);font:600 13px var(--font);cursor:pointer;white-space:nowrap;transition:background .2s,color .2s}.chips button[aria-pressed=true]{background:var(--chip-on);color:#fff}.rows{display:flex;gap:8px}
 .sw{flex:1;display:flex;align-items:center;justify-content:space-between;gap:8px;height:38px;padding:0 12px;border:0;border-radius:12px;background:var(--chip);color:#fff;font:600 13px var(--font);cursor:pointer;text-align:start}.sw i{flex:none;position:relative;width:34px;height:20px;border-radius:10px;background:rgba(255,255,255,.25);transition:background .25s}.sw i::after{content:"";position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:right .25s var(--ease-out)}.sw[aria-checked=true] i{background:var(--green)}.sw[aria-checked=true] i::after{right:16px}
 .alert .tx{flex:1;min-width:0}.alert h3{font:600 19px/24px var(--font)}.alert p{font:400 14px/19px var(--font);color:var(--sub)}.pill{height:34px;padding:0 16px;border:0;border-radius:999px;background:var(--chip-on);color:#fff;font:600 14px var(--font);cursor:pointer;transition:scale .2s var(--ease-out)}.pill:active{scale:.94}.pill.main{background:#fff;color:#000}.pill.stop{border:1px solid rgba(90,169,255,.28);background:rgba(90,169,255,.14);color:#5AA9FF}.pill[hidden]{display:none}
@@ -49,11 +42,59 @@
 .rim{position:relative}.rim::after{content:"";position:absolute;inset:var(--rim-inset-top,0px) var(--rim-inset-right,0px) var(--rim-inset-bottom,0px) var(--rim-inset-left,0px);box-sizing:border-box;pointer-events:none;opacity:var(--rim-effective,var(--rim,1));background-image:var(--rim-image);background-size:100% 100%}
 
 @media(prefers-reduced-transparency:reduce){.rim{--rim-system:.5}}
+
+/* ===== زجاج سفلي (LiquidGlass2) — الأوضاع الموسعة فقط =====
+   القيم من ملف Windhawk: Blur 3–5 + TintSaturation 1.2 + صبغة #14090909،
+   بدون أي إطار أو لمعة على الحواف (حسب الطلب). */
+@property --gs{syntax:'<percentage>';inherits:true;initial-value:100%}
+@property --gf{syntax:'<percentage>';inherits:true;initial-value:0%}
+.island-surface{--gs:100%;--gf:0%;transition:--gs .6s var(--ease-out),--gf .6s var(--ease-out)}
+[data-state=full] .island-surface{--gs:28%;--gf:38%}
+[data-state=prayer] .island-surface{--gs:30%;--gf:42%}
+[data-state=tools] .island-surface{--gs:28%;--gf:40%}
+[data-state=alert] .island-surface{--gs:40%;--gf:36%}
+.glass,.glass>*{position:absolute;inset:0;border-radius:inherit;pointer-events:none}
+.g-blur{-webkit-backdrop-filter:none;backdrop-filter:none;transition:backdrop-filter .45s ease,-webkit-backdrop-filter .45s ease}
+:is([data-state=full],[data-state=prayer],[data-state=tools],[data-state=alert]) .g-blur{-webkit-backdrop-filter:blur(6px) saturate(1.25) brightness(.72);backdrop-filter:blur(6px) saturate(1.25) brightness(.72)}
+.g-tint{background:linear-gradient(180deg,rgba(9,9,9,.32),rgba(9,9,9,.22))}
+.g-black{background:#000;-webkit-mask-image:linear-gradient(to bottom,#000 var(--gs),rgba(0,0,0,0.957) calc(var(--gs) + var(--gf)*0.125),rgba(0,0,0,0.844) calc(var(--gs) + var(--gf)*0.25),rgba(0,0,0,0.684) calc(var(--gs) + var(--gf)*0.375),rgba(0,0,0,0.5) calc(var(--gs) + var(--gf)*0.5),rgba(0,0,0,0.316) calc(var(--gs) + var(--gf)*0.625),rgba(0,0,0,0.156) calc(var(--gs) + var(--gf)*0.75),rgba(0,0,0,0.043) calc(var(--gs) + var(--gf)*0.875),transparent calc(var(--gs) + var(--gf)*1));mask-image:linear-gradient(to bottom,#000 var(--gs),rgba(0,0,0,0.957) calc(var(--gs) + var(--gf)*0.125),rgba(0,0,0,0.844) calc(var(--gs) + var(--gf)*0.25),rgba(0,0,0,0.684) calc(var(--gs) + var(--gf)*0.375),rgba(0,0,0,0.5) calc(var(--gs) + var(--gf)*0.5),rgba(0,0,0,0.316) calc(var(--gs) + var(--gf)*0.625),rgba(0,0,0,0.156) calc(var(--gs) + var(--gf)*0.75),rgba(0,0,0,0.043) calc(var(--gs) + var(--gf)*0.875),transparent calc(var(--gs) + var(--gf)*1))}
+:is([data-state=full],[data-state=prayer],[data-state=tools],[data-state=alert]){--sub:rgba(235,235,245,.82);--track:rgba(235,235,245,.42);--chip:rgba(255,255,255,.15);--chip-on:rgba(255,255,255,.3)}
+:is([data-state=full],[data-state=prayer],[data-state=tools],[data-state=alert]) .layer{text-shadow:0 1px 6px rgba(0,0,0,.32)}
+
+/* ===== المواقيت — تصميم جديد: لون دافئ لكل صلاة + عدّاد أرقام + شريط تقدّم ===== */
+.prayer{width:444px;height:188px;margin-left:-222px;transform:scale(.9);padding:18px 22px;display:flex;gap:14px;--t1:#FFE08A;--t2:#FFB020}
+.prayer[data-tone=fajr]{--t1:#C9B8FF;--t2:#FF8FCB}.prayer[data-tone=sunrise]{--t1:#FFD8B0;--t2:#FF9F7A}
+.prayer[data-tone=dhuhr]{--t1:#FFE69A;--t2:#FFB020}.prayer[data-tone=asr]{--t1:#FFCB8A;--t2:#FF8A3D}
+.prayer[data-tone=maghrib]{--t1:#FFA494;--t2:#FF4D8D}.prayer[data-tone=isha]{--t1:#7CF5D8;--t2:#1FB6A0}
+.ph{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:9px}
+.ph-top{display:flex;align-items:center;gap:7px;font:600 12px/16px var(--font);color:var(--sub);white-space:nowrap}
+.ph-dot{flex:none;width:8px;height:8px;border-radius:50%;background:linear-gradient(135deg,var(--t1),var(--t2));box-shadow:0 0 9px var(--t2)}
+.ph-row{display:flex;align-items:baseline;gap:9px;min-width:0}
+.ph-name{margin:0;font:700 29px/34px var(--font);letter-spacing:-.01em;white-space:nowrap}
+.ph-count{display:flex;flex-direction:column;gap:10px}
+.ph-digits{display:flex;align-items:flex-start;gap:5px;direction:ltr}
+.ph-digits span{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:38px}
+.ph-digits b{font:700 33px/32px var(--font);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.ph-digits span:last-of-type b{color:var(--t1)}
+.ph-digits small{font:600 9.5px/1 var(--font);color:var(--sub)}
+.ph-digits i{font:600 24px/32px var(--font);font-style:normal;color:rgba(255,255,255,.38)}
+.ph-bar{height:5px;border-radius:99px;background:rgba(255,255,255,.16);overflow:hidden}
+.ph-bar i{display:block;height:100%;width:var(--progress,0%);border-radius:inherit;background:linear-gradient(90deg,var(--t2),var(--t1));box-shadow:0 0 12px var(--t2);transition:width 1s linear}
+.plist{flex:none;width:216px;padding:6px;border-radius:20px;display:flex;flex-direction:column;background:linear-gradient(180deg,rgba(255,255,255,.13),rgba(255,255,255,.06))}
+.pr{height:28px;display:flex;align-items:center;gap:6px;padding:0 11px;border-radius:14px;font:600 14px/1 var(--font);transition:background .3s,opacity .3s}
+.pr b{flex:none;font-weight:600}
+.pr em{flex:1;font:600 10px/1 var(--font);color:var(--sub)}
+.pr span{font-size:13px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pr.past{opacity:.5}
+.pr.nxt{background:rgba(255,255,255,.22);background:linear-gradient(90deg,color-mix(in srgb,var(--t2) 46%,transparent),color-mix(in srgb,var(--t1) 24%,transparent))}
+.pr.nxt em{color:var(--t1)}.pr.nxt span{color:#fff}
+@media(prefers-reduced-transparency:reduce){.island-surface{--gs:100%!important;--gf:0%!important}}
 </style>
 </head>
 <body>
 <div id="isl" class="island" data-state="idle" role="button" tabindex="0" aria-label="Dynamic Island — فتح مواقيت الصلاة" aria-expanded="false">
   <div class="island-surface">
+  <div class="glass" aria-hidden="true"><i class="g-blur"></i><i class="g-tint"></i><i class="g-black"></i></div>
   <div class="layer idle" data-s="idle" dir="rtl" aria-hidden="false"><button class="idle-prayer rim" id="idlePrayer" aria-label="فتح مواقيت الصلاة"><span id="idlePrayerName"></span></button></div>
   <div class="layer compact" data-s="compact" aria-hidden="true"><div class="art" id="compactArt"></div><div class="wave"><i></i><i></i><i></i><i></i><i></i></div></div>
   <div class="layer full" data-s="full" aria-hidden="true" inert>
@@ -66,7 +107,15 @@
     <button class="tbtn rim" id="tb" aria-label="الأدوات"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 12h3M13 12h7M4 17h11M21 17h-1"/><circle cx="16" cy="7" r="2.5"/><circle cx="10" cy="12" r="2.5"/><circle cx="18" cy="17" r="2.5"/></svg></button>
   </div>
   <div class="layer prayer" data-s="prayer" dir="rtl" aria-hidden="true" role="group" aria-label="مواقيت الصلاة">
-    <div class="pmain"><div class="next-info"><span class="lab" id="plab">المواقيت غير متاحة</span><h2 id="pnm">—</h2></div><div class="prayer-count-wrap"><div class="prayer-count-ring" id="prayerCountRing" role="timer" aria-live="off" aria-label="الوقت المتبقي غير متاح"><div class="prayer-count-core"><div class="pcd"><b id="pcd">—</b><small>متبقي</small></div></div></div></div></div>
+    <section class="ph" aria-label="الصلاة القادمة">
+      <div class="ph-top"><i class="ph-dot"></i><span id="plab">المواقيت غير متاحة</span></div>
+      <div class="ph-row"><h2 class="ph-name" id="pnm">—</h2></div>
+      <div class="ph-count" id="prayerCountRing" role="timer" aria-live="off" aria-label="الوقت المتبقي غير متاح">
+        <div class="ph-digits"><span><b id="pcH">--</b><small>ساعة</small></span><i>:</i><span><b id="pcM">--</b><small>دقيقة</small></span><i>:</i><span><b id="pcS">--</b><small>ثانية</small></span></div>
+        <div class="ph-bar"><i></i></div>
+      </div>
+      <span id="pcd" hidden></span>
+    </section>
     <div class="plist" id="plist" aria-label="جدول اليوم"></div>
   </div>
   <div class="layer tools" data-s="tools" dir="rtl" aria-hidden="true">
@@ -193,8 +242,12 @@ function localDateKey(epoch,timeZone){const parts=new Intl.DateTimeFormat('en-CA
 function formatPrayerTime(epoch,timeZone){return new Intl.DateTimeFormat('ar-EG',{timeZone,hour:'numeric',minute:'2-digit',hourCycle:'h12'}).format(new Date(epoch))}
 function findNext(schedule,now=Date.now()){return Array.isArray(schedule?.events)?schedule.events.find(event=>Number.isFinite(event.at)&&event.at>now)||null:null}
 function getToday(schedule,now=Date.now()){if(!schedule?.timezone||!Array.isArray(schedule.events))return[];const key=localDateKey(now,schedule.timezone);return schedule.events.filter(event=>event.date===key)}
-function renderPrayer(){const schedule=prayerState.schedule,now=Date.now(),next=findNext(schedule,now),list=$('#plist'),label=$('#plab'),name=$('#pnm'),time=$('#pcd'),ring=$('#prayerCountRing');if(!schedule||!next){label.textContent='المواقيت غير متاحة';label.title=prayerState.refreshError||'اختر موقعًا وطريقة حساب من إعدادات الصلاة';name.textContent='—';time.textContent='—';ring.style.setProperty('--progress','0%');ring.setAttribute('aria-label','لا توجد مواقيت مؤكدة');list.replaceChildren();refreshIdle();return}
-  const todayKey=localDateKey(now,schedule.timezone),manual=schedule.locationSource==='manual',stale=!!schedule.stale;label.textContent=`${manual?'القادمة · يدوي':'الصلاة القادمة'}${next.date!==todayKey?' · غدًا':''}${stale?' · محفوظ':''}`;label.title=`${schedule.locationLabel||''}${schedule.methodName?` · ${schedule.methodName}`:''}${stale?` · ${schedule.refreshError||'جدول محفوظ من المصدر'} `:''}`;name.textContent=next.name;time.textContent=countdown(next.at-now);ring.setAttribute('aria-label',`${countdown(next.at-now)} متبقي حتى صلاة ${next.name}`);
+const TONES=[[/فجر/,'fajr'],[/شروق/,'sunrise'],[/ظهر|جمعة/,'dhuhr'],[/عصر/,'asr'],[/مغرب/,'maghrib'],[/عشاء/,'isha']];
+const toneOf=n=>(TONES.find(([r])=>r.test(n))||[0,'dhuhr'])[1];
+function setCount(ms){const t=ms==null?null:Math.max(0,Math.floor(ms/1000)),p=n=>String(n).padStart(2,'0'),seg=t==null?['--','--','--']:[p(Math.floor(t/3600)),p(Math.floor(t%3600/60)),p(t%60)];
+  $('#pcd').textContent=t==null?'—':countdown(ms);['#pcH','#pcM','#pcS'].forEach((id,i)=>{const e=$(id);if(e.textContent!==seg[i])e.textContent=seg[i]})}
+function renderPrayer(){const schedule=prayerState.schedule,now=Date.now(),next=findNext(schedule,now),list=$('#plist'),label=$('#plab'),name=$('#pnm'),time=$('#pcd'),ring=$('#prayerCountRing');if(!schedule||!next){label.textContent='المواقيت غير متاحة';label.title=prayerState.refreshError||'اختر موقعًا وطريقة حساب من إعدادات الصلاة';name.textContent='—';setCount(null);ring.style.setProperty('--progress','0%');ring.setAttribute('aria-label','لا توجد مواقيت مؤكدة');list.replaceChildren();refreshIdle();return}
+  const todayKey=localDateKey(now,schedule.timezone),manual=schedule.locationSource==='manual',stale=!!schedule.stale;label.textContent=`${manual?'القادمة · يدوي':'الصلاة القادمة'}${next.date!==todayKey?' · غدًا':''}${stale?' · محفوظ':''}`;label.title=`${schedule.locationLabel||''}${schedule.methodName?` · ${schedule.methodName}`:''}${stale?` · ${schedule.refreshError||'جدول محفوظ من المصدر'} `:''}`;name.textContent=next.name;setCount(next.at-now);$('.layer.prayer').dataset.tone=toneOf(next.name);ring.setAttribute('aria-label',`${countdown(next.at-now)} متبقي حتى صلاة ${next.name}`);
   const index=schedule.events.findIndex(event=>event.id===next.id),previous=index>0?schedule.events[index-1]:null;const progress=previous&&next.at>previous.at?clamp((now-previous.at)/(next.at-previous.at),0,1)*100:0;ring.style.setProperty('--progress',`${progress.toFixed(2)}%`);
   const today=getToday(schedule,now),signature=today.map(event=>event.id).join('|'),old=list.dataset.signature||'';if(signature!==old){list.dataset.signature=signature;list.replaceChildren(...today.map(event=>{const row=document.createElement('div');row.className='pr';row.dataset.id=event.id;const prayer=document.createElement('b'),stateText=document.createElement('em'),timeText=document.createElement('span');prayer.textContent=event.name;row.append(prayer,stateText,timeText);return row}))}
   const previousToday=[...today].reverse().find(event=>event.at<=now);[...list.children].forEach(row=>{const event=today.find(item=>item.id===row.dataset.id);if(!event)return;const isNext=event.id===next.id,isCurrent=event.id===previousToday?.id;row.children[1].textContent=isNext?'القادمة':isCurrent?'الحالية':'';row.children[2].textContent=formatPrayerTime(event.at,schedule.timezone);row.classList.toggle('nxt',isNext);row.classList.toggle('past',event.at<=now&&!isNext&&!isCurrent)});refreshIdle()}

@@ -825,6 +825,30 @@ pub fn run() {
           });
         });
       }
+      /* اختبار Windows فقط: يعرض تنبيهًا مستعادًا مع حالة تشغيل اصطناعية كي
+         يختبر smoke مساري الإيقاف والاستئناف دون تشغيل ملف صوتي حقيقي. */
+      if std::env::var("TARTEEL_WINDOWS_ALERT_SMOKE_TEST").ok().as_deref() == Some("1") {
+        let alert_smoke_handle = app.handle().clone();
+        let _ = app.once_any("island-ready", move |_| {
+          let alert_smoke_handle = alert_smoke_handle.clone();
+          thread::spawn(move || {
+            thread::sleep(Duration::from_secs(2));
+            let id = "windows-smoke-alert";
+            if let Err(cause) = alert_smoke_handle.emit("adhan-playback-state", serde_json::json!({
+              "playing": true, "id": id
+            })) {
+              eprintln!("Tarteel Windows smoke alert state emit failed: {cause}");
+              return;
+            }
+            if let Err(cause) = alert_smoke_handle.emit("prayer-alarm-restore", serde_json::json!({
+              "id": id, "key": "fajr", "name": "الفجر", "wasPlaying": true,
+              "pausedByAdhan": true, "resumeDisabled": false
+            })) {
+              eprintln!("Tarteel Windows smoke alert restore emit failed: {cause}");
+            }
+          });
+        });
+      }
       /* الحجم يُحدد هنا لا في الملف: النافذة كانت تُبنى بلا `inner_size`
          فتحصل على الحجم الافتراضي (~800×600)، فيصبح مركزها (400, 300) بدل
          (0, 0). وكل تغيير حجم لاحق يُبقى المركز ثابتًا، فتظهر الجزيرة في

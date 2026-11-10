@@ -11,6 +11,7 @@ $logPath = Join-Path $env:APPDATA 'com.tarteel.desktop/island-geometry.jsonl'
 $placementPath = Join-Path $env:APPDATA 'com.tarteel.desktop/island-position.json'
 $process = $null
 $previousSmokeFlag = $env:TARTEEL_WINDOWS_SMOKE_TEST
+$previousAlertSmokeFlag = $env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST
 
 function Set-Status([string]$Value) {
   Set-Content -Path $statusPath -Value $Value -Encoding UTF8
@@ -57,6 +58,61 @@ function Click-RectCenter($Record) {
   Start-Sleep -Milliseconds 70
   [TarteelUiSmokeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
   Write-Host "Sent physical mouse click at measured capsule center ($x,$y) for $($Record.state)."
+}
+
+function Find-IslandElement($Record, [string]$Name) {
+  $hwnd = [IntPtr]([long]$Record.window_handle)
+  $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+  $condition = [System.Windows.Automation.PropertyCondition]::new(
+    [System.Windows.Automation.AutomationElement]::NameProperty,
+    $Name
+  )
+  return $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+}
+
+function Wait-IslandElement($Record, [string]$Name, [int]$TimeoutSeconds = 8, [switch]$Absent) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  do {
+    $element = Find-IslandElement $Record $Name
+    $visible = $null -ne $element -and -not $element.Current.IsOffscreen
+    if ($Absent -and -not $visible) { return $true }
+    if (-not $Absent -and $visible) { return $element }
+    Start-Sleep -Milliseconds 200
+  } while ((Get-Date) -lt $deadline)
+  if ($Absent) { throw "Accessible island element '$Name' remained visible." }
+  throw "Accessible island element '$Name' was not found in time."
+}
+
+function Click-IslandElement($Record, [string]$Name) {
+  $element = Wait-IslandElement $Record $Name
+  try {
+    $pattern = $element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    $pattern.Invoke()
+  } catch {
+    $pattern = $element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+    $pattern.Toggle()
+  }
+  Start-Sleep -Milliseconds 250
+  Write-Host "Invoked accessible island control '$Name'."
+}
+
+function Assert-IslandToggleState($Record, [string]$Name, [bool]$ExpectedOn, [int]$TimeoutSeconds = 8) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  do {
+    $element = Find-IslandElement $Record $Name
+    if ($null -ne $element -and -not $element.Current.IsOffscreen) {
+      try {
+        $pattern = $element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+        $isOn = $pattern.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On
+        if ($isOn -eq $ExpectedOn) {
+          Write-Host "Verified '$Name' accessible toggle is $isOn."
+          return
+        }
+      } catch { }
+    }
+    Start-Sleep -Milliseconds 200
+  } while ((Get-Date) -lt $deadline)
+  throw "Accessible island toggle '$Name' did not reach expected state $ExpectedOn."
 }
 
 function Capture-Top([string]$Name) {
@@ -316,6 +372,8 @@ public static class TarteelUiSmokeNative {
   [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(TarteelScreenPoint point);
 }
 '@
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
 
 try {
   if (-not (Test-Path $ExePath)) { throw "Tarteel executable not found: $ExePath" }
@@ -362,8 +420,36 @@ try {
   $null = Capture-Top 'full-expanded'
   Copy-Item -Force $logPath (Join-Path $outDir 'geometry-full.jsonl')
 
-  Click-RectCenter $full
-  $musicCollapsed = Wait-ForRow 'compact' 15 ([long]$full.timestamp_unix_ms)
+  Click-IslandElement $full 'الأدوات'
+  $tools = Wait-ForRow 'tools' 15 ([long]$full.timestamp_unix_ms) -Expanded
+  Assert-SamePlacementAnchor $idle $tools
+  Assert-ExpandedBoundsContained $tools
+  $null = Capture-Top 'tools-expanded'
+  Click-IslandElement $tools '1.25×'
+  Assert-IslandToggleState $tools '1.25×' $true
+  Click-IslandElement $tools '1×'
+  Assert-IslandToggleState $tools '1×' $true
+  Click-IslandElement $tools '15 د'
+  Assert-IslandToggleState $tools '15 د' $true
+  Click-IslandElement $tools 'إيقاف'
+  Assert-IslandToggleState $tools 'إيقاف' $true
+  Click-IslandElement $tools 'عرض الصلاة القادمة'
+  Assert-IslandToggleState $tools 'عرض الصلاة القادمة' $true
+  Click-IslandElement $tools 'عرض الصلاة القادمة'
+  Assert-IslandToggleState $tools 'عرض الصلاة القادمة' $false
+  Click-IslandElement $tools 'إيقاف التلاوة عند الأذان'
+  Assert-IslandToggleState $tools 'إيقاف التلاوة عند الأذان' $false
+  Click-IslandElement $tools 'إيقاف التلاوة عند الأذان'
+  Assert-IslandToggleState $tools 'إيقاف التلاوة عند الأذان' $true
+  Copy-Item -Force $logPath (Join-Path $outDir 'geometry-tools.jsonl')
+  Click-IslandElement $tools 'رجوع'
+  $fullAfterTools = Wait-ForRow 'full' 15 ([long]$tools.timestamp_unix_ms) -Expanded
+  Assert-SamePlacementAnchor $idle $fullAfterTools
+  Assert-FullStateBounds $fullAfterTools
+  $null = Capture-Top 'full-after-tools'
+
+  Click-RectCenter $fullAfterTools
+  $musicCollapsed = Wait-ForRow 'compact' 15 ([long]$fullAfterTools.timestamp_unix_ms)
   Assert-MusicCompactBounds $musicCollapsed
   Assert-ClickThroughOutsideCapsule $musicCollapsed
   Assert-ClickThroughRoundedCorner $musicCollapsed
@@ -402,11 +488,14 @@ try {
   Remove-Item -Force $logPath -ErrorAction SilentlyContinue
   $previousSmokeFlag = $env:TARTEEL_WINDOWS_SMOKE_TEST
   $env:TARTEEL_WINDOWS_SMOKE_TEST = '1'
+  $env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST = '1'
   try {
     $process = Start-Process -FilePath (Resolve-Path $ExePath) -WorkingDirectory (Split-Path (Resolve-Path $ExePath)) -PassThru
   } finally {
     if ($null -eq $previousSmokeFlag) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_TEST -ErrorAction SilentlyContinue }
     else { $env:TARTEEL_WINDOWS_SMOKE_TEST = $previousSmokeFlag }
+    if ($null -eq $previousAlertSmokeFlag) { Remove-Item Env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST -ErrorAction SilentlyContinue }
+    else { $env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST = $previousAlertSmokeFlag }
   }
   $restored = Wait-ForRow 'idle' 35
   Assert-Anchor $restored
@@ -414,6 +503,16 @@ try {
   $restoreDy = [double]$restored.capsule_anchor_center_screen.y - [double]$savedAnchor.y
   if ([Math]::Abs($restoreDx) -gt 0.5 -or [Math]::Abs($restoreDy) -gt 0.5) { throw "The manual anchor did not survive a process restart: dx=$restoreDx, dy=$restoreDy." }
   Write-Host "Verified saved manual placement after relaunch: anchor delta=($restoreDx,$restoreDy)."
+  $alert = Wait-ForRow 'alert' 25 ([long]$restored.timestamp_unix_ms) -Expanded
+  Assert-ExpandedBoundsContained $alert
+  $null = Capture-Top 'alert-restored'
+  $null = Wait-IslandElement $alert 'إيقاف الأذان'
+  $null = Wait-IslandElement $alert 'استئناف'
+  Click-IslandElement $alert 'إيقاف الأذان'
+  $null = Wait-IslandElement $alert 'إيقاف الأذان' 8 -Absent
+  $null = Wait-IslandElement $alert 'تم إيقاف صوت الأذان.'
+  Click-IslandElement $alert 'استئناف'
+  $null = Wait-IslandElement $alert 'لا يوجد تشغيل سابق محفوظ لهذه الصلاة؛ لن يبدأ الصوت تلقائيًا.'
 
   $summary = @(
     'PASS: launched the built Tarteel Windows executable.',
@@ -421,7 +520,9 @@ try {
     'PASS: visible idle capsule remains 44x24 CSS px with a transparent render gutter on every side.',
     'PASS: music compact rounded rectangle remains 112x24 CSS px with radius 11; all four screenshot corners and antialiased edge pixels pass, and outside hit-testing reaches the window behind.',
     "PASS: physical click expanded the full player to 384x210 CSS px with a measured lower gutter; top-anchor range=$fullMotionSpan CSS px across $($full.motion_sample_count) frames.",
+    'PASS: tools expanded at the same anchor; UI Automation changed and restored speed, sleep timer, and both prayer preferences through the main-window event bridge.',
     "PASS: physical click expanded prayer state without clipping its bottom edge; lower gutter verified; top-anchor range=$motionSpan CSS px across $($prayer.motion_sample_count) frames.",
+    'PASS: synthetic restored adhan alert expanded within bounds; the stop action reached Rust and hid the stop control, and resume-without-an-active-track returned the expected failure message. No audio was played; actual recitation resume is not covered.',
     'PASS: physical mouse click returned to idle, the island retained the same manual anchor, and native hit-testing passed through outside its rounded corner and edge.',
     'PASS: a negative Manual Y offset crossed the former top limit across idle, music, prayer, and full states, then restored after process relaunch.',
     "Display: $($collapsed.monitor_rc_monitor.right - $collapsed.monitor_rc_monitor.left)x$($collapsed.monitor_rc_monitor.bottom - $collapsed.monitor_rc_monitor.top); scale_factor=$($collapsed.scale_factor); native_dpi=$($collapsed.native_dpi)."
@@ -436,5 +537,7 @@ try {
   if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
   if ($null -eq $previousSmokeFlag) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_TEST -ErrorAction SilentlyContinue }
   else { $env:TARTEEL_WINDOWS_SMOKE_TEST = $previousSmokeFlag }
+  if ($null -eq $previousAlertSmokeFlag) { Remove-Item Env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST -ErrorAction SilentlyContinue }
+  else { $env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST = $previousAlertSmokeFlag }
   if (Test-Path $logPath) { Copy-Item -Force $logPath (Join-Path $outDir 'geometry-final.jsonl') }
 }

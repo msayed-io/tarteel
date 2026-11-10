@@ -33,7 +33,7 @@ describe('Tarteel production surface', () => {
     expect(html).toContain('[data-state=prayer] .prayer,[data-state=tools] .tools,[data-state=alert] .alert{transform:scale(.9)}');
     expect(html).toContain('.prayer{width:444px;height:188px');
     expect(html).toContain('.plist{flex:none;width:216px');
-    expect(html).toContain('width:82px;height:82px;flex:0 0 82px');
+    expect(html).toContain('.full .art{left:18px;top:27px;width:90px;height:90px}');
     expect(html).toContain('.tools{width:480px;height:auto');
     expect(html).toContain('.alert{width:440px;height:92px');
   });
