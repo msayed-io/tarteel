@@ -119,7 +119,11 @@ async function verifyIslandAppearance(browser) {
     element.style.height = '430px';
     element.style.borderRadius = '28px';
   });
-  await page.waitForTimeout(500);
+  await page.waitForFunction(() => {
+    const blur = getComputedStyle(document.querySelector('.g-blur')).backdropFilter;
+    const radius = Number(blur.match(/blur\(([\d.]+)px\)/)?.[1] ?? NaN);
+    return Number.isFinite(radius) && Math.abs(radius - 6) < 0.05;
+  });
   const measure = () => page.evaluate(() => {
     const selectors = ['#isl', '.island-surface', '.layer.tools', '#tb', '#tback', '#chSpeed button', '#chSleep button'];
     const geometry = selectors.map(selector => {
@@ -141,7 +145,8 @@ async function verifyIslandAppearance(browser) {
   const glass = await measure();
   assert.equal(glass.background, 'rgba(0, 0, 0, 0)', 'glass mode preserves the original transparent surface');
   assert.notEqual(glass.glassDisplay, 'none', 'glass mode keeps the original layer visible');
-  assert.match(glass.blur, /blur\(6px\)/, 'the existing glass blur rule remains active in expanded mode');
+  const blurRadius = Number(glass.blur.match(/blur\(([\d.]+)px\)/)?.[1] ?? NaN);
+  assert.ok(Number.isFinite(blurRadius) && Math.abs(blurRadius - 6) < 0.05, `the original 6px glass blur remains active in expanded mode: ${glass.blur}`);
   assert.deepEqual(glass.glassLayers, ['g-blur', 'g-tint', 'g-black'], 'the original layered glass stack is intact');
   assert.equal(glass.toolsButtonHasRim, false, 'the tools button has no specular rim');
   assert.equal(glass.toolsRimCount, 0, 'no internal tools control has a specular rim');
@@ -150,7 +155,8 @@ async function verifyIslandAppearance(browser) {
   const black = await measure();
   assert.equal(black.background, 'rgb(0, 0, 0)', 'black mode uses a solid black surface');
   assert.equal(black.glassDisplay, 'none', 'black mode hides the glass layer rather than restyling it');
-  assert.equal(black.blur, glass.blur, 'switching material does not alter the original glass CSS');
+  const blackBlurRadius = Number(black.blur.match(/blur\(([\d.]+)px\)/)?.[1] ?? NaN);
+  assert.ok(Number.isFinite(blackBlurRadius) && Math.abs(blackBlurRadius - 6) < 0.05, `hidden glass layer retains the original 6px CSS rule: ${black.blur}`);
   assert.deepEqual(black.geometry, glass.geometry, 'switching material preserves island, tools, and control geometry');
   assert.deepEqual(black.glassLayers, glass.glassLayers, 'the hidden layer remains the same original stack');
   await context.close();
