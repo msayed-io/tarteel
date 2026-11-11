@@ -63,18 +63,23 @@ describe('selective Dynamic Island update', () => {
   it('isolates the Windows WebView2 audio smoke test on a free diagnostic port', async () => {
     const smoke = await read('scripts/windows-island-smoke.ps1');
     const meter = await read('test/windows-audio-meter.mjs');
+    const rust = await read('src-tauri/src/lib.rs');
     expect(smoke).toContain('[System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)');
-    expect(smoke).toContain('$env:WEBVIEW2_USER_DATA_FOLDER = $webViewProfile');
+    expect(smoke).toContain("$env:TARTEEL_WINDOWS_SMOKE_CDP = '1'");
+    expect(smoke).toContain('$env:TARTEEL_WINDOWS_SMOKE_DEBUG_PORT = "$webViewDebugPort"');
+    expect(smoke).toContain('$env:TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR = $webViewProfile');
     expect(smoke).toContain('Wait-WebViewDebugPort 30');
     expect(smoke).toContain('Process diagnostics: $details');
-    expect(smoke).toContain('HKCU:\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments');
-    expect(smoke).toContain('Restore-WebViewDebugPolicy');
-    const startup = smoke.slice(smoke.indexOf('$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $webViewDebugArguments'), smoke.indexOf('$savedAnchor = $collapsed.capsule_anchor_center_screen'));
+    expect(rust).toContain('TARTEEL_WINDOWS_SMOKE_CDP');
+    expect(rust).toContain('.additional_browser_args(&browser_args)');
+    expect(rust).toContain('.data_directory(PathBuf::from(data_directory))');
+    expect(rust).toContain('--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection');
+    const startup = smoke.slice(smoke.indexOf("$env:TARTEEL_WINDOWS_SMOKE_CDP = '1'"), smoke.indexOf('$savedAnchor = $collapsed.capsule_anchor_center_screen'));
     expect(startup.indexOf('Wait-WebViewDebugPort 30')).toBeGreaterThanOrEqual(0);
-    expect(startup.indexOf('Restore-WebViewDebugPolicy')).toBe(-1);
+    expect(startup).not.toContain('Remove-Item Env:TARTEEL_WINDOWS_SMOKE_CDP');
     const restart = smoke.slice(smoke.indexOf('$savedAnchor = $collapsed.capsule_anchor_center_screen'), smoke.indexOf("$previousSmokeFlag = $env:TARTEEL_WINDOWS_SMOKE_TEST", smoke.indexOf('$savedAnchor = $collapsed.capsule_anchor_center_screen')));
-    expect(restart.indexOf('Restore-WebViewDebugPolicy')).toBeGreaterThanOrEqual(0);
-    expect(restart.indexOf('Restore-WebViewDebugPolicy')).toBeLessThan(restart.indexOf('Stop-Process'));
+    expect(restart.indexOf('Remove-Item Env:TARTEEL_WINDOWS_SMOKE_CDP')).toBeGreaterThanOrEqual(0);
+    expect(restart.indexOf('Remove-Item Env:TARTEEL_WINDOWS_SMOKE_CDP')).toBeLessThan(restart.indexOf('Stop-Process'));
     expect(meter).toContain('cause?.cause');
   });
 

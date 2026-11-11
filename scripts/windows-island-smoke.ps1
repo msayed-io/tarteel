@@ -24,14 +24,9 @@ $placementPath = Join-Path $env:APPDATA 'com.tarteel.desktop/island-position.jso
 $process = $null
 $previousSmokeFlag = $env:TARTEEL_WINDOWS_SMOKE_TEST
 $previousAlertSmokeFlag = $env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST
-$previousWebViewArgs = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
-$previousWebViewProfile = $env:WEBVIEW2_USER_DATA_FOLDER
-$webViewPolicyPath = 'HKCU:\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
-$webViewPolicyPaths = @('HKCU:\Software\Policies', 'HKCU:\Software\Policies\Microsoft', 'HKCU:\Software\Policies\Microsoft\Edge', 'HKCU:\Software\Policies\Microsoft\Edge\WebView2', $webViewPolicyPath)
-$previousWebViewPolicyKeys = @{}
-$webViewPolicyExe = $null
-$previousWebViewPolicyValueExists = $false
-$previousWebViewPolicyValue = $null
+$previousSmokeCdpFlag = $env:TARTEEL_WINDOWS_SMOKE_CDP
+$previousSmokeCdpPort = $env:TARTEEL_WINDOWS_SMOKE_DEBUG_PORT
+$previousSmokeCdpDataDirectory = $env:TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR
 
 function Set-Status([string]$Value) {
   Set-Content -Path $statusPath -Value $Value -Encoding UTF8
@@ -298,24 +293,6 @@ function Wait-WebViewDebugPort([int]$TimeoutSeconds = 30) {
   $appProcesses = @(Get-CimInstance -ClassName Win32_Process -Filter "Name='tarteel.exe'" -ErrorAction SilentlyContinue | Select-Object ProcessId, CommandLine)
   $details = @{ port = $webViewDebugPort; profile = $webViewProfile; browserArguments = $webViewDebugArguments; webViewProcesses = $webViewProcesses; appProcesses = $appProcesses } | ConvertTo-Json -Compress -Depth 5
   throw "WebView2 DevTools did not open at $endpoint within $TimeoutSeconds seconds. Process diagnostics: $details"
-}
-
-function Restore-WebViewDebugPolicy() {
-  if ([string]::IsNullOrWhiteSpace($webViewPolicyExe)) { return }
-  if ($previousWebViewPolicyValueExists) {
-    New-ItemProperty -Path $webViewPolicyPath -Name $webViewPolicyExe -PropertyType String -Value $previousWebViewPolicyValue -Force | Out-Null
-  } else {
-    Remove-ItemProperty -Path $webViewPolicyPath -Name $webViewPolicyExe -ErrorAction SilentlyContinue
-  }
-  for ($i = $webViewPolicyPaths.Count - 1; $i -ge 0; $i--) {
-    $path = $webViewPolicyPaths[$i]
-    if ($previousWebViewPolicyKeys.ContainsKey($path) -and -not $previousWebViewPolicyKeys[$path]) {
-      $key = Get-Item -Path $path -ErrorAction SilentlyContinue
-      if ($null -ne $key -and @($key.GetValueNames()).Count -eq 0 -and @($key.GetSubKeyNames()).Count -eq 0) {
-        Remove-Item -Path $path -Force -ErrorAction SilentlyContinue
-      }
-    }
-  }
 }
 
 function Write-DigitalSilenceWav([string]$Path) {
@@ -656,23 +633,10 @@ try {
   $placementJson = @{ mode = 'manual'; offsetX = 28; offsetY = -2 } | ConvertTo-Json -Compress
   [System.IO.File]::WriteAllText($placementPath, $placementJson, [System.Text.UTF8Encoding]::new($false))
   if (Test-Path $logPath) { Remove-Item -Force $logPath }
-  $webViewPolicyExe = [System.IO.Path]::GetFileName((Resolve-Path $ExePath).Path)
-  foreach ($path in $webViewPolicyPaths) {
-    $previousWebViewPolicyKeys[$path] = Test-Path -Path $path
-  }
-  foreach ($path in $webViewPolicyPaths) {
-    if (-not $previousWebViewPolicyKeys[$path]) { New-Item -Path $path -Force | Out-Null }
-  }
-  $existingPolicyKey = Get-Item -Path $webViewPolicyPath
-  if ($existingPolicyKey.GetValueNames() -contains $webViewPolicyExe) {
-    $previousWebViewPolicyValue = $existingPolicyKey.GetValue($webViewPolicyExe)
-    $previousWebViewPolicyValueExists = $true
-  }
-  New-ItemProperty -Path $webViewPolicyPath -Name $webViewPolicyExe -PropertyType String -Value $webViewDebugArguments -Force | Out-Null
-  Write-Host "Temporarily enabled the WebView2 debugging policy for $webViewPolicyExe on port $webViewDebugPort."
   $env:TARTEEL_WINDOWS_SMOKE_TEST = '1'
-  $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $webViewDebugArguments
-  $env:WEBVIEW2_USER_DATA_FOLDER = $webViewProfile
+  $env:TARTEEL_WINDOWS_SMOKE_CDP = '1'
+  $env:TARTEEL_WINDOWS_SMOKE_DEBUG_PORT = "$webViewDebugPort"
+  $env:TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR = $webViewProfile
   $process = Start-Process -FilePath (Resolve-Path $ExePath) -WorkingDirectory (Split-Path (Resolve-Path $ExePath)) -PassThru
   Wait-WebViewDebugPort 30
   $idle = Wait-ForRow 'idle' 35
@@ -821,11 +785,12 @@ try {
   Copy-Item -Force $logPath (Join-Path $outDir 'geometry-final.jsonl')
 
   $savedAnchor = $collapsed.capsule_anchor_center_screen
-  Restore-WebViewDebugPolicy
-  if ($null -eq $previousWebViewArgs) { Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue }
-  else { $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousWebViewArgs }
-  if ($null -eq $previousWebViewProfile) { Remove-Item Env:WEBVIEW2_USER_DATA_FOLDER -ErrorAction SilentlyContinue }
-  else { $env:WEBVIEW2_USER_DATA_FOLDER = $previousWebViewProfile }
+  if ($null -eq $previousSmokeCdpPort) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_DEBUG_PORT -ErrorAction SilentlyContinue }
+  else { $env:TARTEEL_WINDOWS_SMOKE_DEBUG_PORT = $previousSmokeCdpPort }
+  if ($null -eq $previousSmokeCdpDataDirectory) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR -ErrorAction SilentlyContinue }
+  else { $env:TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR = $previousSmokeCdpDataDirectory }
+  if ($null -eq $previousSmokeCdpFlag) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_CDP -ErrorAction SilentlyContinue }
+  else { $env:TARTEEL_WINDOWS_SMOKE_CDP = $previousSmokeCdpFlag }
   if ($null -eq $previousSmokeFlag) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_TEST -ErrorAction SilentlyContinue }
   else { $env:TARTEEL_WINDOWS_SMOKE_TEST = $previousSmokeFlag }
   if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force }
@@ -892,15 +857,16 @@ try {
   exit 1
 } finally {
   if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
-  Restore-WebViewDebugPolicy
   if ($null -eq $previousSmokeFlag) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_TEST -ErrorAction SilentlyContinue }
   else { $env:TARTEEL_WINDOWS_SMOKE_TEST = $previousSmokeFlag }
   if ($null -eq $previousAlertSmokeFlag) { Remove-Item Env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST -ErrorAction SilentlyContinue }
   else { $env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST = $previousAlertSmokeFlag }
-  if ($null -eq $previousWebViewArgs) { Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue }
-  else { $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousWebViewArgs }
-  if ($null -eq $previousWebViewProfile) { Remove-Item Env:WEBVIEW2_USER_DATA_FOLDER -ErrorAction SilentlyContinue }
-  else { $env:WEBVIEW2_USER_DATA_FOLDER = $previousWebViewProfile }
+  if ($null -eq $previousSmokeCdpFlag) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_CDP -ErrorAction SilentlyContinue }
+  else { $env:TARTEEL_WINDOWS_SMOKE_CDP = $previousSmokeCdpFlag }
+  if ($null -eq $previousSmokeCdpPort) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_DEBUG_PORT -ErrorAction SilentlyContinue }
+  else { $env:TARTEEL_WINDOWS_SMOKE_DEBUG_PORT = $previousSmokeCdpPort }
+  if ($null -eq $previousSmokeCdpDataDirectory) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR -ErrorAction SilentlyContinue }
+  else { $env:TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR = $previousSmokeCdpDataDirectory }
   if (Test-Path $audioTestRoot) { Remove-Item -Recurse -Force $audioTestRoot -ErrorAction SilentlyContinue }
   if (Test-Path $logPath) { Copy-Item -Force $logPath (Join-Path $outDir 'geometry-final.jsonl') }
 }

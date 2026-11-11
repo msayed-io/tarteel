@@ -1034,7 +1034,22 @@ pub fn run() {
          وسط الشاشة بدل أعلاها — وهو ما رآه المستخدم بالضبط.
          الآن تُولد بالحجم النهائي الصحيح منذ اللحظة الأولى. */
       let boot_size = island_boot_size_logical();
-      let island = WebviewWindowBuilder::new(app, "island", WebviewUrl::App("island.html".into()))
+      let island_builder = WebviewWindowBuilder::new(app, "island", WebviewUrl::App("island.html".into()));
+      // Windows smoke only: enable CDP for the island WebView with its own data directory.
+      #[cfg(windows)]
+      let island_builder = if std::env::var("TARTEEL_WINDOWS_SMOKE_CDP").ok().as_deref() == Some("1") {
+        let port = std::env::var("TARTEEL_WINDOWS_SMOKE_DEBUG_PORT")
+          .expect("Windows smoke CDP requires TARTEEL_WINDOWS_SMOKE_DEBUG_PORT");
+        let data_directory = std::env::var("TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR")
+          .expect("Windows smoke CDP requires TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR");
+        let browser_args = format!("--remote-debugging-port={port} --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
+        island_builder
+          .additional_browser_args(&browser_args)
+          .data_directory(PathBuf::from(data_directory))
+      } else {
+        island_builder
+      };
+      let island = island_builder
         .title("تَرتيل")
         .inner_size(boot_size.0, boot_size.1)
         .decorations(false)
