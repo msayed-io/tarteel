@@ -218,7 +218,11 @@ function Get-FolderDialog {
     )
   )
   foreach ($window in $windows) {
-    if ($window.Current.Name -match 'اختر مجلد التلاوات|Select|Open|Choose|Browse|Folder|Directory|مجلد|التلاوات|اختيار|تحديد') { return $window }
+    if ($window.Current.Name -match 'اختر مجلد التلاوات|Select|Open|Choose|Browse|Folder|Directory|مجلد|التلاوات|اختيار|تحديد') {
+      $info = $window.Current
+      Write-Host "Folder-dialog candidate: name='$($info.Name)'; class='$($info.ClassName)'; hwnd=$($info.NativeWindowHandle); pid=$($info.ProcessId); offscreen=$($info.IsOffscreen)."
+      return $window
+    }
   }
   return $null
 }
@@ -266,7 +270,12 @@ function Select-MainAudioFolder([string]$FolderPath) {
     foreach ($window in $windows) { $windowNames += "$($window.Current.Name) [$($window.Current.ClassName); PID $($window.Current.ProcessId)]" }
     throw "The native folder picker did not open for '$FolderPath'. All UIA windows: $($windowNames -join '; ')"
   }
-  $dialog.SetFocus()
+  $dialogHwnd = [IntPtr]$dialog.Current.NativeWindowHandle
+  if ($dialogHwnd -eq [IntPtr]::Zero) { throw "The detected folder-dialog candidate '$($dialog.Current.Name)' has no native HWND." }
+  $dialogRootHwnd = [TarteelUiSmokeNative]::GetAncestor($dialogHwnd, 2)
+  if ($dialogRootHwnd -eq [IntPtr]::Zero) { $dialogRootHwnd = $dialogHwnd }
+  [TarteelUiSmokeNative]::SetForegroundWindow($dialogRootHwnd) | Out-Null
+  Write-Host "Activated folder-dialog HWND $dialogRootHwnd for keyboard navigation."
   Start-Sleep -Milliseconds 150
   [System.Windows.Forms.SendKeys]::SendWait('^l')
   Start-Sleep -Milliseconds 100

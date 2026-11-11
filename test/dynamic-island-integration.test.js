@@ -74,6 +74,7 @@ describe('selective Dynamic Island update', () => {
     expect(smoke).toContain('All UIA windows:');
     const folderDialogSearch = smoke.slice(smoke.indexOf('function Get-FolderDialog'), smoke.indexOf('function Select-MainAudioFolder'));
     expect(folderDialogSearch).toContain('[System.Windows.Automation.TreeScope]::Descendants');
+    expect(folderDialogSearch).toContain('Folder-dialog candidate:');
     expect(smoke).toContain('$script:mainWindow = $ancestor');
     const mainButtonSearch = smoke.slice(smoke.indexOf('function Find-MainButton'), smoke.indexOf('function Wait-MainTrack'));
     expect(mainButtonSearch).toContain('$mainWindow = $script:mainWindow');
@@ -87,6 +88,9 @@ describe('selective Dynamic Island update', () => {
     expect(folderPicker).toContain('WindowFromPoint($point)');
     expect(folderPicker).toContain('GetAncestor($hitHwnd, 2)');
     expect(folderPicker).toContain('SetForegroundWindow($mainHwnd)');
+    expect(folderPicker).toContain('GetAncestor($dialogHwnd, 2)');
+    expect(folderPicker).toContain('SetForegroundWindow($dialogRootHwnd)');
+    expect(folderPicker).not.toContain('$dialog.SetFocus()');
     expect(rust).toContain('TARTEEL_WINDOWS_SMOKE_CDP');
     expect(rust).toContain('.additional_browser_args(&browser_args)');
     expect(rust).toContain('.data_directory(PathBuf::from(data_directory))');
