@@ -288,6 +288,7 @@ function Select-MainAudioFolder([string]$FolderPath) {
   [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
 
   $navigationDeadline = (Get-Date).AddSeconds(10)
+  $expectedPathPattern = [regex]::Escape($FolderPath) + '\s*$'
   $pathVisible = $false
   $select = $null
   $actionNames = @()
@@ -303,7 +304,7 @@ function Select-MainAudioFolder([string]$FolderPath) {
     $actionNames = @()
     foreach ($candidate in $controls) {
       $info = $candidate.Current
-      if (-not [string]::IsNullOrWhiteSpace($info.Name) -and $info.Name -ieq $FolderPath) { $pathVisible = $true }
+      if (-not [string]::IsNullOrWhiteSpace($info.Name) -and $info.Name -match $expectedPathPattern) { $pathVisible = $true }
       if ($info.Name -match '^(Select|Choose|Open|اختر|اختيار|تحديد|موافق)(\s|$)') {
         $actionNames += "$($info.ControlType.ProgrammaticName): '$($info.Name)' [AutomationId=$($info.AutomationId); enabled=$($info.IsEnabled); offscreen=$($info.IsOffscreen)]"
         if ($null -eq $select -and -not $info.IsOffscreen -and $info.IsEnabled) { $select = $candidate }

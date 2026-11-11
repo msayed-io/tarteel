@@ -98,7 +98,8 @@ describe('selective Dynamic Island update', () => {
     expect(folderPicker).not.toContain('[System.Windows.Automation.ValuePattern]::Pattern');
     expect(folderPicker).toContain('$navigationDeadline = (Get-Date).AddSeconds(10)');
     expect(folderPicker).toContain('[System.Windows.Automation.Condition]::TrueCondition');
-    expect(folderPicker).toContain('$info.Name -ieq $FolderPath');
+    expect(folderPicker).toContain("$expectedPathPattern = [regex]::Escape($FolderPath) + '\\s*$'");
+    expect(folderPicker).toContain('$info.Name -match $expectedPathPattern');
     expect(folderPicker).toContain('$info.IsEnabled');
     expect(folderPicker).toContain('[System.Windows.Automation.InvokePattern]::Pattern');
     expect(folderPicker).toContain('[System.Windows.Automation.LegacyIAccessiblePattern]::Pattern');
