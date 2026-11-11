@@ -97,7 +97,12 @@ describe('selective Dynamic Island update', () => {
     expect(folderPicker).toContain("[System.Windows.Forms.SendKeys]::SendWait('^v')");
     expect(folderPicker).not.toContain('[System.Windows.Automation.ValuePattern]::Pattern');
     expect(folderPicker).toContain('$navigationDeadline = (Get-Date).AddSeconds(10)');
+    expect(folderPicker).toContain('[System.Windows.Automation.Condition]::TrueCondition');
+    expect(folderPicker).toContain('$info.Name -ieq $FolderPath');
     expect(folderPicker).toContain('$info.IsEnabled');
+    expect(folderPicker).toContain('[System.Windows.Automation.InvokePattern]::Pattern');
+    expect(folderPicker).toContain('[System.Windows.Automation.LegacyIAccessiblePattern]::Pattern');
+    expect(folderPicker).toContain("Physically clicked the verified native folder selection element");
     expect(folderPicker).toContain("Capture-Top 'folder-picker-navigation-failed'");
     expect(folderPicker).toContain("^(Select|Choose|Open|اختر|اختيار|تحديد|موافق)(\\s|$)");
     expect(rust).toContain('TARTEEL_WINDOWS_SMOKE_CDP');

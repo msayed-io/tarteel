@@ -288,42 +288,74 @@ function Select-MainAudioFolder([string]$FolderPath) {
   [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
 
   $navigationDeadline = (Get-Date).AddSeconds(10)
+  $pathVisible = $false
   $select = $null
-  $buttonNames = @()
+  $actionNames = @()
   do {
     $dialog = Get-FolderDialog
     if ($null -eq $dialog) { break }
-    $buttons = $dialog.FindAll(
+    $controls = $dialog.FindAll(
       [System.Windows.Automation.TreeScope]::Descendants,
-      [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-        [System.Windows.Automation.ControlType]::Button
-      )
+      [System.Windows.Automation.Condition]::TrueCondition
     )
-    $buttonNames = @($buttons | ForEach-Object { $_.Current.Name })
-    foreach ($candidate in $buttons) {
+    $pathVisible = $false
+    $select = $null
+    $actionNames = @()
+    foreach ($candidate in $controls) {
       $info = $candidate.Current
-      if (-not $info.IsOffscreen -and $info.IsEnabled -and $info.Name -match '^(Select|Choose|Open|اختر|اختيار|تحديد|موافق)(\s|$)') { $select = $candidate; break }
+      if (-not [string]::IsNullOrWhiteSpace($info.Name) -and $info.Name -ieq $FolderPath) { $pathVisible = $true }
+      if ($info.Name -match '^(Select|Choose|Open|اختر|اختيار|تحديد|موافق)(\s|$)') {
+        $actionNames += "$($info.ControlType.ProgrammaticName): '$($info.Name)' [AutomationId=$($info.AutomationId); enabled=$($info.IsEnabled); offscreen=$($info.IsOffscreen)]"
+        if ($null -eq $select -and -not $info.IsOffscreen -and $info.IsEnabled) { $select = $candidate }
+      }
     }
-    if ($null -ne $select) { break }
+    if ($pathVisible -and $null -ne $select) { break }
     Start-Sleep -Milliseconds 150
   } while ((Get-Date) -lt $navigationDeadline)
-  if ($null -ne $dialog -and $null -eq $select) {
+  if ($null -ne $dialog -and (-not $pathVisible -or $null -eq $select)) {
     $screenshot = Capture-Top 'folder-picker-navigation-failed'
-    $controls = @()
+    $controlDetails = @()
     $allControls = $dialog.FindAll(
       [System.Windows.Automation.TreeScope]::Descendants,
       [System.Windows.Automation.Condition]::TrueCondition
     )
     foreach ($control in ($allControls | Select-Object -First 80)) {
       $info = $control.Current
-      $controls += "$($info.ControlType.ProgrammaticName): '$($info.Name)' [AutomationId=$($info.AutomationId); offscreen=$($info.IsOffscreen)]"
+      $controlDetails += "$($info.ControlType.ProgrammaticName): '$($info.Name)' [AutomationId=$($info.AutomationId); offscreen=$($info.IsOffscreen)]"
     }
-    throw "The native folder picker did not expose a Select/Choose action after focusing its location bar and pasting '$FolderPath'. Buttons: $($buttonNames -join '; '). UIA controls: $($controls -join '; '). Screenshot: $screenshot"
+    throw "The native folder picker did not verify the requested path and an enabled Select/Choose action. Expected path: '$FolderPath'; pathVisible=$pathVisible; candidate actions: $($actionNames -join '; '). UIA controls: $($controlDetails -join '; '). Screenshot: $screenshot"
   }
   if ($null -ne $select) {
-    Write-Host "Invoking native folder-dialog action button '$($select.Current.Name)' after location-bar navigation."
-    $select.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Write-Host "Selecting verified native folder '$FolderPath' through '$($select.Current.Name)' ($($select.Current.ControlType.ProgrammaticName))."
+    $selected = $false
+    try {
+      $select.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+      $selected = $true
+      Write-Host 'Invoked native folder selection through UIA InvokePattern.'
+    } catch {
+      Write-Host "UIA InvokePattern was unavailable for the native selection element: $($_.Exception.Message)"
+    }
+    if (-not $selected) {
+      try {
+        $select.GetCurrentPattern([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern).DoDefaultAction()
+        $selected = $true
+        Write-Host 'Invoked native folder selection through LegacyIAccessiblePattern.'
+      } catch {
+        Write-Host "UIA LegacyIAccessible default action was unavailable: $($_.Exception.Message)"
+      }
+    }
+    if (-not $selected) {
+      $rect = $select.Current.BoundingRectangle
+      if ($rect.IsEmpty -or $rect.Width -le 0 -or $rect.Height -le 0) { throw "The native '$($select.Current.Name)' selection element has no clickable bounds." }
+      $x = [int][Math]::Round($rect.Left + $rect.Width / 2.0)
+      $y = [int][Math]::Round($rect.Top + $rect.Height / 2.0)
+      if (-not [TarteelUiSmokeNative]::SetCursorPos($x, $y)) { throw "SetCursorPos failed at ($x,$y) for the native folder selection element." }
+      Start-Sleep -Milliseconds 100
+      [TarteelUiSmokeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+      Start-Sleep -Milliseconds 70
+      [TarteelUiSmokeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+      Write-Host "Physically clicked the verified native folder selection element at ($x,$y)."
+    }
   }
   $deadline = (Get-Date).AddSeconds(8)
   do {
