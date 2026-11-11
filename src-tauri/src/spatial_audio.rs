@@ -4,6 +4,10 @@
 //! اختيار العمق المكاني أو محاكاة المسجد، ويعمل مستهلك المصدر على خيط خرج Rodio
 //! المنفصل عن واجهة Tauri. لا توجد تخصيصات داخل `Iterator::next`.
 
+#[path = "spatial_audio/hrtf.rs"]
+mod hrtf;
+use hrtf::HrtfRenderer;
+
 use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use serde::Serialize;
 use std::fs::File;
@@ -21,6 +25,7 @@ use symphonia::core::probe::Hint;
 
 const LIMIT: f32 = 0.98;
 const SEEK_FADE_MS: u32 = 8;
+const HRIR_TAIL_MS: u64 = 4;
 const MOSQUE_TAIL_MS: u64 = 1_600;
 const MAX_DELAY_MS: usize = 1_600;
 
@@ -41,7 +46,7 @@ impl DspMode {
 
     fn tail_duration(self) -> Duration {
         match self {
-            Self::Spatial => Duration::ZERO,
+            Self::Spatial => Duration::from_millis(HRIR_TAIL_MS),
             Self::Mosque => Duration::from_millis(MOSQUE_TAIL_MS),
         }
     }
@@ -162,7 +167,7 @@ impl SpatialAudioEngine {
             .map(|value| value.saturating_add(mode.tail_duration()))
             .unwrap_or_else(|| mode.tail_duration());
         let levels = Arc::new(LevelSnapshot::default());
-        let source = SpatialSource::new(decoder.convert_samples::<f32>(), mode, levels.clone());
+        let source = SpatialSource::new(decoder.convert_samples::<f32>(), mode, levels.clone())?;
         let handle = self.ensure_handle()?;
         let sink = Sink::try_new(handle.as_ref())
             .map_err(|error| format!("تعذر إنشاء مسار الصوت المكاني: {error}"))?;
@@ -638,13 +643,10 @@ const MOSQUE_REFLECTIONS: [Reflection; 13] = [
 struct DspProcessor {
     mode: DspMode,
     sample_rate: usize,
-    mono_history: [f32; 64],
-    mono_cursor: usize,
+    hrtf: Option<HrtfRenderer>,
     left_delay: Vec<f32>,
     right_delay: Vec<f32>,
     delay_cursor: usize,
-    spatial_taps_left: [(usize, f32); 4],
-    spatial_taps_right: [(usize, f32); 4],
     reflection_taps: [(usize, Reflection); 13],
     level_count: usize,
     level_squares: f64,
@@ -653,34 +655,25 @@ struct DspProcessor {
 }
 
 impl DspProcessor {
-    fn new(mode: DspMode, sample_rate: u32, levels: Arc<LevelSnapshot>) -> Self {
+    fn new(mode: DspMode, sample_rate: u32, levels: Arc<LevelSnapshot>) -> Result<Self, String> {
         let rate = sample_rate as usize;
         let delay_len = rate
             .saturating_mul(MAX_DELAY_MS)
             .saturating_div(1_000)
             .saturating_add(2)
             .max(2);
-        let to_samples = |ms: f32| ((ms * rate as f32 / 1_000.0).round() as usize).min(63);
-        Self {
+        let hrtf = if mode == DspMode::Spatial {
+            Some(HrtfRenderer::new(sample_rate)?)
+        } else {
+            None
+        };
+        Ok(Self {
             mode,
             sample_rate: rate,
-            mono_history: [0.0; 64],
-            mono_cursor: 0,
+            hrtf,
             left_delay: vec![0.0; delay_len],
             right_delay: vec![0.0; delay_len],
             delay_cursor: 0,
-            spatial_taps_left: [
-                (0, 0.80),
-                (to_samples(0.10), 0.12),
-                (to_samples(0.32), 0.055),
-                (to_samples(0.58), 0.025),
-            ],
-            spatial_taps_right: [
-                (0, 0.78),
-                (to_samples(0.18), 0.11),
-                (to_samples(0.45), 0.075),
-                (to_samples(0.74), 0.035),
-            ],
             reflection_taps: MOSQUE_REFLECTIONS.map(|tap| {
                 let delay = ((tap.delay_ms * rate as f32 / 1_000.0).round() as usize)
                     .min(delay_len - 1)
@@ -691,27 +684,16 @@ impl DspProcessor {
             level_squares: 0.0,
             level_peak: 0.0,
             levels,
-        }
+        })
     }
 
-    fn process(&mut self, left: f32, right: f32) -> (f32, f32) {
+    fn process(&mut self, left: f32, right: f32, mono_input: bool) -> (f32, f32) {
         let (mut out_left, mut out_right) = match self.mode {
-            DspMode::Spatial => {
-                let mid = 0.5 * (left + right);
-                let side = 0.5 * (left - right);
-                self.mono_history[self.mono_cursor] = mid;
-                let mut binaural_left = 0.0;
-                let mut binaural_right = 0.0;
-                for (delay, gain) in self.spatial_taps_left {
-                    binaural_left += self.mono_history[(self.mono_cursor + 64 - delay) % 64] * gain;
-                }
-                for (delay, gain) in self.spatial_taps_right {
-                    binaural_right +=
-                        self.mono_history[(self.mono_cursor + 64 - delay) % 64] * gain;
-                }
-                self.mono_cursor = (self.mono_cursor + 1) % 64;
-                (binaural_left + side * 0.30, binaural_right - side * 0.30)
-            }
+            DspMode::Spatial => self
+                .hrtf
+                .as_mut()
+                .expect("spatial mode always owns measured HRIR filters")
+                .process(left, right, mono_input),
             DspMode::Mosque => {
                 let cursor = self.delay_cursor;
                 self.left_delay[cursor] = left;
@@ -779,21 +761,22 @@ pub struct SpatialSource<S: Source<Item = f32>> {
 }
 
 impl<S: Source<Item = f32>> SpatialSource<S> {
-    fn new(inner: S, mode: DspMode, levels: Arc<LevelSnapshot>) -> Self {
+    fn new(inner: S, mode: DspMode, levels: Arc<LevelSnapshot>) -> Result<Self, String> {
         let channels = usize::from(inner.channels().max(1));
         let sample_rate = inner.sample_rate().max(1);
         let duration = inner
             .total_duration()
             .map(|value| value.saturating_add(mode.tail_duration()));
         let fade_total = (sample_rate as usize * SEEK_FADE_MS as usize / 1_000).max(1);
-        Self {
+        let processor = DspProcessor::new(mode, sample_rate, levels)?;
+        Ok(Self {
             inner,
             mode,
             channels,
             frame: vec![0.0; channels],
             output: [0.0; 2],
             output_cursor: 2,
-            processor: DspProcessor::new(mode, sample_rate, levels),
+            processor,
             eof: false,
             tail_remaining: 0,
             duration,
@@ -801,7 +784,7 @@ impl<S: Source<Item = f32>> SpatialSource<S> {
             fade_remaining: fade_total,
             fade_from: [0.0; 2],
             last_output: [0.0; 2],
-        }
+        })
     }
 
     fn next_frame(&mut self) -> Option<[f32; 2]> {
@@ -837,10 +820,9 @@ impl<S: Source<Item = f32>> SpatialSource<S> {
                 return Some(self.process_frame(left, right));
             }
             self.eof = true;
-            self.tail_remaining = if self.mode == DspMode::Mosque {
-                self.processor.sample_rate * MOSQUE_TAIL_MS as usize / 1_000
-            } else {
-                0
+            self.tail_remaining = match self.mode {
+                DspMode::Spatial => self.processor.sample_rate * HRIR_TAIL_MS as usize / 1_000,
+                DspMode::Mosque => self.processor.sample_rate * MOSQUE_TAIL_MS as usize / 1_000,
             };
         }
         if self.tail_remaining == 0 {
@@ -851,7 +833,8 @@ impl<S: Source<Item = f32>> SpatialSource<S> {
     }
 
     fn process_frame(&mut self, left: f32, right: f32) -> [f32; 2] {
-        let (processed_left, processed_right) = self.processor.process(left, right);
+        let (processed_left, processed_right) =
+            self.processor.process(left, right, self.channels == 1);
         let mut frame = [processed_left, processed_right];
         if self.fade_remaining > 0 {
             let progress = 1.0 - self.fade_remaining as f32 / self.fade_total as f32;
@@ -898,7 +881,10 @@ impl<S: Source<Item = f32>> Source for SpatialSource<S> {
             self.mode,
             self.inner.sample_rate(),
             self.processor.levels.clone(),
-        );
+        )
+        .map_err(|_| rodio::source::SeekError::NotSupported {
+            underlying_source: "SpatialSource HRIR reset",
+        })?;
         self.output_cursor = 2;
         self.eof = false;
         self.tail_remaining = 0;
@@ -969,7 +955,9 @@ mod tests {
     fn convolution_reverb_produces_a_bounded_tail_without_allocating_per_sample() {
         let input = SamplesBuffer::new(1, 1_000, vec![1.0_f32, 0.0, 0.0, 0.0]);
         let levels = Arc::new(LevelSnapshot::default());
-        let output: Vec<f32> = SpatialSource::new(input, DspMode::Mosque, levels).collect();
+        let output: Vec<f32> = SpatialSource::new(input, DspMode::Mosque, levels)
+            .unwrap()
+            .collect();
         assert_eq!(
             output.len(),
             (4 + MOSQUE_TAIL_MS as usize * 1_000 / 1_000) * 2
@@ -984,11 +972,49 @@ mod tests {
     }
 
     #[test]
-    fn spatial_fir_preserves_stereo_output_and_clips_safely() {
+    fn spatial_hrtf_preserves_binaural_output_and_clips_safely() {
         let input = SamplesBuffer::new(1, 48_000, vec![1.0_f32; 64]);
         let levels = Arc::new(LevelSnapshot::default());
-        let output: Vec<f32> = SpatialSource::new(input, DspMode::Spatial, levels).collect();
-        assert_eq!(output.len(), 128);
+        let output: Vec<f32> = SpatialSource::new(input, DspMode::Spatial, levels)
+            .unwrap()
+            .collect();
+        assert_eq!(
+            output.len(),
+            (64 + HRIR_TAIL_MS as usize * 48_000 / 1_000) * 2
+        );
+        assert!(output
+            .iter()
+            .all(|sample| sample.is_finite() && sample.abs() <= LIMIT));
+        assert!(output.chunks_exact(2).any(|frame| frame[0].abs() > 0.001));
+        assert!(output
+            .chunks_exact(2)
+            .all(|frame| (frame[0] - frame[1]).abs() < 0.001));
+        let hrir_tail = &output[64 * 2..];
+        assert!(hrir_tail
+            .chunks_exact(2)
+            .any(|frame| frame[0].abs() > 0.001 || frame[1].abs() > 0.001));
+        assert!(output
+            .chunks_exact(2)
+            .rev()
+            .take(8)
+            .all(|frame| frame[0].abs() < 1e-6 && frame[1].abs() < 1e-6));
+    }
+
+    #[test]
+    fn spatial_stereo_uses_measured_left_and_right_virtual_speaker_hrirs() {
+        let mut input = Vec::with_capacity(128);
+        for _ in 0..64 {
+            input.extend_from_slice(&[1.0_f32, 0.0]);
+        }
+        let input = SamplesBuffer::new(2, 48_000, input);
+        let levels = Arc::new(LevelSnapshot::default());
+        let output: Vec<f32> = SpatialSource::new(input, DspMode::Spatial, levels)
+            .unwrap()
+            .collect();
+        assert_eq!(
+            output.len(),
+            (64 + HRIR_TAIL_MS as usize * 48_000 / 1_000) * 2
+        );
         assert!(output
             .iter()
             .all(|sample| sample.is_finite() && sample.abs() <= LIMIT));

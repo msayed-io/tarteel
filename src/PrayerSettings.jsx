@@ -433,7 +433,7 @@ export default function PrayerSettings({ config, schedule, audioMode, onAudioMod
               <div className="ps-audio-options" role="group" aria-label="وضع معالجة صوت التلاوة">
                 {[
                   { id: 'natural', title: 'طبيعي', detail: 'الصوت الأصلي بلا مؤثرات إضافية.' },
-                  { id: 'spatial', title: 'العمق المكاني', detail: 'محاكاة HRTF ثابتة وخفيفة لتوسيع المجال.' },
+                  { id: 'spatial', title: 'العمق المكاني', detail: 'HRIR مقاسة من رأس KU100 لتوسيع المجال بهدوء.' },
                   { id: 'mosque', title: 'محاكاة المسجد', detail: 'صدى تلافيفي متزن يحافظ على وضوح التلاوة.' },
                 ].map(option => (
                   <button
@@ -448,7 +448,7 @@ export default function PrayerSettings({ config, schedule, audioMode, onAudioMod
                   </button>
                 ))}
               </div>
-              <p className="ps-audio-hint">المعالجة المكانية اختيارية وتعمل محليًا في Rust؛ اختيار «طبيعي» يبقي مشغل التلاوة الحالي دون تغيير.</p>
+              <p className="ps-audio-hint">بيانات HRTF مقاسة عامة وليست مخصصة لأذن المستمع؛ المعالجة تعمل محليًا في Rust، ويبقي «طبيعي» المشغّل الحالي دون تغيير.</p>
             </div>
           </section>
 
