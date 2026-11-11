@@ -60,6 +60,16 @@ describe('selective Dynamic Island update', () => {
     expect(meter).toContain('cancelAnimationFrame(meter.raf)');
   });
 
+  it('isolates the Windows WebView2 audio smoke test on a free diagnostic port', async () => {
+    const smoke = await read('scripts/windows-island-smoke.ps1');
+    const meter = await read('test/windows-audio-meter.mjs');
+    expect(smoke).toContain('[System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)');
+    expect(smoke).toContain('$env:WEBVIEW2_USER_DATA_FOLDER = $webViewProfile');
+    expect(smoke).toContain('Wait-WebViewDebugPort 30');
+    expect(smoke).toContain('Process diagnostics: $details');
+    expect(meter).toContain('cause?.cause');
+  });
+
   it('preserves the prayer and adhan UI and all pre-existing player operations', async () => {
     const island = await read('island.html');
     const main = await read('src/main.jsx');

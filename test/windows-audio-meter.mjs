@@ -17,7 +17,8 @@ async function getIslandTarget() {
       if (target?.webSocketDebuggerUrl) return target;
       lastError = `island.html target not listed; found ${targets.map(item => item.url).join(', ')}`;
     } catch (cause) {
-      lastError = String(cause);
+      const nested = cause?.cause;
+      lastError = `${String(cause)}${nested ? ` (${nested.code || ''} ${nested.message || nested})` : ''}`;
     }
     await delay(200);
   }

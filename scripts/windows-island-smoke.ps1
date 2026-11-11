@@ -6,12 +6,16 @@ param(
 $ErrorActionPreference = 'Stop'
 $outDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts/island-ui-smoke'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-$webViewDebugPort = 9222
+$portProbe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+$portProbe.Start()
+$webViewDebugPort = $portProbe.LocalEndpoint.Port
+$portProbe.Stop()
 $audioMeterResults = @()
 $audioTestRoot = Join-Path $env:RUNNER_TEMP 'tarteel-audio-smoke'
 $audioLibrary = Join-Path $audioTestRoot 'with-tracks'
 $silenceLibrary = Join-Path $audioTestRoot 'with-silence'
 $emptyAudioLibrary = Join-Path $audioTestRoot 'empty'
+$webViewProfile = Join-Path $audioTestRoot 'webview2-profile'
 $audioMeterScript = Join-Path $env:GITHUB_WORKSPACE 'test/windows-audio-meter.mjs'
 $statusPath = Join-Path $outDir 'status.txt'
 $logPath = Join-Path $env:APPDATA 'com.tarteel.desktop/island-geometry.jsonl'
@@ -20,6 +24,7 @@ $process = $null
 $previousSmokeFlag = $env:TARTEEL_WINDOWS_SMOKE_TEST
 $previousAlertSmokeFlag = $env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST
 $previousWebViewArgs = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+$previousWebViewProfile = $env:WEBVIEW2_USER_DATA_FOLDER
 
 function Set-Status([string]$Value) {
   Set-Content -Path $statusPath -Value $Value -Encoding UTF8
@@ -267,6 +272,25 @@ function Assert-WebViewAudio([string]$Mode, [string]$FileName = '') {
   catch { throw "WebView2 audio assertion '$Mode' returned invalid measurement JSON: $text" }
   $script:audioMeterResults += $measurement
   Write-Host $text
+}
+
+function Wait-WebViewDebugPort([int]$TimeoutSeconds = 30) {
+  $endpoint = "http://127.0.0.1:$webViewDebugPort/json/version"
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  do {
+    try {
+      $response = Invoke-RestMethod -Uri $endpoint -TimeoutSec 1
+      if ($response.webSocketDebuggerUrl) {
+        Write-Host "Verified WebView2 DevTools endpoint on port $webViewDebugPort ($($response.Browser))."
+        return
+      }
+    } catch { }
+    Start-Sleep -Milliseconds 250
+  } while ((Get-Date) -lt $deadline)
+  $webViewProcesses = @(Get-CimInstance -ClassName Win32_Process -Filter "Name='msedgewebview2.exe'" -ErrorAction SilentlyContinue | Select-Object ProcessId, CommandLine)
+  $appProcesses = @(Get-CimInstance -ClassName Win32_Process -Filter "Name='tarteel.exe'" -ErrorAction SilentlyContinue | Select-Object ProcessId, CommandLine)
+  $details = @{ port = $webViewDebugPort; profile = $webViewProfile; browserArguments = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS; webViewProcesses = $webViewProcesses; appProcesses = $appProcesses } | ConvertTo-Json -Compress -Depth 5
+  throw "WebView2 DevTools did not open at $endpoint within $TimeoutSeconds seconds. Process diagnostics: $details"
 }
 
 function Write-DigitalSilenceWav([string]$Path) {
@@ -595,7 +619,7 @@ try {
   $fixtureHash = (Get-FileHash -Path $fixturePath -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($fixtureHash -ne '59a4eef339d3e42aeaf9b77a6423297a0f830e4872783fc0718a64862b02df32') { throw "The test-only recitation fixture hash changed unexpectedly: $fixtureHash" }
   if (Test-Path $audioTestRoot) { Remove-Item -Recurse -Force $audioTestRoot }
-  New-Item -ItemType Directory -Force -Path $audioLibrary, $silenceLibrary, $emptyAudioLibrary | Out-Null
+  New-Item -ItemType Directory -Force -Path $audioLibrary, $silenceLibrary, $emptyAudioLibrary, $webViewProfile | Out-Null
   Copy-Item -Force $fixturePath (Join-Path $audioLibrary 'Al-Fatiha-01.ogg')
   Copy-Item -Force $fixturePath (Join-Path $audioLibrary 'Al-Fatiha-02.ogg')
   Write-DigitalSilenceWav (Join-Path $silenceLibrary 'Digital-Silence-Test.wav')
@@ -609,14 +633,18 @@ try {
   if (Test-Path $logPath) { Remove-Item -Force $logPath }
   $env:TARTEEL_WINDOWS_SMOKE_TEST = '1'
   $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$webViewDebugPort"
+  $env:WEBVIEW2_USER_DATA_FOLDER = $webViewProfile
   try {
     $process = Start-Process -FilePath (Resolve-Path $ExePath) -WorkingDirectory (Split-Path (Resolve-Path $ExePath)) -PassThru
   } finally {
     if ($null -eq $previousWebViewArgs) { Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue }
     else { $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousWebViewArgs }
+    if ($null -eq $previousWebViewProfile) { Remove-Item Env:WEBVIEW2_USER_DATA_FOLDER -ErrorAction SilentlyContinue }
+    else { $env:WEBVIEW2_USER_DATA_FOLDER = $previousWebViewProfile }
     if ($null -eq $previousSmokeFlag) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_TEST -ErrorAction SilentlyContinue }
     else { $env:TARTEEL_WINDOWS_SMOKE_TEST = $previousSmokeFlag }
   }
+  Wait-WebViewDebugPort 30
   $idle = Wait-ForRow 'idle' 35
   if ($idle.aligned_within_half_pixel -ne $true) { throw "Idle alignment was not verified: $($idle.aligned_within_half_pixel)" }
   if ($null -eq $idle.capsule_rect_screen -or $null -eq $idle.capsule_anchor_center_screen) { throw 'Idle row did not include measured capsule and monitor-origin anchor coordinates.' }
@@ -833,6 +861,8 @@ try {
   else { $env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST = $previousAlertSmokeFlag }
   if ($null -eq $previousWebViewArgs) { Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue }
   else { $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousWebViewArgs }
+  if ($null -eq $previousWebViewProfile) { Remove-Item Env:WEBVIEW2_USER_DATA_FOLDER -ErrorAction SilentlyContinue }
+  else { $env:WEBVIEW2_USER_DATA_FOLDER = $previousWebViewProfile }
   if (Test-Path $audioTestRoot) { Remove-Item -Recurse -Force $audioTestRoot -ErrorAction SilentlyContinue }
   if (Test-Path $logPath) { Copy-Item -Force $logPath (Join-Path $outDir 'geometry-final.jsonl') }
 }
