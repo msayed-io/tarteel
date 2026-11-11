@@ -72,6 +72,16 @@ describe('selective Dynamic Island update', () => {
     expect(smoke).toContain('Process diagnostics: $details');
     expect(smoke).toContain('Choose|Browse|Folder|Directory');
     expect(smoke).toContain('Top-level UIA windows:');
+    expect(smoke).toContain('$script:mainWindow = $ancestor');
+    const mainButtonSearch = smoke.slice(smoke.indexOf('function Find-MainButton'), smoke.indexOf('function Wait-MainTrack'));
+    expect(mainButtonSearch).toContain('$mainWindow = $script:mainWindow');
+    expect(mainButtonSearch).toContain('$mainWindow.FindAll(');
+    expect(mainButtonSearch).not.toContain('RootElement');
+    const folderPicker = smoke.slice(smoke.indexOf('function Select-MainAudioFolder'), smoke.indexOf('function Invoke-MainTrack'));
+    expect(folderPicker).toContain('$button.Current.BoundingRectangle');
+    expect(folderPicker).toContain('SetCursorPos($x, $y)');
+    expect(folderPicker).toContain('mouse_event(0x0002');
+    expect(folderPicker).toContain('mouse_event(0x0004');
     expect(rust).toContain('TARTEEL_WINDOWS_SMOKE_CDP');
     expect(rust).toContain('.additional_browser_args(&browser_args)');
     expect(rust).toContain('.data_directory(PathBuf::from(data_directory))');

@@ -22,6 +22,7 @@ $statusPath = Join-Path $outDir 'status.txt'
 $logPath = Join-Path $env:APPDATA 'com.tarteel.desktop/island-geometry.jsonl'
 $placementPath = Join-Path $env:APPDATA 'com.tarteel.desktop/island-position.json'
 $process = $null
+$script:mainWindow = $null
 $previousSmokeFlag = $env:TARTEEL_WINDOWS_SMOKE_TEST
 $previousAlertSmokeFlag = $env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST
 $previousSmokeCdpFlag = $env:TARTEEL_WINDOWS_SMOKE_CDP
@@ -155,6 +156,12 @@ function Wait-MainLibrary([int]$TimeoutSeconds = 10) {
       $condition
     )
     if ($null -ne $element -and -not $element.Current.IsOffscreen) {
+      $ancestor = $element
+      while ($null -ne $ancestor -and $ancestor.Current.ControlType -ne [System.Windows.Automation.ControlType]::Window) {
+        $ancestor = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($ancestor)
+      }
+      if ($null -eq $ancestor) { throw 'The visible empty-state marker was not contained by a top-level main window.' }
+      $script:mainWindow = $ancestor
       Write-Host 'Verified the existing main-window recitation library is visible.'
       return $element
     }
@@ -165,11 +172,13 @@ function Wait-MainLibrary([int]$TimeoutSeconds = 10) {
 }
 
 function Find-MainButton([string]$Name) {
+  $mainWindow = $script:mainWindow
+  if ($null -eq $mainWindow) { return $null }
   $condition = [System.Windows.Automation.PropertyCondition]::new(
     [System.Windows.Automation.AutomationElement]::NameProperty,
     $Name
   )
-  $elements = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+  $elements = $mainWindow.FindAll(
     [System.Windows.Automation.TreeScope]::Descendants,
     $condition
   )
@@ -217,7 +226,16 @@ function Get-FolderDialog {
 function Select-MainAudioFolder([string]$FolderPath) {
   $button = Find-MainButton 'اختيار مجلد الصوت'
   if ($null -eq $button) { throw 'The visible main window did not expose its existing «اختيار مجلد الصوت» button.' }
-  $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+  $rect = $button.Current.BoundingRectangle
+  if ($rect.IsEmpty -or $rect.Width -le 0 -or $rect.Height -le 0) { throw 'The main-window folder button has no usable screen bounds.' }
+  $x = [int][Math]::Round($rect.Left + $rect.Width / 2.0)
+  $y = [int][Math]::Round($rect.Top + $rect.Height / 2.0)
+  if (-not [TarteelUiSmokeNative]::SetCursorPos($x, $y)) { throw "SetCursorPos failed at ($x,$y) for the main-window folder picker button." }
+  Start-Sleep -Milliseconds 100
+  [TarteelUiSmokeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 70
+  [TarteelUiSmokeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+  Write-Host "Sent physical mouse click to main-window folder button at ($x,$y)."
   $deadline = (Get-Date).AddSeconds(15)
   $dialog = $null
   do {
