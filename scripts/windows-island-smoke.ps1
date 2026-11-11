@@ -60,6 +60,22 @@ function Click-RectCenter($Record) {
   Write-Host "Sent physical mouse click at measured capsule center ($x,$y) for $($Record.state)."
 }
 
+function Click-IslandOffset($Record, [double]$OffsetX, [double]$OffsetY) {
+  $rect = $Record.capsule_rect_screen
+  if ($null -eq $rect) { throw "State '$($Record.state)' has no measured island rectangle" }
+  $cx = ([double]$rect.left + [double]$rect.right) / 2.0
+  $cy = ([double]$rect.top + [double]$rect.bottom) / 2.0
+  $scale = 0.8 * [double]$Record.scale_factor
+  $x = [int][Math]::Round($cx + $OffsetX * $scale)
+  $y = [int][Math]::Round($cy + $OffsetY * $scale)
+  if (-not [TarteelUiSmokeNative]::SetCursorPos($x, $y)) { throw "SetCursorPos failed at ($x,$y) for the measured island control." }
+  Start-Sleep -Milliseconds 100
+  [TarteelUiSmokeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 70
+  [TarteelUiSmokeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+  Write-Host "Sent physical mouse click to measured island control at ($x,$y) from $($Record.state)."
+}
+
 function Find-IslandElement($Record, [string]$Name) {
   $hwnd = [IntPtr]([long]$Record.window_handle)
   $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
@@ -420,7 +436,9 @@ try {
   $null = Capture-Top 'full-expanded'
   Copy-Item -Force $logPath (Join-Path $outDir 'geometry-full.jsonl')
 
-  Click-IslandElement $full 'الأدوات'
+  # WebView2's UI Automation tree may omit this icon-only aria-labeled button;
+  # click its measured physical position as a user would, then verify the state.
+  Click-IslandOffset $full 192 81
   $tools = Wait-ForRow 'tools' 15 ([long]$full.timestamp_unix_ms) -Expanded
   Assert-SamePlacementAnchor $idle $tools
   Assert-ExpandedBoundsContained $tools
