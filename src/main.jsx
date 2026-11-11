@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { sendNotification } from '@tauri-apps/plugin-notification';
 import PrayerSettings from './PrayerSettings.jsx';
 import { displayPlaceName } from './engine/display.js';
@@ -11,6 +12,7 @@ import { buildSchedule, scheduleNeedsRebuild, alarmEvents, upcoming, current as 
 import { installSpecularRim } from './lib/specular-rim.js';
 import { applyRimIntensity, readRimIntensity } from './lib/rim-preference.js';
 import './styles.css';
+import { measureAudioLevels } from './engine/audio-levels.js';
 
 const DIG = '٠١٢٣٤٥٦٧٨٩';
 const ar = n => String(n).replace(/\d/g, d => DIG[d]);
@@ -127,6 +129,7 @@ function App() {
   const [adhanAlert, setAdhanAlert] = useState(() => readPendingAdhan());
   const [audioPrefs, setAudioPrefs] = useState(() => ({ ...DEFAULT_AUDIO_PREFS, ...(readJson('tarteel.audio.settings', {}) || {}) }));
   const audio = useRef(null);
+  const audioMeter = useRef({ context: null, source: null, stream: null, analyser: null, gate: null, samples: null, levels: Array(5).fill(0), raf: 0, lastSample: 0, disabled: false });
   const nextRef = useRef(() => {});
   const tracksRef = useRef(tracks);
   const visibleRef = useRef([]);
@@ -154,6 +157,7 @@ function App() {
 
   if (!audio.current) {
     audio.current = new Audio();
+    audio.current.crossOrigin = 'anonymous';
     audio.current.preload = 'metadata';
     audio.current.playbackRate = Number(audioPrefs.speed) || 1;
   }
@@ -353,11 +357,91 @@ function App() {
 
   useEffect(() => {
     const a = audio.current;
+    const meter = audioMeter.current;
+    const publishLevels = (audioState, levels = Array(5).fill(0), rms = 0, peak = 0) => {
+      emit('audio-levels', { audioState, levels, rms, peak }).catch(cause => console.error('Tarteel audio-level event failed', cause));
+    };
+    const stopMeter = (audioState, publish = true) => {
+      if (meter.raf) cancelAnimationFrame(meter.raf);
+      meter.raf = 0;
+      meter.lastSample = 0;
+      meter.levels = Array(5).fill(0);
+      if (meter.context?.state === 'running' && audioState !== 'playing') meter.context.suspend().catch(cause => console.warn('Tarteel audio meter suspend failed', cause));
+      if (publish) publishLevels(audioState);
+    };
+    const ensureMeter = () => {
+      if (meter.disabled) return null;
+      if (meter.analyser) return meter;
+      const Context = window.AudioContext || window.webkitAudioContext;
+      if (!Context || typeof a.captureStream !== 'function') {
+        meter.disabled = true;
+        console.warn('Tarteel audio-level monitoring is unavailable; original playback remains unchanged.');
+        return null;
+      }
+      let context, source, analyser, gate, stream;
+      try {
+        context = new Context({ latencyHint: 'interactive' });
+        stream = a.captureStream();
+        if (!stream?.getAudioTracks().length) throw new Error('The active playback stream has no audio track.');
+        source = context.createMediaStreamSource(stream);
+        analyser = context.createAnalyser();
+        analyser.fftSize = 1024;
+        analyser.smoothingTimeConstant = 0;
+        gate = context.createGain();
+        gate.gain.value = 0;
+        source.connect(analyser);
+        analyser.connect(gate);
+        gate.connect(context.destination);
+        Object.assign(meter, { context, source, stream, analyser, gate, samples: new Float32Array(analyser.fftSize), levels: Array(5).fill(0) });
+        return meter;
+      } catch (cause) {
+        try { source?.disconnect(); analyser?.disconnect(); gate?.disconnect(); } catch {}
+        if (stream) for (const track of stream.getTracks()) track.stop();
+        context?.close().catch(() => {});
+        meter.disabled = true;
+        console.warn('Tarteel could not start non-invasive audio-level monitoring; playback is unchanged.', cause);
+        return null;
+      }
+    };
+    const sample = now => {
+      meter.raf = 0;
+      if (a.paused || a.ended || !a.currentSrc) {
+        stopMeter(a.ended ? 'ended' : currentRef.current === null ? 'no-track' : 'paused');
+        return;
+      }
+      if (now - meter.lastSample >= 50) {
+        meter.lastSample = now;
+        try {
+          meter.analyser.getFloatTimeDomainData(meter.samples);
+          const signal = measureAudioLevels(meter.samples, meter.levels);
+          meter.levels = signal.levels;
+          publishLevels('playing', signal.levels, signal.rms, signal.peak);
+        } catch (cause) {
+          console.warn('Tarteel audio-level sampling stopped; playback continues.', cause);
+          stopMeter('playing');
+          return;
+        }
+      }
+      meter.raf = requestAnimationFrame(sample);
+    };
+    const startMeter = () => {
+      if (a.paused || a.ended || !a.currentSrc) return;
+      const state = ensureMeter();
+      if (!state) return;
+      state.context.resume().then(() => {
+        if (a.paused || a.ended || !a.currentSrc) {
+          stopMeter(a.ended ? 'ended' : currentRef.current === null ? 'no-track' : 'paused');
+          return;
+        }
+        if (!state.raf) state.raf = requestAnimationFrame(sample);
+      }).catch(cause => console.warn('Tarteel audio meter resume failed; playback is unchanged.', cause));
+    };
     const onTime = () => setPos(Number.isFinite(a.currentTime) ? a.currentTime : 0);
     const onMetadata = () => setDuration(Number.isFinite(a.duration) ? a.duration : 0);
-    const onPlay = () => { setPlaying(true); playingRef.current = true; };
-    const onPause = () => { setPlaying(false); playingRef.current = false; };
+    const onPlay = () => { setPlaying(true); playingRef.current = true; startMeter(); };
+    const onPause = () => { setPlaying(false); playingRef.current = false; stopMeter(currentRef.current === null ? 'no-track' : 'paused'); };
     const onEnded = () => {
+      stopMeter('ended');
       const prefs = audioPrefsRef.current;
       const sleepEnded = prefs.sleepMode === 'end';
       if (sleepEnded) {
@@ -373,6 +457,8 @@ function App() {
       const code = a.error?.code || 0;
       console.error('Tarteel audio engine error', { code, mediaError: a.error?.message || 'unknown' });
       setPlaying(false);
+      playingRef.current = false;
+      stopMeter(currentRef.current === null ? 'no-track' : 'paused');
       setError('تعذّر فك ترميز الملف الصوتي. جرّب MP3 أو WAV أو OGG مدعومًا.');
     };
     a.addEventListener('timeupdate', onTime);
@@ -394,6 +480,11 @@ function App() {
       a.removeEventListener('pause', onPause);
       a.removeEventListener('ended', onEnded);
       a.removeEventListener('error', onError);
+      stopMeter('no-track', false);
+      try { meter.source?.disconnect(); meter.analyser?.disconnect(); meter.gate?.disconnect(); } catch {}
+      for (const track of meter.stream?.getTracks() || []) track.stop();
+      meter.context?.close().catch(() => {});
+      Object.assign(meter, { context: null, source: null, stream: null, analyser: null, gate: null, samples: null, levels: Array(5).fill(0), disabled: false });
       stopLocationWatch();
     };
   }, []);
@@ -553,8 +644,14 @@ function App() {
       const found = await invoke('scan_directory', { path: picked });
       setTracks(found);
       localStorage.setItem('tarteel.folder', picked);
-      setCurrent(found.length ? 0 : null);
-      setDuration(0); setPos(0); setPlaying(false);
+      if (!found.length) {
+        audio.current.pause();
+        audio.current.removeAttribute('src');
+        audio.current.load();
+      }
+      const first = found.length ? 0 : null;
+      setCurrent(first); currentRef.current = first;
+      setDuration(0); setPos(0); setPlaying(false); playingRef.current = false;
     } catch (cause) {
       console.error('Tarteel directory scan failed', { message: String(cause) });
       setError(`تعذّر فحص المجلد: ${String(cause)}`);
@@ -697,7 +794,19 @@ function App() {
     resumeAfterAdhan, stopAdhan,
     dismissAdhan: async () => { await stopAdhan(); clearAdhanAlert(); },
     setPrayerPreference: (key, value) => updatePrayerPreferences({ [key]: Boolean(value) }),
-    openPrayerSettings: () => setPrayerSettingsOpen(true)
+    openPrayerSettings: () => setPrayerSettingsOpen(true),
+    openLibrary: async () => {
+      setFilter('all'); setQuery(''); setPrayerSettingsOpen(false);
+      try {
+        const appWindow = getCurrentWindow();
+        await appWindow.unminimize();
+        await appWindow.show();
+        await appWindow.setFocus();
+      } catch (cause) {
+        console.error('Tarteel could not open the recitation library from the island', cause);
+        setError('تعذّر فتح مكتبة التلاوات.');
+      }
+    }
   };
   controlsRef.current = controls;
 
@@ -707,7 +816,7 @@ function App() {
     localStorage.setItem('tarteel.player.last-playback', JSON.stringify({ path: active.path, position: Number(pos) || 0, wasPlaying: Boolean(playing), savedAt: Date.now() }));
   }, [active?.path, pos, playing]);
   const publishPlayerState = () => emit('player-state', {
-    state: active ? 'compact' : 'idle', playing, fileName: active?.title || active?.file_name || '', artist: active?.artist || '',
+    state: active ? 'compact' : 'idle', audioState: !active ? 'no-track' : audio.current?.ended ? 'ended' : playing ? 'playing' : 'paused', playing, fileName: active?.title || active?.file_name || '', artist: active?.artist || '',
     cover: active?.cover || null, duration: Number.isFinite(duration) ? duration : 0, position: Number.isFinite(pos) ? pos : 0,
     speed: audioPrefsRef.current.speed, sleepMode: audioPrefsRef.current.sleepMode, sleepMinutes: audioPrefsRef.current.sleepMinutes,
   }).catch(cause => console.error('Tarteel island player state event failed', cause));
@@ -758,6 +867,7 @@ function App() {
         if (payload.action === 'stop-adhan') controlsRef.current.stopAdhan();
         if (payload.action === 'dismiss-adhan') controlsRef.current.dismissAdhan();
         if (payload.action === 'open-prayer-settings') controlsRef.current.openPrayerSettings();
+        if (payload.action === 'open-library') controlsRef.current.openLibrary();
       }),
       listen('island-ready', () => {
         statePublisherRef.current(); publishPrayerState();

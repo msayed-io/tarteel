@@ -108,7 +108,7 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml --lib
       - name: Build Windows app and NSIS installer
         run: npm run tauri -- build --bundles nsis
-      - name: Interactive island geometry smoke test
+      - name: Interactive island geometry and audio smoke test
         shell: pwsh
         run: ./scripts/windows-island-smoke.ps1 -ExePath ./src-tauri/target/release/tarteel.exe
       - name: Upload island screenshots and geometry log

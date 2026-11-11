@@ -6,12 +6,20 @@ param(
 $ErrorActionPreference = 'Stop'
 $outDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts/island-ui-smoke'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+$webViewDebugPort = 9222
+$audioMeterResults = @()
+$audioTestRoot = Join-Path $env:RUNNER_TEMP 'tarteel-audio-smoke'
+$audioLibrary = Join-Path $audioTestRoot 'with-tracks'
+$silenceLibrary = Join-Path $audioTestRoot 'with-silence'
+$emptyAudioLibrary = Join-Path $audioTestRoot 'empty'
+$audioMeterScript = Join-Path $env:GITHUB_WORKSPACE 'test/windows-audio-meter.mjs'
 $statusPath = Join-Path $outDir 'status.txt'
 $logPath = Join-Path $env:APPDATA 'com.tarteel.desktop/island-geometry.jsonl'
 $placementPath = Join-Path $env:APPDATA 'com.tarteel.desktop/island-position.json'
 $process = $null
 $previousSmokeFlag = $env:TARTEEL_WINDOWS_SMOKE_TEST
 $previousAlertSmokeFlag = $env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST
+$previousWebViewArgs = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
 
 function Set-Status([string]$Value) {
   Set-Content -Path $statusPath -Value $Value -Encoding UTF8
@@ -76,6 +84,31 @@ function Click-IslandOffset($Record, [double]$OffsetX, [double]$OffsetY) {
   Write-Host "Sent physical mouse click to measured island control at ($x,$y) from $($Record.state)."
 }
 
+function Swipe-IslandOffset($Record, [double]$OffsetXCss, [double]$OffsetYCss, [int]$DurationMs = 180) {
+  $rect = $Record.capsule_rect_screen
+  if ($null -eq $rect) { throw "State '$($Record.state)' has no measured island rectangle for a swipe" }
+  $cx = ([double]$rect.left + [double]$rect.right) / 2.0
+  $cy = ([double]$rect.top + [double]$rect.bottom) / 2.0
+  $scale = [double]$Record.scale_factor
+  $x0 = [int][Math]::Round($cx); $y0 = [int][Math]::Round($cy)
+  $x1 = [int][Math]::Round($cx + $OffsetXCss * $scale)
+  $y1 = [int][Math]::Round($cy + $OffsetYCss * $scale)
+  if (-not [TarteelUiSmokeNative]::SetCursorPos($x0, $y0)) { throw "SetCursorPos failed at ($x0,$y0) before swipe." }
+  Start-Sleep -Milliseconds 80
+  [TarteelUiSmokeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+  try {
+    for ($step = 1; $step -le 8; $step++) {
+      $x = [int][Math]::Round($x0 + ($x1 - $x0) * $step / 8.0)
+      $y = [int][Math]::Round($y0 + ($y1 - $y0) * $step / 8.0)
+      if (-not [TarteelUiSmokeNative]::SetCursorPos($x, $y)) { throw "SetCursorPos failed at ($x,$y) during swipe." }
+      Start-Sleep -Milliseconds ([int][Math]::Max(8, $DurationMs / 8))
+    }
+  } finally {
+    [TarteelUiSmokeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+  }
+  Write-Host "Sent physical pointer swipe from measured $($Record.state) capsule by ($OffsetXCss,$OffsetYCss) CSS px."
+}
+
 function Find-IslandElement($Record, [string]$Name) {
   $hwnd = [IntPtr]([long]$Record.window_handle)
   $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
@@ -83,7 +116,11 @@ function Find-IslandElement($Record, [string]$Name) {
     [System.Windows.Automation.AutomationElement]::NameProperty,
     $Name
   )
-  return $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+  $elements = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
+  foreach ($element in $elements) {
+    if (-not $element.Current.IsOffscreen) { return $element }
+  }
+  return $null
 }
 
 function Wait-IslandElement($Record, [string]$Name, [int]$TimeoutSeconds = 8, [switch]$Absent) {
@@ -97,6 +134,165 @@ function Wait-IslandElement($Record, [string]$Name, [int]$TimeoutSeconds = 8, [s
   } while ((Get-Date) -lt $deadline)
   if ($Absent) { throw "Accessible island element '$Name' remained visible." }
   throw "Accessible island element '$Name' was not found in time."
+}
+
+function Wait-MainLibrary([int]$TimeoutSeconds = 10) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $condition = [System.Windows.Automation.PropertyCondition]::new(
+    [System.Windows.Automation.AutomationElement]::NameProperty,
+    'اختر مجلد الصوت لبدء مكتبتك'
+  )
+  do {
+    $element = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
+      [System.Windows.Automation.TreeScope]::Descendants,
+      $condition
+    )
+    if ($null -ne $element -and -not $element.Current.IsOffscreen) {
+      Write-Host 'Verified the existing main-window recitation library is visible.'
+      return $element
+    }
+    if ($process -and $process.HasExited) { throw "Tarteel exited while opening the main-window library (code $($process.ExitCode))." }
+    Start-Sleep -Milliseconds 200
+  } while ((Get-Date) -lt $deadline)
+  throw 'The empty-state library action did not bring the existing recitation library into view.'
+}
+
+function Find-MainButton([string]$Name) {
+  $condition = [System.Windows.Automation.PropertyCondition]::new(
+    [System.Windows.Automation.AutomationElement]::NameProperty,
+    $Name
+  )
+  $elements = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+    [System.Windows.Automation.TreeScope]::Descendants,
+    $condition
+  )
+  foreach ($element in $elements) {
+    if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and -not $element.Current.IsOffscreen) { return $element }
+  }
+  return $null
+}
+
+function Wait-MainTrack([string]$FileName, [int]$TimeoutSeconds = 15) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $condition = [System.Windows.Automation.PropertyCondition]::new(
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.ControlType]::Button
+  )
+  do {
+    $buttons = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+      [System.Windows.Automation.TreeScope]::Descendants,
+      $condition
+    )
+    foreach ($button in $buttons) {
+      $name = $button.Current.Name
+      if (-not $button.Current.IsOffscreen -and -not [string]::IsNullOrEmpty($name) -and $name.Contains($FileName)) { return $button }
+    }
+    if ($process -and $process.HasExited) { throw "Tarteel exited while waiting for library track '$FileName'." }
+    Start-Sleep -Milliseconds 200
+  } while ((Get-Date) -lt $deadline)
+  throw "The main-window library did not expose track '$FileName'."
+}
+
+function Get-FolderDialog {
+  $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+    [System.Windows.Automation.TreeScope]::Children,
+    [System.Windows.Automation.PropertyCondition]::new(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::Window
+    )
+  )
+  foreach ($window in $windows) {
+    if ($window.Current.Name -match 'اختر مجلد التلاوات|Select Folder|Select|Open') { return $window }
+  }
+  return $null
+}
+
+function Select-MainAudioFolder([string]$FolderPath) {
+  $button = Find-MainButton 'اختيار مجلد الصوت'
+  if ($null -eq $button) { throw 'The visible main window did not expose its existing «اختيار مجلد الصوت» button.' }
+  $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+  $deadline = (Get-Date).AddSeconds(8)
+  $dialog = $null
+  do {
+    $dialog = Get-FolderDialog
+    if ($null -ne $dialog) { break }
+    Start-Sleep -Milliseconds 100
+  } while ((Get-Date) -lt $deadline)
+  if ($null -eq $dialog) { throw "The native folder picker did not open for '$FolderPath'." }
+  $dialog.SetFocus()
+  Start-Sleep -Milliseconds 150
+  [System.Windows.Forms.SendKeys]::SendWait('^l')
+  Start-Sleep -Milliseconds 100
+  [System.Windows.Forms.SendKeys]::SendWait('^a')
+  [System.Windows.Forms.SendKeys]::SendWait($FolderPath)
+  [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+  Start-Sleep -Milliseconds 350
+  $dialog = Get-FolderDialog
+  if ($null -ne $dialog) {
+    $buttons = $dialog.FindAll(
+      [System.Windows.Automation.TreeScope]::Descendants,
+      [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Button
+      )
+    )
+    $select = $null
+    foreach ($candidate in $buttons) {
+      if ($candidate.Current.Name -match 'Select|Choose|Open|Folder|اختر|اختيار|تحديد|موافق') { $select = $candidate; break }
+    }
+    if ($null -eq $select) { throw "The native folder picker stayed open without a Select/Choose button after navigating to '$FolderPath'." }
+    $select.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+  }
+  $deadline = (Get-Date).AddSeconds(8)
+  do {
+    if ($null -eq (Get-FolderDialog)) { Write-Host "Selected real library folder through the existing picker: $FolderPath"; return }
+    Start-Sleep -Milliseconds 100
+  } while ((Get-Date) -lt $deadline)
+  throw "The native folder picker did not close after selecting '$FolderPath'."
+}
+
+function Invoke-MainTrack([string]$FileName) {
+  $element = Wait-MainTrack $FileName
+  $element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+  Start-Sleep -Milliseconds 200
+  Write-Host "Started the real library track through the existing application row: $FileName"
+}
+
+function Assert-WebViewAudio([string]$Mode, [string]$FileName = '') {
+  $output = & node $audioMeterScript $webViewDebugPort $Mode $FileName 2>&1
+  $exitCode = $LASTEXITCODE
+  $text = $output -join [Environment]::NewLine
+  if ($exitCode -ne 0) { throw "WebView2 audio assertion '$Mode' failed (node exit $exitCode): $text" }
+  try { $measurement = ConvertFrom-Json -InputObject $text }
+  catch { throw "WebView2 audio assertion '$Mode' returned invalid measurement JSON: $text" }
+  $script:audioMeterResults += $measurement
+  Write-Host $text
+}
+
+function Write-DigitalSilenceWav([string]$Path) {
+  $sampleRate = 48000
+  $dataBytes = $sampleRate * 4 * 2
+  $stream = [System.IO.File]::Create($Path)
+  $writer = $null
+  try {
+    $writer = [System.IO.BinaryWriter]::new($stream, [System.Text.Encoding]::ASCII)
+    $writer.Write([System.Text.Encoding]::ASCII.GetBytes('RIFF'))
+    $writer.Write([int]($dataBytes + 36))
+    $writer.Write([System.Text.Encoding]::ASCII.GetBytes('WAVE'))
+    $writer.Write([System.Text.Encoding]::ASCII.GetBytes('fmt '))
+    $writer.Write([int]16)
+    $writer.Write([short]1)
+    $writer.Write([short]1)
+    $writer.Write([int]$sampleRate)
+    $writer.Write([int]($sampleRate * 2))
+    $writer.Write([short]2)
+    $writer.Write([short]16)
+    $writer.Write([System.Text.Encoding]::ASCII.GetBytes('data'))
+    $writer.Write([int]$dataBytes)
+    $writer.Write([byte[]]::new($dataBytes))
+  } finally {
+    if ($null -ne $writer) { $writer.Dispose() } else { $stream.Dispose() }
+  }
 }
 
 function Click-IslandElement($Record, [string]$Name) {
@@ -377,6 +573,7 @@ function Assert-ClickThroughRoundedCorner($Record) {
 }
 
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -393,6 +590,15 @@ Add-Type -AssemblyName UIAutomationTypes
 
 try {
   if (-not (Test-Path $ExePath)) { throw "Tarteel executable not found: $ExePath" }
+  $fixturePath = Join-Path $env:GITHUB_WORKSPACE 'test/fixtures/Al-Fatiha-CC0.ogg'
+  if (-not (Test-Path $fixturePath)) { throw "Test-only CC0 audio fixture is missing: $fixturePath" }
+  $fixtureHash = (Get-FileHash -Path $fixturePath -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($fixtureHash -ne '59a4eef339d3e42aeaf9b77a6423297a0f830e4872783fc0718a64862b02df32') { throw "The test-only recitation fixture hash changed unexpectedly: $fixtureHash" }
+  if (Test-Path $audioTestRoot) { Remove-Item -Recurse -Force $audioTestRoot }
+  New-Item -ItemType Directory -Force -Path $audioLibrary, $silenceLibrary, $emptyAudioLibrary | Out-Null
+  Copy-Item -Force $fixturePath (Join-Path $audioLibrary 'Al-Fatiha-01.ogg')
+  Copy-Item -Force $fixturePath (Join-Path $audioLibrary 'Al-Fatiha-02.ogg')
+  Write-DigitalSilenceWav (Join-Path $silenceLibrary 'Digital-Silence-Test.wav')
   if ([TarteelUiSmokeNative]::GetSystemMetrics(0) -le 0 -or [TarteelUiSmokeNative]::GetSystemMetrics(1) -le 0) {
     throw 'Windows runner exposes no interactive display; refusing to mark native geometry verification as passed.'
   }
@@ -402,9 +608,12 @@ try {
   [System.IO.File]::WriteAllText($placementPath, $placementJson, [System.Text.UTF8Encoding]::new($false))
   if (Test-Path $logPath) { Remove-Item -Force $logPath }
   $env:TARTEEL_WINDOWS_SMOKE_TEST = '1'
+  $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$webViewDebugPort"
   try {
     $process = Start-Process -FilePath (Resolve-Path $ExePath) -WorkingDirectory (Split-Path (Resolve-Path $ExePath)) -PassThru
   } finally {
+    if ($null -eq $previousWebViewArgs) { Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue }
+    else { $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousWebViewArgs }
     if ($null -eq $previousSmokeFlag) { Remove-Item Env:TARTEEL_WINDOWS_SMOKE_TEST -ErrorAction SilentlyContinue }
     else { $env:TARTEEL_WINDOWS_SMOKE_TEST = $previousSmokeFlag }
   }
@@ -424,7 +633,7 @@ try {
   Assert-Anchor $music
   $musicShot = Capture-Top 'music-compact-before-full'
   Assert-MusicRoundedCorners $music $musicShot
-  Click-RectCenter $music
+  Swipe-IslandOffset $music 0 62
   $full = Wait-ForRow 'full' 15 ([long]$music.timestamp_unix_ms) -Expanded
   Assert-SamePlacementAnchor $idle $full
   Assert-FullStateBounds $full
@@ -473,12 +682,65 @@ try {
   Assert-ClickThroughRoundedCorner $musicCollapsed
   $musicCollapsedShot = Capture-Top 'music-compact-after-full'
   Assert-MusicRoundedCorners $musicCollapsed $musicCollapsedShot
-  $idleAfterMusic = Wait-ForRow 'idle' 60 ([long]$musicCollapsed.timestamp_unix_ms)
+
+  Click-RectCenter $musicCollapsed
+  $emptyFull = Wait-ForRow 'full' 15 ([long]$musicCollapsed.timestamp_unix_ms) -Expanded
+  $null = Wait-IslandElement $emptyFull 'لا توجد تلاوة' 60
+  $null = Capture-Top 'music-empty-full'
+  Click-IslandElement $emptyFull 'تشغيل'
+  $null = Wait-IslandElement $emptyFull 'لا توجد تلاوة' 4
+  Click-IslandElement $emptyFull 'اختيار تلاوة'
+  $null = Wait-MainLibrary 12
+  Assert-WebViewAudio 'no-track'
+  Assert-WebViewAudio 'cancel'
+  Select-MainAudioFolder $audioLibrary
+  Invoke-MainTrack 'Al-Fatiha-01.ogg'
+  Assert-WebViewAudio 'playing' 'Al-Fatiha-01.ogg'
+  Click-IslandElement $emptyFull 'إيقاف مؤقت'
+  Assert-WebViewAudio 'paused'
+  Click-IslandElement $emptyFull 'تشغيل'
+  Assert-WebViewAudio 'playing' 'Al-Fatiha-01.ogg'
+  Invoke-MainTrack 'Al-Fatiha-02.ogg'
+  Assert-WebViewAudio 'playing' 'Al-Fatiha-02.ogg'
+  Select-MainAudioFolder $silenceLibrary
+  Invoke-MainTrack 'Digital-Silence-Test.wav'
+  Assert-WebViewAudio 'silence' 'Digital-Silence-Test.wav'
+  Select-MainAudioFolder $emptyAudioLibrary
+  $null = Wait-MainLibrary 12
+  Assert-WebViewAudio 'no-track'
+  $null = Wait-IslandElement $emptyFull 'لا توجد تلاوة' 8
+  Swipe-IslandOffset $emptyFull 0 -62
+  $compactEmpty = Wait-ForRow 'compact' 15 ([long]$emptyFull.timestamp_unix_ms)
+  Swipe-IslandOffset $compactEmpty 0 -62
+  $idleBeforeEmptySwipe = Wait-ForRow 'idle' 15 ([long]$compactEmpty.timestamp_unix_ms)
+  Swipe-IslandOffset $idleBeforeEmptySwipe 62 0
+  $musicWithoutTrack = Wait-ForRow 'compact' 15 ([long]$idleBeforeEmptySwipe.timestamp_unix_ms)
+  $null = Capture-Top 'music-empty-compact'
+  Swipe-IslandOffset $musicWithoutTrack 0 62
+  $expandedEmpty = Wait-ForRow 'full' 15 ([long]$musicWithoutTrack.timestamp_unix_ms) -Expanded
+  $null = Wait-IslandElement $expandedEmpty 'لا توجد تلاوة' 8
+  Swipe-IslandOffset $expandedEmpty 0 -62
+  $compactAfterEmpty = Wait-ForRow 'compact' 15 ([long]$expandedEmpty.timestamp_unix_ms)
+  Swipe-IslandOffset $compactAfterEmpty 0 -62
+  $idleAfterMusic = Wait-ForRow 'idle' 15 ([long]$compactAfterEmpty.timestamp_unix_ms)
   Assert-Anchor $idleAfterMusic
   Assert-RenderGutter $idleAfterMusic
 
-  Click-RectCenter $idleAfterMusic
-  $prayer = Wait-ForRow 'prayer' 15 ([long]$idleAfterMusic.timestamp_unix_ms) -Expanded
+  Swipe-IslandOffset $idleAfterMusic 62 0
+  $compactFromIdleSwipe = Wait-ForRow 'compact' 15 ([long]$idleAfterMusic.timestamp_unix_ms)
+  Swipe-IslandOffset $compactFromIdleSwipe -62 0
+  $prayerFromSwipe = Wait-ForRow 'prayer' 15 ([long]$compactFromIdleSwipe.timestamp_unix_ms) -Expanded
+  Assert-SamePlacementAnchor $idle $prayerFromSwipe
+  Assert-ExpandedBoundsContained $prayerFromSwipe
+  Swipe-IslandOffset $prayerFromSwipe 62 0
+  $compactFromPrayerSwipe = Wait-ForRow 'compact' 15 ([long]$prayerFromSwipe.timestamp_unix_ms)
+  Swipe-IslandOffset $compactFromPrayerSwipe 62 0
+  $idleAfterDirections = Wait-ForRow 'idle' 15 ([long]$compactFromPrayerSwipe.timestamp_unix_ms)
+  Assert-Anchor $idleAfterDirections
+  Assert-RenderGutter $idleAfterDirections
+
+  Click-RectCenter $idleAfterDirections
+  $prayer = Wait-ForRow 'prayer' 15 ([long]$idleAfterDirections.timestamp_unix_ms) -Expanded
   Assert-SamePlacementAnchor $idle $prayer
   if ($prayer.client_size.width -lt 300 -or $prayer.client_size.height -lt 100) { throw "Prayer state did not expand the native window as expected: $($prayer.client_size.width)x$($prayer.client_size.height)" }
   Assert-ExpandedBoundsContained $prayer
@@ -538,16 +800,22 @@ try {
   $null = Wait-IslandElement $manualAlert 'تم' 8 -Absent
   Write-Host 'Verified the automatic completion hides the alert; the single «تم» action closes the next alert. Resume was sent without an active test recitation.'
 
+  $audioMeterSummary = @($audioMeterResults | ForEach-Object {
+    $cpu = if ($null -eq $_.rendererTaskCpuPercentApprox) { 'unavailable' } else { '{0:N2}%' -f [double]$_.rendererTaskCpuPercentApprox }
+    "$($_.mode)=$cpu renderer-task CPU; runtime errors=$($_.runtimeErrors); console errors=$($_.consoleErrors)"
+  })
   $summary = @(
     'PASS: launched the built Tarteel Windows executable.',
     "PASS: measured idle capsule offset before correction=$($idle.pre_alignment.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress); after correction=$($collapsed.capsule_center_error_from_anchor_px | ConvertTo-Json -Compress).",
     'PASS: visible idle capsule remains 44x24 CSS px with a transparent render gutter on every side.',
     'PASS: music compact rounded rectangle remains 112x24 CSS px with radius 11; all four screenshot corners and antialiased edge pixels pass, and outside hit-testing reaches the window behind.',
-    "PASS: physical click expanded the full player to 384x210 CSS px with a measured lower gutter; top-anchor range=$fullMotionSpan CSS px across $($full.motion_sample_count) frames.",
+    "PASS: physical downward swipe expanded the full player to 384x210 CSS px with a measured lower gutter; top-anchor range=$fullMotionSpan CSS px across $($full.motion_sample_count) frames.",
     'PASS: tools expanded at the same anchor; every speed, sleep duration/mode, and both prayer preferences changed and restored through the main-window event bridge.',
     "PASS: physical click expanded prayer state without clipping its bottom edge; lower gutter verified; top-anchor range=$motionSpan CSS px across $($prayer.motion_sample_count) frames.",
     'PASS: synthetic adhan alert expanded within bounds and auto-dismissed on its completion event; the only «تم» button closed a second alert. No audio was played; actual device audio and recitation resume are not covered.',
-    'PASS: physical mouse click returned to idle, the island retained the same manual anchor, and native hit-testing passed through outside its rounded corner and edge.',
+    'PASS: physical mouse taps and directional swipes preserved click behavior, reached music from idle with no recitation, returned to idle, and retained the same manual anchor; native hit-testing passed through outside its rounded corner and edge.',
+    'PASS: no-track music stayed empty; the existing library loaded a test-only CC0 recitation and a temporary digital-silence WAV in the built Windows app; measured live audio waves, settled silent bars, pause/resume, track switching, and removal back to empty. Test audio stayed in RUNNER_TEMP and was not bundled.',
+    "WebView performance/error samples: $($audioMeterSummary -join '; ').",
     'PASS: a negative Manual Y offset crossed the former top limit across idle, music, prayer, and full states, then restored after process relaunch.',
     "Display: $($collapsed.monitor_rc_monitor.right - $collapsed.monitor_rc_monitor.left)x$($collapsed.monitor_rc_monitor.bottom - $collapsed.monitor_rc_monitor.top); scale_factor=$($collapsed.scale_factor); native_dpi=$($collapsed.native_dpi)."
   )
@@ -563,5 +831,8 @@ try {
   else { $env:TARTEEL_WINDOWS_SMOKE_TEST = $previousSmokeFlag }
   if ($null -eq $previousAlertSmokeFlag) { Remove-Item Env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST -ErrorAction SilentlyContinue }
   else { $env:TARTEEL_WINDOWS_ALERT_SMOKE_TEST = $previousAlertSmokeFlag }
+  if ($null -eq $previousWebViewArgs) { Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue }
+  else { $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousWebViewArgs }
+  if (Test-Path $audioTestRoot) { Remove-Item -Recurse -Force $audioTestRoot -ErrorAction SilentlyContinue }
   if (Test-Path $logPath) { Copy-Item -Force $logPath (Join-Path $outDir 'geometry-final.jsonl') }
 }
