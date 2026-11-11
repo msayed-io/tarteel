@@ -277,41 +277,22 @@ function Select-MainAudioFolder([string]$FolderPath) {
   [TarteelUiSmokeNative]::SetForegroundWindow($dialogRootHwnd) | Out-Null
   Write-Host "Activated folder-dialog HWND $dialogRootHwnd for keyboard navigation."
   Start-Sleep -Milliseconds 150
-  $edits = $dialog.FindAll(
-    [System.Windows.Automation.TreeScope]::Descendants,
-    [System.Windows.Automation.PropertyCondition]::new(
-      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-      [System.Windows.Automation.ControlType]::Edit
-    )
-  )
-  $editNames = @()
-  $pathField = $null
-  foreach ($field in $edits) {
-    $info = $field.Current
-    $editNames += "'$($info.Name)' [AutomationId=$($info.AutomationId); offscreen=$($info.IsOffscreen)]"
-    if ($null -eq $pathField -and -not $info.IsOffscreen -and $info.Name -match '^(File name:?|Folder name:?|Address|Location|اسم الملف|اسم المجلد|المسار|الموقع)') { $pathField = $field }
-  }
-  Write-Host "Folder-dialog edit fields: $($editNames -join '; ')"
-  if ($null -ne $pathField) {
-    try {
-      $pathField.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($FolderPath)
-      $pathField.SetFocus()
-      Write-Host "Set folder path through UIA edit '$($pathField.Current.Name)'."
-    } catch {
-      Write-Host "UIA path field was not writable; falling back to Ctrl+L: $($_.Exception.Message)"
-      $pathField = $null
-    }
-  }
-  if ($null -eq $pathField) {
-    [System.Windows.Forms.SendKeys]::SendWait('^l')
-    Start-Sleep -Milliseconds 100
-    [System.Windows.Forms.SendKeys]::SendWait('^a')
-    [System.Windows.Forms.SendKeys]::SendWait($FolderPath)
-  }
+  # Windows 11's native picker exposes a Search Box through UI Automation, not
+  # a writable path Edit. Focus the actual location bar and paste the test path
+  # instead of guessing a localized UIA name or typing path punctuation as keys.
+  Set-Clipboard -Value $FolderPath -ErrorAction Stop
+  [System.Windows.Forms.SendKeys]::SendWait('%d')
+  Start-Sleep -Milliseconds 150
+  [System.Windows.Forms.SendKeys]::SendWait('^a')
+  [System.Windows.Forms.SendKeys]::SendWait('^v')
   [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-  Start-Sleep -Milliseconds 350
-  $dialog = Get-FolderDialog
-  if ($null -ne $dialog) {
+
+  $navigationDeadline = (Get-Date).AddSeconds(10)
+  $select = $null
+  $buttonNames = @()
+  do {
+    $dialog = Get-FolderDialog
+    if ($null -eq $dialog) { break }
     $buttons = $dialog.FindAll(
       [System.Windows.Automation.TreeScope]::Descendants,
       [System.Windows.Automation.PropertyCondition]::new(
@@ -319,15 +300,29 @@ function Select-MainAudioFolder([string]$FolderPath) {
         [System.Windows.Automation.ControlType]::Button
       )
     )
-    $buttonNames = @()
-    foreach ($candidate in $buttons) { $buttonNames += $candidate.Current.Name }
-    Write-Host "Folder-dialog buttons: $($buttonNames -join '; ')"
-    $select = $null
+    $buttonNames = @($buttons | ForEach-Object { $_.Current.Name })
     foreach ($candidate in $buttons) {
-      if ($candidate.Current.Name -match '^(Select|Choose|Open|اختر|اختيار|تحديد|موافق)(\s|$)') { $select = $candidate; break }
+      $info = $candidate.Current
+      if (-not $info.IsOffscreen -and $info.IsEnabled -and $info.Name -match '^(Select|Choose|Open|اختر|اختيار|تحديد|موافق)(\s|$)') { $select = $candidate; break }
     }
-    if ($null -eq $select) { throw "The native folder picker stayed open without a Select/Choose button after navigating to '$FolderPath'." }
-    Write-Host "Invoking folder-dialog action button '$($select.Current.Name)'."
+    if ($null -ne $select) { break }
+    Start-Sleep -Milliseconds 150
+  } while ((Get-Date) -lt $navigationDeadline)
+  if ($null -ne $dialog -and $null -eq $select) {
+    $screenshot = Capture-Top 'folder-picker-navigation-failed'
+    $controls = @()
+    $allControls = $dialog.FindAll(
+      [System.Windows.Automation.TreeScope]::Descendants,
+      [System.Windows.Automation.Condition]::TrueCondition
+    )
+    foreach ($control in ($allControls | Select-Object -First 80)) {
+      $info = $control.Current
+      $controls += "$($info.ControlType.ProgrammaticName): '$($info.Name)' [AutomationId=$($info.AutomationId); offscreen=$($info.IsOffscreen)]"
+    }
+    throw "The native folder picker did not expose a Select/Choose action after focusing its location bar and pasting '$FolderPath'. Buttons: $($buttonNames -join '; '). UIA controls: $($controls -join '; '). Screenshot: $screenshot"
+  }
+  if ($null -ne $select) {
+    Write-Host "Invoking native folder-dialog action button '$($select.Current.Name)' after location-bar navigation."
     $select.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
   }
   $deadline = (Get-Date).AddSeconds(8)

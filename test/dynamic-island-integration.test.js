@@ -91,9 +91,14 @@ describe('selective Dynamic Island update', () => {
     expect(folderPicker).toContain('SetForegroundWindow($dialogRootHwnd)');
     expect(folderPicker).not.toContain('$dialog.SetFocus()');
     expect(folderPicker).toContain('Folder-dialog candidate:');
-    expect(folderPicker).toContain('Folder-dialog buttons:');
-    expect(folderPicker).toContain('Folder-dialog edit fields:');
-    expect(folderPicker).toContain('[System.Windows.Automation.ValuePattern]::Pattern');
+    expect(folderPicker).toContain('Set-Clipboard -Value $FolderPath -ErrorAction Stop');
+    expect(folderPicker).toContain("[System.Windows.Forms.SendKeys]::SendWait('%d')");
+    expect(folderPicker).toContain("[System.Windows.Forms.SendKeys]::SendWait('^a')");
+    expect(folderPicker).toContain("[System.Windows.Forms.SendKeys]::SendWait('^v')");
+    expect(folderPicker).not.toContain('[System.Windows.Automation.ValuePattern]::Pattern');
+    expect(folderPicker).toContain('$navigationDeadline = (Get-Date).AddSeconds(10)');
+    expect(folderPicker).toContain('$info.IsEnabled');
+    expect(folderPicker).toContain("Capture-Top 'folder-picker-navigation-failed'");
     expect(folderPicker).toContain("^(Select|Choose|Open|اختر|اختيار|تحديد|موافق)(\\s|$)");
     expect(rust).toContain('TARTEEL_WINDOWS_SMOKE_CDP');
     expect(rust).toContain('.additional_browser_args(&browser_args)');
