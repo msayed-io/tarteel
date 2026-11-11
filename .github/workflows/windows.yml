@@ -70,7 +70,7 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci
       - name: Install Chromium for rendered rim pixel tests
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
       - run: npm test
       - run: npm run test:rim-browser
       - run: npm run build
