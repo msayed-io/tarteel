@@ -60,7 +60,10 @@ function Wait-ForRow([string]$State, [int]$TimeoutSeconds, [Nullable[long]]$Afte
     if ($process -and $process.HasExited) { throw "Tarteel exited early with code $($process.ExitCode) while waiting for state '$State'" }
     Start-Sleep -Milliseconds 200
   } while ((Get-Date) -lt $deadline)
-  throw "Timed out waiting for a measured '$State' state in $logPath"
+  $recentRows = @($rows | Select-Object -Last 8 | ForEach-Object {
+    "state=$($_.state); view=$($_.viewState); audio=$($_.audioState); timestamp=$($_.timestamp_unix_ms)"
+  }) -join ' | '
+  throw "Timed out waiting for a measured '$State' state after=$After in $logPath; recent measured rows: $recentRows"
 }
 
 function Click-RectCenter($Record) {
@@ -104,11 +107,11 @@ function Swipe-IslandOffset($Record, [double]$OffsetXCss, [double]$OffsetYCss, [
   $minimumStepDelayMs = 8
   $effectiveDurationMs = $DurationMs
   if ($compactUpFlick) {
-    # The compact pill is at the desktop top edge; use a measured in-pill start and a real flick.
+    # The compact pill is at the desktop top edge; send one in-pill move so cursor clipping still produces a fast flick.
     $startY = [double]$rect.bottom - 1
-    $steps = 4
+    $steps = 1
     $minimumStepDelayMs = 1
-    $effectiveDurationMs = [Math]::Min($DurationMs, 24)
+    $effectiveDurationMs = 1
   }
   $stepDelayMs = [int][Math]::Max($minimumStepDelayMs, $effectiveDurationMs / $steps)
   $x0 = [int][Math]::Round($cx); $y0 = [int][Math]::Round($startY)
@@ -116,6 +119,9 @@ function Swipe-IslandOffset($Record, [double]$OffsetXCss, [double]$OffsetYCss, [
   $y1 = [int][Math]::Round($startY + $OffsetYCss * $scale)
   if (-not [TarteelUiSmokeNative]::SetCursorPos($x0, $y0)) { throw "SetCursorPos failed at ($x0,$y0) before swipe." }
   Start-Sleep -Milliseconds 80
+  $actualStart = [TarteelScreenPoint]::new()
+  if (-not [TarteelUiSmokeNative]::GetCursorPos([ref]$actualStart)) { throw 'GetCursorPos failed before swipe.' }
+  $swipeClock = [System.Diagnostics.Stopwatch]::StartNew()
   [TarteelUiSmokeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
   try {
     for ($step = 1; $step -le $steps; $step++) {
@@ -126,8 +132,16 @@ function Swipe-IslandOffset($Record, [double]$OffsetXCss, [double]$OffsetYCss, [
     }
   } finally {
     [TarteelUiSmokeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    $swipeClock.Stop()
   }
-  Write-Host "Sent physical pointer swipe from measured $($Record.state) capsule by ($OffsetXCss,$OffsetYCss) CSS px."
+  $actualEnd = [TarteelScreenPoint]::new()
+  if (-not [TarteelUiSmokeNative]::GetCursorPos([ref]$actualEnd)) { throw 'GetCursorPos failed after swipe.' }
+  $actualDeltaX = $actualEnd.X - $actualStart.X
+  $actualDeltaY = $actualEnd.Y - $actualStart.Y
+  $elapsedMs = [Math]::Round($swipeClock.Elapsed.TotalMilliseconds, 1)
+  $actualDistanceCss = [Math]::Max([Math]::Abs($actualDeltaX), [Math]::Abs($actualDeltaY)) / $scale
+  $velocityCssPerMs = [Math]::Round($actualDistanceCss / [Math]::Max($elapsedMs, 1), 3)
+  Write-Host "Sent physical pointer swipe from measured $($Record.state) capsule by ($OffsetXCss,$OffsetYCss) CSS px; cursor start=($($actualStart.X),$($actualStart.Y)), end=($($actualEnd.X),$($actualEnd.Y)), delta=($actualDeltaX,$actualDeltaY) physical px, elapsed=$elapsedMs ms, velocity=$velocityCssPerMs CSS px/ms."
 }
 
 function Find-IslandElement($Record, [string]$Name) {
@@ -747,6 +761,7 @@ using System.Runtime.InteropServices;
 [StructLayout(LayoutKind.Sequential)] public struct TarteelScreenPoint { public int X; public int Y; }
 public static class TarteelUiSmokeNative {
   [DllImport("user32.dll", SetLastError=true)] public static extern bool SetCursorPos(int X, int Y);
+  [DllImport("user32.dll", SetLastError=true)] public static extern bool GetCursorPos(out TarteelScreenPoint point);
   [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int nIndex);
   [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(TarteelScreenPoint point);

@@ -117,8 +117,12 @@ describe('selective Dynamic Island update', () => {
     const swipeInput = smoke.slice(smoke.indexOf('function Swipe-IslandOffset'), smoke.indexOf('function Find-IslandElement'));
     expect(swipeInput).toContain("$compactUpFlick = $Record.state -eq 'compact' -and $OffsetXCss -eq 0 -and $OffsetYCss -lt 0");
     expect(swipeInput).toContain('$startY = [double]$rect.bottom - 1');
-    expect(swipeInput).toContain('$effectiveDurationMs = [Math]::Min($DurationMs, 24)');
+    expect(swipeInput).toContain('$steps = 1');
+    expect(swipeInput).toContain('$effectiveDurationMs = 1');
+    expect(swipeInput).toContain('[TarteelUiSmokeNative]::GetCursorPos([ref]$actualStart)');
+    expect(swipeInput).toContain('velocity=$velocityCssPerMs CSS px/ms');
     expect(swipeInput).toContain('$stepDelayMs = [int][Math]::Max($minimumStepDelayMs, $effectiveDurationMs / $steps)');
+    expect(smoke).toContain('recent measured rows: $recentRows');
     expect(smoke).toContain("$idleBeforeEmptySwipe = Wait-ForRow 'idle' 15");
     expect(smoke).toContain("$idleAfterMusic = Wait-ForRow 'idle' 15");
     expect(folderPicker).toContain('$info.IsEnabled');
