@@ -438,7 +438,8 @@ function App() {
     };
     const onTime = () => setPos(Number.isFinite(a.currentTime) ? a.currentTime : 0);
     const onMetadata = () => setDuration(Number.isFinite(a.duration) ? a.duration : 0);
-    const onPlay = () => { setPlaying(true); playingRef.current = true; startMeter(); };
+    const onPlay = () => { setPlaying(true); playingRef.current = true; };
+    const onPlaying = () => startMeter();
     const onPause = () => { setPlaying(false); playingRef.current = false; stopMeter(currentRef.current === null ? 'no-track' : 'paused'); };
     const onEnded = () => {
       stopMeter('ended');
@@ -465,6 +466,7 @@ function App() {
     a.addEventListener('loadedmetadata', onMetadata);
     a.addEventListener('durationchange', onMetadata);
     a.addEventListener('play', onPlay);
+    a.addEventListener('playing', onPlaying);
     a.addEventListener('pause', onPause);
     a.addEventListener('ended', onEnded);
     a.addEventListener('error', onError);
@@ -477,6 +479,7 @@ function App() {
       a.removeEventListener('loadedmetadata', onMetadata);
       a.removeEventListener('durationchange', onMetadata);
       a.removeEventListener('play', onPlay);
+      a.removeEventListener('playing', onPlaying);
       a.removeEventListener('pause', onPause);
       a.removeEventListener('ended', onEnded);
       a.removeEventListener('error', onError);

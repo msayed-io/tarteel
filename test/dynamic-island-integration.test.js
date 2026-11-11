@@ -44,12 +44,15 @@ describe('selective Dynamic Island update', () => {
   it('uses only measured playback data for bars and leaves the original audio route untouched', async () => {
     const island = await read('island.html');
     const main = await read('src/main.jsx');
-    const meter = main.slice(main.indexOf('const publishLevels ='), main.indexOf("a.addEventListener('timeupdate'"));
+    const meter = main.slice(main.indexOf('const publishLevels ='), main.indexOf('a.muted = false;'));
     expect(main).toContain("emit('audio-levels', { audioState, levels, rms, peak })");
     expect(main).toContain('a.captureStream()');
     expect(main).toContain("audio.current.crossOrigin = 'anonymous'");
     expect(main).toContain('createMediaStreamSource(stream)');
     expect(main).toContain('getFloatTimeDomainData(meter.samples)');
+    expect(meter).toContain('const onPlaying = () => startMeter()');
+    expect(meter).toContain("a.addEventListener('playing', onPlaying)");
+    expect(main).toContain("a.removeEventListener('playing', onPlaying)");
     expect(island).toContain("listen('audio-levels'");
     expect(meter).not.toContain('setInterval(');
     expect(island).toContain('transform:scaleY(var(--level,.07))');
