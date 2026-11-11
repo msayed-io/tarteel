@@ -978,7 +978,9 @@ try {
   $null = Wait-IslandElement $autoAlert 'تم'
   $null = Wait-IslandElement $autoAlert 'استئناف'
   $null = Wait-IslandElement $autoAlert 'إيقاف الأذان' 8 -Absent
-  $null = Wait-IslandElement $autoAlert 'تم' 18 -Absent
+  # The following synthetic alert reuses the same accessible «تم» button.
+  # Verify the first alert completed by observing its return to the prior idle state.
+  $null = Wait-ForRow 'idle' 18 ([long]$autoAlert.timestamp_unix_ms)
 
   $manualAlert = Wait-ForRow 'alert' 20 ([long]$autoAlert.timestamp_unix_ms) -Expanded
   Assert-ExpandedBoundsContained $manualAlert
