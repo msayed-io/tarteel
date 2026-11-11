@@ -104,7 +104,13 @@ describe('selective Dynamic Island update', () => {
     expect(folderPicker).toContain("[System.Windows.Forms.SendKeys]::SendWait('^a')");
     expect(folderPicker).toContain("[System.Windows.Forms.SendKeys]::SendWait('^v')");
     expect(folderPicker).not.toContain('[System.Windows.Automation.ValuePattern]::Pattern');
-    expect(folderPicker).toContain('$navigationDeadline = (Get-Date).AddSeconds(10)');
+    expect(folderPicker).toContain('Start-Sleep -Milliseconds 400');
+    expect(folderPicker).toContain('$navigationDeadline = (Get-Date).AddSeconds(15)');
+    expect(folderPicker).toContain('FromHandle($dialogRootHwnd)');
+    expect(folderPicker).toContain('UIA folder-picker enumeration attempt $navigationAttempts failed; retrying before deadline: $lastUiAutomationError');
+    expect(folderPicker).toContain("navigationAttempts=$navigationAttempts; lastUiAutomationError='$lastUiAutomationError'");
+    expect(folderPicker).toContain('if ($pathVisible -and $null -ne $select) { break }');
+    expect(folderPicker).toContain('if ($null -eq $dialog -or (-not $pathVisible -or $null -eq $select))');
     expect(folderPicker).toContain('[System.Windows.Automation.Condition]::TrueCondition');
     expect(folderPicker).toContain("$expectedPathPattern = [regex]::Escape($FolderPath) + '\\s*$'");
     expect(folderPicker).toContain('$info.Name -match $expectedPathPattern');

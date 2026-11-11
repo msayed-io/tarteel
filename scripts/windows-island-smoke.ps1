@@ -300,21 +300,33 @@ function Select-MainAudioFolder([string]$FolderPath) {
   [System.Windows.Forms.SendKeys]::SendWait('^v')
   [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
 
-  $navigationDeadline = (Get-Date).AddSeconds(10)
+  Start-Sleep -Milliseconds 400
+  $navigationDeadline = (Get-Date).AddSeconds(15)
   $expectedPathPattern = [regex]::Escape($FolderPath) + '\s*$'
   $pathVisible = $false
   $select = $null
   $actionNames = @()
+  $lastUiAutomationError = $null
+  $navigationAttempts = 0
   do {
-    $dialog = Get-FolderDialog
-    if ($null -eq $dialog) { break }
-    $controls = $dialog.FindAll(
-      [System.Windows.Automation.TreeScope]::Descendants,
-      [System.Windows.Automation.Condition]::TrueCondition
-    )
     $pathVisible = $false
     $select = $null
     $actionNames = @()
+    try {
+      $dialog = [System.Windows.Automation.AutomationElement]::FromHandle($dialogRootHwnd)
+      if ($null -eq $dialog) { $dialog = Get-FolderDialog }
+      if ($null -eq $dialog) { break }
+      $controls = $dialog.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+      )
+    } catch {
+      $navigationAttempts++
+      $lastUiAutomationError = $_.Exception.Message
+      Write-Host "UIA folder-picker enumeration attempt $navigationAttempts failed; retrying before deadline: $lastUiAutomationError"
+      Start-Sleep -Milliseconds 150
+      continue
+    }
     foreach ($candidate in $controls) {
       $info = $candidate.Current
       if (-not [string]::IsNullOrWhiteSpace($info.Name) -and $info.Name -match $expectedPathPattern) { $pathVisible = $true }
@@ -326,18 +338,26 @@ function Select-MainAudioFolder([string]$FolderPath) {
     if ($pathVisible -and $null -ne $select) { break }
     Start-Sleep -Milliseconds 150
   } while ((Get-Date) -lt $navigationDeadline)
-  if ($null -ne $dialog -and (-not $pathVisible -or $null -eq $select)) {
+  if ($null -eq $dialog -or (-not $pathVisible -or $null -eq $select)) {
     $screenshot = Capture-Top 'folder-picker-navigation-failed'
     $controlDetails = @()
-    $allControls = $dialog.FindAll(
-      [System.Windows.Automation.TreeScope]::Descendants,
-      [System.Windows.Automation.Condition]::TrueCondition
-    )
-    foreach ($control in ($allControls | Select-Object -First 80)) {
-      $info = $control.Current
-      $controlDetails += "$($info.ControlType.ProgrammaticName): '$($info.Name)' [AutomationId=$($info.AutomationId); offscreen=$($info.IsOffscreen)]"
+    try {
+      $diagnosticDialog = [System.Windows.Automation.AutomationElement]::FromHandle($dialogRootHwnd)
+      if ($null -eq $diagnosticDialog) { $diagnosticDialog = $dialog }
+      if ($null -ne $diagnosticDialog) {
+        $allControls = $diagnosticDialog.FindAll(
+          [System.Windows.Automation.TreeScope]::Descendants,
+          [System.Windows.Automation.Condition]::TrueCondition
+        )
+        foreach ($control in ($allControls | Select-Object -First 80)) {
+          $info = $control.Current
+          $controlDetails += "$($info.ControlType.ProgrammaticName): '$($info.Name)' [AutomationId=$($info.AutomationId); offscreen=$($info.IsOffscreen)]"
+        }
+      }
+    } catch {
+      $controlDetails += "UIA diagnostic enumeration failed: $($_.Exception.Message)"
     }
-    throw "The native folder picker did not verify the requested path and an enabled Select/Choose action. Expected path: '$FolderPath'; pathVisible=$pathVisible; candidate actions: $($actionNames -join '; '). UIA controls: $($controlDetails -join '; '). Screenshot: $screenshot"
+    throw "The native folder picker did not verify the requested path and an enabled Select/Choose action. Expected path: '$FolderPath'; pathVisible=$pathVisible; navigationAttempts=$navigationAttempts; lastUiAutomationError='$lastUiAutomationError'; candidate actions: $($actionNames -join '; '). UIA controls: $($controlDetails -join '; '). Screenshot: $screenshot"
   }
   if ($null -ne $select) {
     Write-Host "Selecting verified native folder '$FolderPath' through '$($select.Current.Name)' ($($select.Current.ControlType.ProgrammaticName))."
