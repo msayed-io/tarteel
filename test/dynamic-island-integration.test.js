@@ -67,6 +67,14 @@ describe('selective Dynamic Island update', () => {
     expect(smoke).toContain('$env:WEBVIEW2_USER_DATA_FOLDER = $webViewProfile');
     expect(smoke).toContain('Wait-WebViewDebugPort 30');
     expect(smoke).toContain('Process diagnostics: $details');
+    expect(smoke).toContain('HKCU:\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments');
+    expect(smoke).toContain('Restore-WebViewDebugPolicy');
+    const startup = smoke.slice(smoke.indexOf('$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $webViewDebugArguments'), smoke.indexOf('$savedAnchor = $collapsed.capsule_anchor_center_screen'));
+    expect(startup.indexOf('Wait-WebViewDebugPort 30')).toBeGreaterThanOrEqual(0);
+    expect(startup.indexOf('Restore-WebViewDebugPolicy')).toBe(-1);
+    const restart = smoke.slice(smoke.indexOf('$savedAnchor = $collapsed.capsule_anchor_center_screen'), smoke.indexOf("$previousSmokeFlag = $env:TARTEEL_WINDOWS_SMOKE_TEST", smoke.indexOf('$savedAnchor = $collapsed.capsule_anchor_center_screen')));
+    expect(restart.indexOf('Restore-WebViewDebugPolicy')).toBeGreaterThanOrEqual(0);
+    expect(restart.indexOf('Restore-WebViewDebugPolicy')).toBeLessThan(restart.indexOf('Stop-Process'));
     expect(meter).toContain('cause?.cause');
   });
 
