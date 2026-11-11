@@ -70,6 +70,8 @@ describe('selective Dynamic Island update', () => {
     expect(smoke).toContain('$env:TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR = $webViewProfile');
     expect(smoke).toContain('Wait-WebViewDebugPort 30');
     expect(smoke).toContain('Process diagnostics: $details');
+    expect(smoke).toContain('Choose|Browse|Folder|Directory');
+    expect(smoke).toContain('Top-level UIA windows:');
     expect(rust).toContain('TARTEEL_WINDOWS_SMOKE_CDP');
     expect(rust).toContain('.additional_browser_args(&browser_args)');
     expect(rust).toContain('.data_directory(PathBuf::from(data_directory))');

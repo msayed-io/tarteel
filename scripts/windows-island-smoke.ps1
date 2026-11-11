@@ -209,7 +209,7 @@ function Get-FolderDialog {
     )
   )
   foreach ($window in $windows) {
-    if ($window.Current.Name -match 'اختر مجلد التلاوات|Select Folder|Select|Open') { return $window }
+    if ($window.Current.Name -match 'اختر مجلد التلاوات|Select|Open|Choose|Browse|Folder|Directory|مجلد|التلاوات|اختيار|تحديد') { return $window }
   }
   return $null
 }
@@ -218,14 +218,25 @@ function Select-MainAudioFolder([string]$FolderPath) {
   $button = Find-MainButton 'اختيار مجلد الصوت'
   if ($null -eq $button) { throw 'The visible main window did not expose its existing «اختيار مجلد الصوت» button.' }
   $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-  $deadline = (Get-Date).AddSeconds(8)
+  $deadline = (Get-Date).AddSeconds(15)
   $dialog = $null
   do {
     $dialog = Get-FolderDialog
     if ($null -ne $dialog) { break }
     Start-Sleep -Milliseconds 100
   } while ((Get-Date) -lt $deadline)
-  if ($null -eq $dialog) { throw "The native folder picker did not open for '$FolderPath'." }
+  if ($null -eq $dialog) {
+    $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+      [System.Windows.Automation.TreeScope]::Children,
+      [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Window
+      )
+    )
+    $windowNames = @()
+    foreach ($window in $windows) { $windowNames += "$($window.Current.Name) [$($window.Current.ClassName); PID $($window.Current.ProcessId)]" }
+    throw "The native folder picker did not open for '$FolderPath'. Top-level UIA windows: $($windowNames -join '; ')"
+  }
   $dialog.SetFocus()
   Start-Sleep -Milliseconds 150
   [System.Windows.Forms.SendKeys]::SendWait('^l')
