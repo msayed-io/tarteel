@@ -92,6 +92,8 @@ describe('selective Dynamic Island update', () => {
     expect(folderPicker).not.toContain('$dialog.SetFocus()');
     expect(folderPicker).toContain('Folder-dialog candidate:');
     expect(folderPicker).toContain('Folder-dialog buttons:');
+    expect(folderPicker).toContain('Folder-dialog edit fields:');
+    expect(folderPicker).toContain('[System.Windows.Automation.ValuePattern]::Pattern');
     expect(folderPicker).toContain("^(Select|Choose|Open|اختر|اختيار|تحديد|موافق)(\\s|$)");
     expect(rust).toContain('TARTEEL_WINDOWS_SMOKE_CDP');
     expect(rust).toContain('.additional_browser_args(&browser_args)');

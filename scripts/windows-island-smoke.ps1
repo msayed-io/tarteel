@@ -277,10 +277,37 @@ function Select-MainAudioFolder([string]$FolderPath) {
   [TarteelUiSmokeNative]::SetForegroundWindow($dialogRootHwnd) | Out-Null
   Write-Host "Activated folder-dialog HWND $dialogRootHwnd for keyboard navigation."
   Start-Sleep -Milliseconds 150
-  [System.Windows.Forms.SendKeys]::SendWait('^l')
-  Start-Sleep -Milliseconds 100
-  [System.Windows.Forms.SendKeys]::SendWait('^a')
-  [System.Windows.Forms.SendKeys]::SendWait($FolderPath)
+  $edits = $dialog.FindAll(
+    [System.Windows.Automation.TreeScope]::Descendants,
+    [System.Windows.Automation.PropertyCondition]::new(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::Edit
+    )
+  )
+  $editNames = @()
+  $pathField = $null
+  foreach ($field in $edits) {
+    $info = $field.Current
+    $editNames += "'$($info.Name)' [AutomationId=$($info.AutomationId); offscreen=$($info.IsOffscreen)]"
+    if ($null -eq $pathField -and -not $info.IsOffscreen -and $info.Name -match '^(File name:?|Folder name:?|Address|Location|اسم الملف|اسم المجلد|المسار|الموقع)') { $pathField = $field }
+  }
+  Write-Host "Folder-dialog edit fields: $($editNames -join '; ')"
+  if ($null -ne $pathField) {
+    try {
+      $pathField.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($FolderPath)
+      $pathField.SetFocus()
+      Write-Host "Set folder path through UIA edit '$($pathField.Current.Name)'."
+    } catch {
+      Write-Host "UIA path field was not writable; falling back to Ctrl+L: $($_.Exception.Message)"
+      $pathField = $null
+    }
+  }
+  if ($null -eq $pathField) {
+    [System.Windows.Forms.SendKeys]::SendWait('^l')
+    Start-Sleep -Milliseconds 100
+    [System.Windows.Forms.SendKeys]::SendWait('^a')
+    [System.Windows.Forms.SendKeys]::SendWait($FolderPath)
+  }
   [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
   Start-Sleep -Milliseconds 350
   $dialog = Get-FolderDialog
