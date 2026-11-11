@@ -128,6 +128,51 @@ fn parse_range(value: &str) -> Option<(u64, u64)> {
 /// حالة التنبيهات المشتركة بين الواجهة وحلقة الإطلاق.
 struct AlarmHandle { state: alarm::SharedAlarm, path: PathBuf }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+struct AdhanPreferences {
+  enabled: bool,
+  volume: u32,
+  muted: bool,
+}
+
+impl Default for AdhanPreferences {
+  fn default() -> Self { Self { enabled: true, volume: 80, muted: false } }
+}
+
+#[derive(Clone)]
+struct AdhanPreferencesHandle { state: Arc<Mutex<AdhanPreferences>>, path: PathBuf }
+
+fn read_adhan_preferences(path: &Path) -> AdhanPreferences {
+  fs::read(path)
+    .ok()
+    .and_then(|bytes| serde_json::from_slice::<AdhanPreferences>(&bytes).ok())
+    .unwrap_or_default()
+}
+
+fn write_adhan_preferences(path: &Path, preferences: &AdhanPreferences) -> Result<(), String> {
+  let parent = path.parent().ok_or_else(|| "مسار تفضيلات الأذان غير صالح".to_string())?;
+  fs::create_dir_all(parent).map_err(|e| format!("تعذر إنشاء مجلد تفضيلات الأذان: {e}"))?;
+  let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
+  let bytes = serde_json::to_vec(preferences).map_err(|e| format!("تعذر ترميز تفضيلات الأذان: {e}"))?;
+  fs::write(&temporary, bytes).map_err(|e| format!("تعذر كتابة تفضيلات الأذان: {e}"))?;
+  if path.exists() { fs::remove_file(path).map_err(|e| format!("تعذر استبدال تفضيلات الأذان: {e}"))?; }
+  fs::rename(&temporary, path).map_err(|e| format!("تعذر تثبيت تفضيلات الأذان: {e}"))
+}
+
+fn update_adhan_preferences(
+  handle: &AdhanPreferencesHandle,
+  update: impl FnOnce(&mut AdhanPreferences),
+) -> Result<AdhanPreferences, String> {
+  let mut stored = handle.state.lock().map_err(|_| "قفل تفضيلات الأذان تالف".to_string())?;
+  let mut next = stored.clone();
+  update(&mut next);
+  next.volume = next.volume.min(100);
+  write_adhan_preferences(&handle.path, &next)?;
+  *stored = next.clone();
+  Ok(next)
+}
+
 /// طلبات مجدول Windows والأحداث الملتقطة التي تنتظر جاهزية الجزيرة.
 #[derive(Default)]
 struct PendingAlarms {
@@ -236,6 +281,29 @@ fn queue_scheduled_task(app: &tauri::AppHandle, task_name: String) {
   process_pending_scheduled_tasks(app);
 }
 
+fn start_scheduled_adhan_audio(app: &tauri::AppHandle, event: &alarm::AlarmEvent) {
+  let Some(preferences) = app.try_state::<AdhanPreferencesHandle>() else {
+    eprintln!("Tarteel adhan preferences are unavailable for a scheduled prayer");
+    return;
+  };
+  let Ok(preferences) = preferences.state.lock().map(|state| state.clone()) else {
+    eprintln!("Tarteel adhan preferences lock is unavailable for a scheduled prayer");
+    return;
+  };
+  if !preferences.enabled || preferences.muted { return; }
+  let Some(engine) = app.try_state::<AudioEngine>() else {
+    eprintln!("Tarteel audio engine is unavailable for a scheduled prayer");
+    return;
+  };
+  let path = match resolve_adhan_file(app) {
+    Ok(path) => path,
+    Err(error) => { eprintln!("Tarteel scheduled adhan file is unavailable: {error}"); return; }
+  };
+  if let Err(error) = engine.play(&event.id, &path, now_ms(), true) {
+    eprintln!("Tarteel native scheduled adhan playback failed: {error}");
+  }
+}
+
 fn process_pending_scheduled_tasks(app: &tauri::AppHandle) {
   let Some(pending) = app.try_state::<PendingAlarms>() else { return };
   let tasks = match pending.task_names.lock() {
@@ -264,6 +332,8 @@ fn process_pending_scheduled_tasks(app: &tauri::AppHandle) {
       event
     };
     if let Some(event) = event {
+      /* يبدأ الصوت الآن؛ لا ننتظر جاهزية WebView كي لا يضيع عند فشل تحميل الواجهة. */
+      start_scheduled_adhan_audio(app, &event);
       if let Ok(mut events) = pending.events.lock() { events.push(event); }
     }
   }
@@ -337,7 +407,7 @@ fn sync_windows_tasks(handle: State<AlarmHandle>, ahead_ms: Option<i64>) -> Resu
   let state = handle.state.lock().map_err(|_| "تعذر قفل حالة التنبيهات".to_string())?;
   let horizon = now_ms() + ahead_ms.unwrap_or(7 * 24 * 3600 * 1000);
   let specs: Vec<task_scheduler::TaskSpec> = state.events.iter()
-    .filter(|event| event.at > now_ms() && event.at <= horizon)
+    .filter(|event| matches!(event.key.as_str(), "fajr" | "dhuhr" | "asr" | "maghrib" | "isha") && event.at > now_ms() && event.at <= horizon)
     .map(|event| task_scheduler::TaskSpec {
       name: task_scheduler::task_name_for(&event.id),
       at_epoch_ms: event.at,
@@ -378,7 +448,7 @@ fn deliver_alarm(app: &tauri::AppHandle, event: alarm::AlarmEvent) {
 
 /// حلقة الإطلاق: تفحص كل 250ms. عند استئناف الجهاز من النوم لا تُطلق أحداثًا
 /// متأخرة، بل تُسجّلها كمُطلقة (انظر alarm::tick).
-fn start_alarm_loop(app: tauri::AppHandle, state: alarm::SharedAlarm, path: PathBuf) {
+fn start_alarm_loop(app: tauri::AppHandle, state: alarm::SharedAlarm, path: PathBuf, engine: AudioEngine) {
   let spawned = thread::Builder::new().name("tarteel-alarm".into()).spawn(move || loop {
     thread::sleep(Duration::from_millis(250));
     let tick_result = {
@@ -396,6 +466,13 @@ fn start_alarm_loop(app: tauri::AppHandle, state: alarm::SharedAlarm, path: Path
       eprintln!("Tarteel alarm skipped (too late): {}", event.id);
     }
     for event in tick_result.due { deliver_alarm(&app, event); }
+    if let Some(id) = engine.take_completed_playback() {
+      if let Err(error) = app.emit("adhan-playback-state", serde_json::json!({
+        "playing": false, "ended": true, "id": id
+      })) {
+        eprintln!("Tarteel adhan completion event delivery failed: {error}");
+      }
+    }
     if tick_result.sleep_due {
       if let Err(error) = app.emit("sleep-deadline", ()) {
         eprintln!("Tarteel sleep timer event delivery failed: {error}");
@@ -430,8 +507,8 @@ fn resolve_adhan_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 fn play_adhan(app: tauri::AppHandle, engine: State<AudioEngine>, id: Option<String>) -> Result<(), String> {
   let path = resolve_adhan_file(&app)?;
   let key = id.unwrap_or_else(|| "manual".to_string());
-  engine.play(&key, &path, now_ms(), true)?;
-  let _ = app.emit("adhan-playback-state", serde_json::json!({ "playing": true, "id": key }));
+  let playing = engine.play(&key, &path, now_ms(), true)?;
+  let _ = app.emit("adhan-playback-state", serde_json::json!({ "playing": playing, "id": key }));
   Ok(())
 }
 
@@ -443,14 +520,34 @@ fn stop_adhan(app: tauri::AppHandle, engine: State<AudioEngine>) -> Result<(), S
 }
 
 #[tauri::command]
-fn set_adhan_volume(engine: State<AudioEngine>, volume: u32) -> Result<(), String> {
-  engine.set_volume(volume);
+fn set_adhan_preferences(
+  handle: State<AdhanPreferencesHandle>,
+  engine: State<AudioEngine>,
+  enabled: bool,
+  volume: u32,
+  muted: bool,
+) -> Result<(), String> {
+  let preferences = update_adhan_preferences(&handle, |stored| {
+    stored.enabled = enabled;
+    stored.volume = volume;
+    stored.muted = muted;
+  })?;
+  engine.set_volume(preferences.volume);
+  engine.set_muted(preferences.muted);
   Ok(())
 }
 
 #[tauri::command]
-fn set_adhan_muted(engine: State<AudioEngine>, muted: bool) -> Result<(), String> {
-  engine.set_muted(muted);
+fn set_adhan_volume(handle: State<AdhanPreferencesHandle>, engine: State<AudioEngine>, volume: u32) -> Result<(), String> {
+  let preferences = update_adhan_preferences(&handle, |stored| stored.volume = volume)?;
+  engine.set_volume(preferences.volume);
+  Ok(())
+}
+
+#[tauri::command]
+fn set_adhan_muted(handle: State<AdhanPreferencesHandle>, engine: State<AudioEngine>, muted: bool) -> Result<(), String> {
+  let preferences = update_adhan_preferences(&handle, |stored| stored.muted = muted)?;
+  engine.set_muted(preferences.muted);
   Ok(())
 }
 
@@ -885,15 +982,15 @@ pub fn run() {
           });
         });
       }
-      /* اختبار Windows فقط: يعرض تنبيهًا مستعادًا مع حالة تشغيل اصطناعية كي
-         يختبر smoke مساري الإيقاف والاستئناف دون تشغيل ملف صوتي حقيقي. */
+      /* اختبار Windows فقط: يبث حالتي تنبيه اصطناعيتين لاختبار الإخفاء التلقائي
+         بعد الاكتمال وزر «تم» دون تشغيل ملف صوتي حقيقي. */
       if std::env::var("TARTEEL_WINDOWS_ALERT_SMOKE_TEST").ok().as_deref() == Some("1") {
         let alert_smoke_handle = app.handle().clone();
         let _ = app.once_any("island-ready", move |_| {
           let alert_smoke_handle = alert_smoke_handle.clone();
           thread::spawn(move || {
             thread::sleep(Duration::from_secs(2));
-            let id = "windows-smoke-alert";
+            let id = "windows-smoke-alert-auto-end";
             if let Err(cause) = alert_smoke_handle.emit("adhan-playback-state", serde_json::json!({
               "playing": true, "id": id
             })) {
@@ -905,6 +1002,28 @@ pub fn run() {
               "pausedByAdhan": true, "resumeDisabled": false
             })) {
               eprintln!("Tarteel Windows smoke alert restore emit failed: {cause}");
+              return;
+            }
+            thread::sleep(Duration::from_secs(8));
+            if let Err(cause) = alert_smoke_handle.emit("adhan-playback-state", serde_json::json!({
+              "playing": false, "ended": true, "id": id
+            })) {
+              eprintln!("Tarteel Windows smoke adhan completion emit failed: {cause}");
+              return;
+            }
+            thread::sleep(Duration::from_secs(3));
+            let id = "windows-smoke-alert-dismiss";
+            if let Err(cause) = alert_smoke_handle.emit("adhan-playback-state", serde_json::json!({
+              "playing": true, "id": id
+            })) {
+              eprintln!("Tarteel Windows smoke dismissal alert state emit failed: {cause}");
+              return;
+            }
+            if let Err(cause) = alert_smoke_handle.emit("prayer-alarm-restore", serde_json::json!({
+              "id": id, "key": "maghrib", "name": "المغرب", "wasPlaying": true,
+              "pausedByAdhan": true, "resumeDisabled": false
+            })) {
+              eprintln!("Tarteel Windows smoke dismissal alert restore emit failed: {cause}");
             }
           });
         });
@@ -978,11 +1097,20 @@ pub fn run() {
       }
       /* حالة التنبيهات: تُقرأ من القرص عند الإقلاع، فتبقى المعرّفات المُطلقة
          محفوظة عبر إعادة التشغيل ولا يتكرر أي أذان. */
-      let alarm_path = alarm::state_path(&app.path().app_config_dir()?);
+      let config_dir = app.path().app_config_dir()?;
+      let adhan_preferences_path = config_dir.join("adhan-preferences.json");
+      let adhan_preferences = read_adhan_preferences(&adhan_preferences_path);
+      let audio_engine = app.state::<AudioEngine>().inner().clone();
+      audio_engine.set_volume(adhan_preferences.volume);
+      audio_engine.set_muted(adhan_preferences.muted);
+      app.manage(AdhanPreferencesHandle {
+        state: Arc::new(Mutex::new(adhan_preferences)), path: adhan_preferences_path,
+      });
+      let alarm_path = alarm::state_path(&config_dir);
       let alarm_state = Arc::new(Mutex::new(alarm::read_state(&alarm_path)));
       app.manage(AlarmHandle { state: alarm_state.clone(), path: alarm_path.clone() });
       process_pending_scheduled_tasks(app.handle());
-      start_alarm_loop(app.handle().clone(), alarm_state, alarm_path);
+      start_alarm_loop(app.handle().clone(), alarm_state, alarm_path, audio_engine);
 
       /* الصينية: تُبنى قبل إظهار النوافذ حتى يبقى التطبيق قابلًا للوصول
          بعد الإخفاء. */
@@ -1021,7 +1149,7 @@ pub fn run() {
       alarm_status,
       set_island_hit_rect, set_island_pass_through,
       island_diagnostics::record_island_geometry,
-      play_adhan, stop_adhan, set_adhan_volume, set_adhan_muted, adhan_state,
+      play_adhan, stop_adhan, set_adhan_preferences, set_adhan_volume, set_adhan_muted, adhan_state,
       set_next_prayer_label,
       is_autostart_enabled, set_autostart
     ])
@@ -1032,6 +1160,23 @@ pub fn run() {
 #[cfg(test)]
 mod island_tests {
   use super::*;
+
+  #[test]
+  fn adhan_preferences_persist_and_clamp_volume() {
+    let dir = std::env::temp_dir().join(format!("tarteel-adhan-prefs-test-{}", std::process::id()));
+    let path = dir.join("adhan-preferences.json");
+    let initial = AdhanPreferences { enabled: false, volume: 64, muted: true };
+    write_adhan_preferences(&path, &initial).unwrap();
+    assert_eq!(read_adhan_preferences(&path), initial);
+
+    let handle = AdhanPreferencesHandle { state: Arc::new(Mutex::new(initial)), path: path.clone() };
+    let updated = update_adhan_preferences(&handle, |prefs| prefs.volume = 140).unwrap();
+    assert_eq!(updated.volume, 100);
+    assert!(!updated.enabled);
+    assert!(updated.muted);
+    assert_eq!(read_adhan_preferences(&path), updated);
+    let _ = fs::remove_dir_all(&dir);
+  }
 
   #[test]
   fn island_bounds_are_derived_from_the_actual_monitor_origin() {

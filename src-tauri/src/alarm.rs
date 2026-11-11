@@ -30,6 +30,10 @@ pub const MAX_FIRED_IDS: usize = 512;
 /// أقصى عدد أحداث مقبول في تحديث واحد (5 صلوات × 366 يومًا).
 pub const MAX_EVENTS: usize = 2000;
 
+fn is_prayer_alarm_key(key: &str) -> bool {
+    matches!(key, "fajr" | "dhuhr" | "asr" | "maghrib" | "isha")
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AlarmEvent {
@@ -100,6 +104,9 @@ pub struct AlarmTick {
 pub fn tick(state: &mut AlarmState, now_ms: i64) -> AlarmTick {
     /* تُجمع النتائج أولًا ثم تُحدَّث القائمة، لأن الاستعارة المتزامنة للقراءة
        والكتابة على نفس الحقل ممنوعة في Rust. */
+    let original_event_count = state.events.len();
+    state.events.retain(|event| is_prayer_alarm_key(&event.key));
+    let removed_invalid_events = state.events.len() != original_event_count;
     let fired: HashSet<String> = state.fired_ids.iter().cloned().collect();
     let mut due = Vec::new();
     let mut skipped = Vec::new();
@@ -116,7 +123,7 @@ pub fn tick(state: &mut AlarmState, now_ms: i64) -> AlarmTick {
         }
         newly_fired.push(event.id.clone());
     }
-    let mut changed = !newly_fired.is_empty();
+    let mut changed = !newly_fired.is_empty() || removed_invalid_events;
     state.fired_ids.extend(newly_fired);
 
     /* تقليم القائمة من الأقدم مع الحفاظ على السقف. */
@@ -153,6 +160,9 @@ pub fn claim_scheduled_task(state: &mut AlarmState, task_name: &str, now_ms: i64
     let event = state.events.iter()
         .find(|event| crate::task_scheduler::task_name_for(&event.id) == task_name)?
         .clone();
+    if !is_prayer_alarm_key(&event.key) {
+        return None;
+    }
     if state.fired_ids.contains(&event.id) || event.at > now_ms {
         return None;
     }
@@ -174,6 +184,9 @@ pub fn apply_events(state: &mut AlarmState, mut events: Vec<AlarmEvent>) -> Resu
     for event in &events {
         if event.id.trim().is_empty() || event.name.trim().is_empty() {
             return Err("رفضت جدولة موعد ناقص المعرّف أو الاسم.".to_string());
+        }
+        if !is_prayer_alarm_key(&event.key) {
+            return Err(format!("رفضت جدولة مفتاح ليس صلاة أذان معتمدة: {}", event.key));
         }
         if event.at <= 0 {
             return Err("رفضت جدولة موعد بلحظة غير صالحة.".to_string());
@@ -290,6 +303,36 @@ mod tests {
         assert!(apply_events(&mut state, vec![AlarmEvent { id: " ".into(), key: "fajr".into(), name: "الفجر".into(), at: 100 }]).is_err());
         assert!(apply_events(&mut state, vec![AlarmEvent { id: "y".into(), key: "fajr".into(), name: "".into(), at: 100 }]).is_err());
         assert!(apply_events(&mut state, vec![event("z", 0)]).is_err());
+    }
+
+    #[test]
+    fn rejects_sunrise_without_replacing_the_last_valid_schedule() {
+        let mut state = AlarmState { events: vec![event("keep", 1_800_000_000_000)], ..Default::default() };
+        let sunrise = AlarmEvent {
+            id: "2026-11-09|sunrise".into(), key: "sunrise".into(), name: "الشروق".into(),
+            at: 1_800_000_000_100,
+        };
+        let error = apply_events(&mut state, vec![sunrise]).unwrap_err();
+        assert!(error.contains("ليس صلاة"));
+        assert_eq!(state.events[0].id, "keep");
+    }
+
+    #[test]
+    fn legacy_sunrise_is_removed_and_cannot_be_claimed_by_a_windows_task() {
+        const AT: i64 = 1_800_000_000_000;
+        let sunrise = AlarmEvent {
+            id: "2026-11-09|sunrise".into(), key: "sunrise".into(), name: "الشروق".into(), at: AT,
+        };
+        let mut state = AlarmState { events: vec![sunrise.clone()], ..Default::default() };
+        let result = tick(&mut state, AT);
+        assert!(result.due.is_empty());
+        assert!(state.events.is_empty());
+        assert!(result.changed);
+
+        let task = crate::task_scheduler::task_name_for(&sunrise.id);
+        let mut restored = AlarmState { events: vec![sunrise], ..Default::default() };
+        assert!(claim_scheduled_task(&mut restored, &task, AT).is_none());
+        assert!(restored.fired_ids.is_empty());
     }
 
     #[test]

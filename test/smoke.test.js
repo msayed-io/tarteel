@@ -201,7 +201,7 @@ describe('Tarteel production surface', () => {
     const main = await read('src/main.jsx');
     const rust = await read('src-tauri/src/lib.rs');
     for (const event of ['player-state', 'prayer-data', 'prayer-adhan', 'prayer-resumed', 'sleep-deadline']) expect(island).toContain(`listen('${event}'`);
-    for (const action of ['seek-by', 'set-speed', 'set-sleep', 'set-prayer-preference', 'resume-after-adhan']) expect(main).toContain(`payload.action === '${action}'`);
+    for (const action of ['toggle', 'previous', 'next', 'seek', 'seek-by', 'set-speed', 'set-sleep', 'set-prayer-preference', 'resume-after-adhan', 'dismiss-adhan']) expect(main).toContain(`payload.action === '${action}'`);
     expect(main).toContain('audio.current.playbackRate = Number(next.speed)');
     expect(main).toContain("sleepMode: 'end'");
     /* المنظومة القديمة أُعيد بناؤها: الجدولة الآن تمرّ بـ set_alarm_schedule
@@ -292,5 +292,17 @@ describe('Tarteel production surface', () => {
     const tickBody = island.split('function tick(now)')[1].split('const kick=')[0];
     expect(tickBody).not.toContain('resize');
     expect(tickBody).not.toContain('host');
+  });
+
+  it('damps island springs without changing the established anchor or collapse sizing', async () => {
+    const island = await read('island.html');
+    const springs = [...island.matchAll(/mk\(\d+,(\d+),(\d+)\)/g)].map(match => [Number(match[1]), Number(match[2])]);
+    expect(springs).toHaveLength(3);
+    for (const [stiffness, damping] of springs) {
+      expect(damping * damping).toBeGreaterThanOrEqual(4 * stiffness);
+    }
+    expect(island).toContain('if(width>host.width||requiredHeight>host.height)');
+    expect(island).toContain('back=state');
+    expect(island).not.toContain('shrinkHostWhenSettled');
   });
 });

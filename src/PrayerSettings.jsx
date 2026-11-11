@@ -195,13 +195,12 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
     }
   };
 
-  /* مستوى الصوت والكتم يُبثّان إلى محرك الصوت في Rust فورًا. */
+  /* تفضيلات الصوت كاملة تُحفظ في Rust لاستخدامها قبل تحميل WebView عند الموعد. */
   useEffect(() => {
-    invoke('set_adhan_volume', { volume: Number(adhanVolume) }).catch(() => {});
-  }, [adhanVolume]);
-  useEffect(() => {
-    invoke('set_adhan_muted', { muted: adhanMuted }).catch(() => {});
-  }, [adhanMuted]);
+    invoke('set_adhan_preferences', {
+      enabled: Boolean(adhanSound), volume: Number(adhanVolume), muted: Boolean(adhanMuted),
+    }).catch(() => {});
+  }, [adhanSound, adhanVolume, adhanMuted]);
 
   /* حالة البدء مع ويندوز تُقرأ من النظام لا من التخزين المحلي. */
   useEffect(() => {

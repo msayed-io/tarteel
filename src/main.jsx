@@ -7,7 +7,7 @@ import { sendNotification } from '@tauri-apps/plugin-notification';
 import PrayerSettings from './PrayerSettings.jsx';
 import { displayPlaceName } from './engine/display.js';
 import { resolveLocation, readDevicePosition, locationNeedsRefresh, describeLocationError } from './engine/location.js';
-import { buildSchedule, scheduleNeedsRebuild, alarmEvents, upcoming, current as currentPrayerOf, countdownLabel, toNativeEvents } from './engine/schedule.js';
+import { buildSchedule, scheduleNeedsRebuild, alarmEvents, upcoming, current as currentPrayerOf, countdownLabel, toNativeEvents, TASK_HORIZON_DAYS, tasksWithinHorizon } from './engine/schedule.js';
 import { installSpecularRim } from './lib/specular-rim.js';
 import { applyRimIntensity, readRimIntensity } from './lib/rim-preference.js';
 import './styles.css';
@@ -163,6 +163,16 @@ function App() {
   useEffect(() => { localStorage.setItem('tarteel.volume', String(volume)); }, [volume]);
   useEffect(() => { localStorage.setItem('tarteel.prayer.settings', JSON.stringify(prayerConfig)); }, [prayerConfig]);
   useEffect(() => { if (adhanAlert) localStorage.setItem('tarteel.adhan.alert', JSON.stringify(adhanAlert)); else localStorage.removeItem('tarteel.adhan.alert'); }, [adhanAlert]);
+  useEffect(() => {
+    invoke('set_adhan_preferences', {
+      enabled: Boolean(prayerConfig.adhanSound ?? true),
+      volume: Math.max(0, Math.min(100, Number(prayerConfig.adhanVolume ?? 80))),
+      muted: Boolean(prayerConfig.adhanMuted ?? false),
+    }).catch(cause => {
+      console.error('Tarteel could not persist adhan preferences for scheduled playback', cause);
+      setError(`تعذر حفظ تفضيلات الأذان للتنبيه عند تشغيل مهمة Windows: ${String(cause)}`);
+    });
+  }, [prayerConfig.adhanSound, prayerConfig.adhanVolume, prayerConfig.adhanMuted]);
 
   const persistAudioPrefs = patch => {
     const next = { ...audioPrefsRef.current, ...patch };
@@ -200,6 +210,7 @@ function App() {
   const clearAdhanAlert = () => {
     adhanAlertRef.current = null;
     setAdhanAlert(null);
+    localStorage.removeItem('tarteel.adhan.alert');
     clearPendingResume();
   };
 
@@ -236,9 +247,20 @@ function App() {
   const publishScheduleToNative = async schedule => {
     const events = toNativeEvents(schedule);
     await invoke('set_alarm_schedule', { events });
-    /* فشل مهام ويندوز لا يُسقط الجدولة المقيمة: تُغطّى الحالتان معًا. */
-    invoke('sync_windows_tasks', { aheadMs: 7 * 24 * 3600 * 1000 })
-      .catch(cause => console.error('Tarteel could not sync Windows tasks', cause));
+    const now = Date.now();
+    const expected = tasksWithinHorizon(schedule, now).length;
+    try {
+      const created = await invoke('sync_windows_tasks', { aheadMs: TASK_HORIZON_DAYS * 24 * 3600 * 1000 });
+      const prefix = 'تعذر مزامنة مهام الأذان';
+      if (created < expected) {
+        setError(`تزامن ${created} من ${expected} مهمة أذان فقط؛ قد لا يعمل الأذان أثناء سكون الجهاز.`);
+      } else {
+        setError(current => current.startsWith(prefix) || current.startsWith('تزامن ') ? '' : current);
+      }
+    } catch (cause) {
+      console.error('Tarteel could not sync Windows tasks', cause);
+      setError(`تعذر مزامنة مهام الأذان مع Windows Task Scheduler؛ قد لا يعمل الأذان أثناء سكون الجهاز. ${String(cause)}`);
+    }
   };
 
   const storePrayerSchedule = async (config, schedule) => {
@@ -717,6 +739,7 @@ function App() {
     let unlistenControl;
     let unlistenReady;
     let unlistenAlarm;
+    let unlistenPlayback;
     let unlistenSleep;
     let unlistenDismiss;
     let unlistenIslandError;
@@ -742,6 +765,11 @@ function App() {
         if (restoreReadyRef.current && adhanAlertRef.current && Date.now() - adhanAlertRef.current.createdAt < 12 * 60 * 60 * 1000) emit('prayer-alarm-restore', adhanAlertRef.current).catch(() => {});
       }),
       listen('prayer-adhan', event => handleAdhan(event.payload || {})),
+      listen('adhan-playback-state', event => {
+        const payload = event.payload || {};
+        if (!payload.ended || adhanAlertRef.current?.id !== payload.id) return;
+        clearAdhanAlert();
+      }),
       listen('sleep-deadline', () => {
         audio.current.pause();
         disableAdhanResume();
@@ -751,14 +779,14 @@ function App() {
       }),
       listen('prayer-alert-dismissed', () => controlsRef.current.dismissAdhan()),
       listen('island-error', event => setError(String(event.payload?.message || 'تعذر تغيير حجم نافذة الجزيرة.')))
-    ]).then(([control, ready, alarm, sleepListener, dismiss, islandError]) => {
-      unlistenControl = control; unlistenReady = ready; unlistenAlarm = alarm; unlistenSleep = sleepListener; unlistenDismiss = dismiss; unlistenIslandError = islandError;
+    ]).then(([control, ready, alarm, playback, sleepListener, dismiss, islandError]) => {
+      unlistenControl = control; unlistenReady = ready; unlistenAlarm = alarm; unlistenPlayback = playback; unlistenSleep = sleepListener; unlistenDismiss = dismiss; unlistenIslandError = islandError;
       emit('main-ready').catch(cause => console.error('Tarteel startup-ready acknowledgement failed', cause));
     }).catch(cause => {
       console.error('Tarteel event listeners failed to initialize', cause);
       setError(`تعذر تهيئة ربط أحداث الصوت/الصلاة: ${String(cause)}`);
     });
-    return () => { unlistenControl?.(); unlistenReady?.(); unlistenAlarm?.(); unlistenSleep?.(); unlistenDismiss?.(); unlistenIslandError?.(); };
+    return () => { unlistenControl?.(); unlistenReady?.(); unlistenAlarm?.(); unlistenPlayback?.(); unlistenSleep?.(); unlistenDismiss?.(); unlistenIslandError?.(); };
   }, []);
 
   const changeVolume = event => {

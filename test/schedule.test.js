@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildSchedule, alarmEvents, tasksWithinHorizon, scheduleNeedsRebuild,
-  upcoming, current, countdownLabel, alarmCopy, TIMELINE_DAYS,
+  toNativeEvents, upcoming, current, countdownLabel, alarmCopy, TASK_HORIZON_DAYS,
 } from '../src/engine/schedule.js';
 
 const zagazig = {
@@ -22,8 +22,8 @@ describe('بناء الجدول من موقع مؤكد', () => {
   });
 
   it('ينتج أحداث صلوات باسم عربي ومعرّف فريد ولحظة مطلقة', () => {
-    /* المرجع يحسب 4 أيام (−1..+2) × 6 صلوات للآيلاند */
-    expect(schedule.events.length).toBe(6 * (TIMELINE_DAYS + 1));
+    /* من يوم أمس حتى اليوم السابع مستقبلًا، ليبقى أسبوع كامل متاحًا عند السكون. */
+    expect(schedule.events.length).toBe(6 * (TASK_HORIZON_DAYS + 2));
     for (const event of schedule.events) {
       expect(event.name).toMatch(/^(الفجر|الشروق|الظهر|العصر|المغرب|العشاء)$/);
       expect(event.id).toBe(`${event.date}|${event.key}`);
@@ -63,6 +63,17 @@ describe('تغذية جدولة Rust ومهام ويندوز', () => {
     expect(tasks.every(t => t.at <= NOW + 7 * 24 * 3600 * 1000)).toBe(true);
     // أسبوع × 5 صلوات = 35 كحد أقصى
     expect(tasks.length).toBeLessThanOrEqual(35);
+  });
+
+  it('يبقي جميع صلوات اليوم السابع متاحة ولا يرسل الشروق لمجدول الأذان', () => {
+    const lastLocalDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: zagazig.timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(NOW + TASK_HORIZON_DAYS * 24 * 3600 * 1000));
+    const daySeven = schedule.events.filter(event => event.date === lastLocalDate);
+    expect(daySeven.map(event => event.key)).toEqual(['fajr', 'sunrise', 'dhuhr', 'asr', 'maghrib', 'isha']);
+    const native = toNativeEvents(schedule);
+    expect(native.length).toBe(5 * (TASK_HORIZON_DAYS + 2));
+    expect(native.some(event => event.key === 'sunrise')).toBe(false);
   });
 });
 

@@ -51,17 +51,49 @@ describe('فصل الأذان عن إشعار التنبيه المسبق', () =
     expect(preview).not.toContain('sendNotification');
   });
 
-  it('زر البطاقة موصول بمحرك الصوت ويختفي بعد الإيقاف', () => {
+  it('زر «تم» يوقف الصوت ويغلق البطاقة، والاكتمال الطبيعي يعيد الجزيرة تلقائيًا', () => {
     const main = source('src/main.jsx');
     const island = source('island.html');
     const rust = source('src-tauri/src/lib.rs');
-    expect(island).toContain('id="alStop"');
-    expect(island).toContain("control('stop-adhan')");
+    const audio = source('src-tauri/src/audio.rs');
+    expect(island).not.toContain('id="alStop"');
+    expect(island).toContain("$('#alD').addEventListener('click',()=>dismissAlert(true))");
     expect(island).toContain("listen('adhan-playback-state'");
-    expect(main).toContain("payload.action === 'stop-adhan'");
+    expect(island).toContain('payload.ended&&prayerState.alert?.id===payload.id');
+    expect(main).toContain("listen('adhan-playback-state', event =>");
+    expect(main).toContain("localStorage.removeItem('tarteel.adhan.alert')");
     expect(main).toContain("invoke('stop_adhan'");
     expect(rust).toContain('fn stop_adhan(app: tauri::AppHandle');
     expect(rust).toContain('"stopped": true');
+    expect(rust).toContain('"ended": true');
+    expect(audio).toContain('take_completed_playback');
+  });
+
+  it('مواعيد Windows تستخدم المنطقة المحلية الديناميكية وتحتفظ بالمهام السابقة عند الفشل', () => {
+    const scheduler = source('src-tauri/src/task_scheduler.rs');
+    expect(scheduler).toContain('GetDynamicTimeZoneInformation');
+    expect(scheduler).toContain('SystemTimeToTzSpecificLocalTimeEx');
+    expect(scheduler).toContain('TIME_ZONE_ID_INVALID');
+    expect(scheduler).toContain('SystemTimeToTzSpecificLocalTimeEx(Some(&time_zone)');
+    expect(scheduler).toContain('احتُفظ بالمهام السابقة');
+    expect(scheduler).toContain('stale_task_names(&existing, &specs)');
+  });
+
+  it('مهمة الإقلاع البارد تبدأ الصوت قبل واجهة WebView وتستخدم تفضيلات محفوظة', () => {
+    const rust = source('src-tauri/src/lib.rs');
+    const main = source('src/main.jsx');
+    const settings = source('src/PrayerSettings.jsx');
+    const scheduler = source('src-tauri/src/task_scheduler.rs');
+    const coldPath = rust.split('fn process_pending_scheduled_tasks(')[1].split('fn flush_pending_alarms(')[0];
+    expect(coldPath).toContain('start_scheduled_adhan_audio(app, &event)');
+    expect(coldPath.indexOf('start_scheduled_adhan_audio(app, &event)'))
+      .toBeLessThan(coldPath.indexOf('pending.events.lock()'));
+    expect(rust).toContain('adhan-preferences.json');
+    expect(rust).toContain('if !preferences.enabled || preferences.muted');
+    expect(main).toContain("invoke('set_adhan_preferences'");
+    expect(settings).toContain("invoke('set_adhan_preferences'");
+    expect(scheduler).toContain('<WakeToRun>true</WakeToRun>');
+    expect(scheduler).toContain('<LogonType>InteractiveToken</LogonType>');
   });
 
   it('إخفاء بطاقة الأذان يوقف الصوت ولا يتركه يعمل بلا تحكم', () => {

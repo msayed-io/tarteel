@@ -22,10 +22,7 @@ import { haversineKm } from './location.js';
    UTC متصلة. يحل محل الحساب اليدوي السابق بالكامل. */
 import { getDayPrayers, getPrayerTimeline } from '../lib/prayer-times.ts';
 
-/** عدد الأيام المحسوبة مسبقًا. 3 أيام تكفي للمسار المتصل حول منتصف الليل. */
-export const TIMELINE_DAYS = 3;
-
-/** الأيام التي تُجدول لها مهام ويندوز. أسبوع كامل يغطي أي انقطاع. */
+/** مدى التغطية المستقبلية لمهام Windows؛ تُحسب أيضًا بالأيام المدنية لتجاوز منتصف الليل. */
 export const TASK_HORIZON_DAYS = 7;
 
 /** الصلوات التي يُطلق لها تنبيه. الشروق ليس صلاة. */
@@ -59,7 +56,7 @@ export function buildSchedule(location, { now = Date.now(), adjust, methodId, sh
    */
   const events = [];
   const days = [];
-  for (let offset = -1; offset < TIMELINE_DAYS; offset += 1) {
+  for (let offset = -1; offset <= TASK_HORIZON_DAYS; offset += 1) {
     const dayDate = new Date(now + offset * 86400000);
     const day = getDayPrayers(latitude, longitude, dayDate, method, timeZone);
     days.push(day);
@@ -225,7 +222,8 @@ function formatPrayerTime(date, timeZone) {
 export function toNativeEvents(schedule) {
   if (!Array.isArray(schedule?.events)) return [];
   return schedule.events
-    .filter(event => Number.isFinite(Number(event.at)))
+    /* الشروق يظهر في القائمة فقط، ولا يُنشأ له أبدًا صوت أذان أو مهمة إيقاظ. */
+    .filter(event => ALARM_KEYS.includes(event.key) && Number.isFinite(Number(event.at)))
     .map(event => ({
       id: String(event.id),
       key: String(event.key),

@@ -25,6 +25,7 @@
 //! أي مهمة أخرى للمستخدم.
 
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -40,6 +41,15 @@ pub struct TaskSpec {
     pub name: String,
     pub at_epoch_ms: i64,
     pub label: String,
+}
+
+fn stale_task_names(existing: &[String], desired: &[TaskSpec]) -> Vec<String> {
+    let desired: HashSet<&str> = desired.iter().map(|spec| spec.name.as_str()).collect();
+    existing
+        .iter()
+        .filter(|name| name.starts_with(TASK_PREFIX) && !desired.contains(name.as_str()))
+        .cloned()
+        .collect()
 }
 
 /// فشل في التفاعل مع مجدول المهام.
@@ -69,19 +79,33 @@ pub fn task_name_for(event_id: &str) -> String {
 #[cfg(windows)]
 fn local_iso(epoch_ms: i64) -> Result<String, TaskError> {
     use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
-    use windows::Win32::System::Time::FileTimeToSystemTime;
+    use windows::Win32::System::Time::{
+        FileTimeToSystemTime, GetDynamicTimeZoneInformation,
+        SystemTimeToTzSpecificLocalTimeEx, DYNAMIC_TIME_ZONE_INFORMATION,
+        TIME_ZONE_ID_INVALID,
+    };
     /* FILETIME = 100ns intervals since 1601-01-01 */
     let filetime = (epoch_ms as i128 + 11_644_473_600_000) * 10_000;
     let ft = FILETIME {
         dwLowDateTime: (filetime & 0xFFFF_FFFF) as u32,
         dwHighDateTime: ((filetime >> 32) & 0xFFFF_FFFF) as u32,
     };
-    let mut st = SYSTEMTIME::default();
-    unsafe { FileTimeToSystemTime(&ft, &mut st) }
-        .map_err(|e| TaskError(format!("تعذر تحويل وقت المهمة إلى توقيت محلي: {e}")))?;
+    let mut utc = SYSTEMTIME::default();
+    unsafe { FileTimeToSystemTime(&ft, &mut utc) }
+        .map_err(|e| TaskError(format!("تعذر تحويل وقت المهمة إلى UTC: {e}")))?;
+    let mut time_zone = DYNAMIC_TIME_ZONE_INFORMATION::default();
+    let status = unsafe { GetDynamicTimeZoneInformation(&mut time_zone) };
+    if status == TIME_ZONE_ID_INVALID {
+        return Err(TaskError("تعذر قراءة منطقة التوقيت الحالية في Windows".into()));
+    }
+    let mut local = SYSTEMTIME::default();
+    unsafe {
+        SystemTimeToTzSpecificLocalTimeEx(Some(&time_zone), &utc, &mut local)
+    }
+    .map_err(|e| TaskError(format!("تعذر تحويل وقت المهمة إلى توقيت Windows المحلي: {e}")))?;
     Ok(format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
-        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond
+        local.wYear, local.wMonth, local.wDay, local.wHour, local.wMinute, local.wSecond
     ))
 }
 
@@ -229,6 +253,32 @@ pub fn delete_task(name: &str) -> Result<(), TaskError> {
     Ok(())
 }
 
+/// يسرد مهام تَرتيل الموجودة دون لمس مهام المستخدم الأخرى.
+#[cfg(windows)]
+fn list_tarteel_tasks() -> Result<Vec<String>, TaskError> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let output = Command::new("schtasks.exe")
+        .args(["/Query", "/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| TaskError(format!("تعذر قراءة مهام مجدول ويندوز: {e}")))?;
+    let text = format!("{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    if !output.status.success() {
+        let lower = text.to_lowercase();
+        if lower.contains("no scheduled tasks") || lower.contains("لا توجد مهام مجدولة") || lower.contains("nenhuma tarefa agendada") {
+            return Ok(Vec::new());
+        }
+        return Err(TaskError(format!("تعذر قراءة المهام الموجودة من Windows Task Scheduler: {}", text.trim())));
+    }
+    Ok(text
+        .lines()
+        .filter_map(|line| line.split(',').next())
+        .map(|first| first.trim().trim_matches('"').trim_start_matches('\\').to_string())
+        .filter(|name| name.starts_with(TASK_PREFIX))
+        .collect())
+}
+
 /// يحذف كل مهام تَرتيل فقط. يعتمد على البادئة، فلا يمسّ مهام المستخدم الأخرى.
 #[cfg(windows)]
 pub fn delete_all_tasks() -> usize {
@@ -254,18 +304,29 @@ pub fn delete_all_tasks() -> usize {
 }
 
 /// يزامن مهام ويندوز مع الجدول المعطى.
-/// يحذف مهام تَرتيل القديمة كلها ثم ينشئ المهام المستقبلية فقط،
-/// فلا تتراكم مهام منتهية ولا تبقى مهام لأيام مضت.
+/// تُحدّث المهام المطلوبة أولًا؛ لا تُحذف القديمة إلا بعد نجاح الإنشاء الكامل،
+/// حتى لا نخسر التنبيهات العاملة عند رفض Windows لمهمة أو أكثر.
 #[cfg(windows)]
 pub fn sync_tasks(specs: &[TaskSpec]) -> Result<usize, TaskError> {
-    delete_all_tasks();
+    let specs: Vec<TaskSpec> = specs.iter().take(MAX_TASKS).cloned().collect();
     let mut created = 0;
-    for spec in specs.iter().take(MAX_TASKS) {
-        /* فشل مهمة واحدة يجب ألا يمنع البقية: التنبيهات المقيمة تغطيها. */
+    let mut failures = Vec::new();
+    for spec in &specs {
         match register_task(spec) {
             Ok(()) => created += 1,
-            Err(error) => eprintln!("Tarteel task '{}' could not be created: {error}", spec.name),
+            Err(error) => failures.push(format!("{}: {error}", spec.name)),
         }
+    }
+    if !failures.is_empty() {
+        let details = failures.iter().take(3).cloned().collect::<Vec<_>>().join("؛ ");
+        return Err(TaskError(format!(
+            "تعذر إنشاء {} من {} مهمة أذان في Windows Task Scheduler؛ احتُفظ بالمهام السابقة. {}",
+            failures.len(), specs.len(), details
+        )));
+    }
+    let existing = list_tarteel_tasks()?;
+    for name in stale_task_names(&existing, &specs) {
+        delete_task(&name)?;
     }
     Ok(created)
 }
@@ -305,6 +366,19 @@ mod tests {
         let name = task_name_for("|مفتاح غريب|");
         assert!(name.starts_with(TASK_PREFIX));
         assert!(name.len() > TASK_PREFIX.len());
+    }
+
+    #[test]
+    fn stale_cleanup_keeps_desired_tasks_and_other_users_tasks() {
+        let desired = TaskSpec {
+            name: "TarteelAdhan_2026_11_09_fajr".into(), at_epoch_ms: 1_800_000_000_000, label: "الفجر".into(),
+        };
+        let existing = vec![
+            desired.name.clone(),
+            "TarteelAdhan_2026_11_08_isha".into(),
+            "OtherApplication_daily".into(),
+        ];
+        assert_eq!(stale_task_names(&existing, &[desired]), vec!["TarteelAdhan_2026_11_08_isha"]);
     }
 
     #[test]

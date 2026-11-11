@@ -172,11 +172,16 @@ struct AudioInner {
   /* `OutputStream` يجب أن يبقى حيًّا طوال العمر، وإلا انقطع الصوت فورًا. */
   stream: Mutex<Option<OutputStream>>,
   handle: Mutex<Option<Arc<OutputStreamHandle>>>,
-  sink: Mutex<Option<Arc<Sink>>>,
+  playback: Mutex<Option<Playback>>,
   volume: AtomicU32,
   muted: AtomicBool,
   last_id: Mutex<Option<String>>,
   last_at: Mutex<i64>,
+}
+
+struct Playback {
+  id: String,
+  sink: Arc<Sink>,
 }
 
 impl Default for AudioEngine {
@@ -191,7 +196,7 @@ impl AudioEngine {
       inner: Arc::new(AudioInner {
         stream: Mutex::new(None),
         handle: Mutex::new(None),
-        sink: Mutex::new(None),
+        playback: Mutex::new(None),
         volume: AtomicU32::new(DEFAULT_VOLUME),
         muted: AtomicBool::new(false),
         last_id: Mutex::new(None),
@@ -218,9 +223,9 @@ impl AudioEngine {
   pub fn set_volume(&self, volume: u32) {
     let clamped = volume.min(100);
     self.inner.volume.store(clamped, Ordering::SeqCst);
-    if let Ok(sink_slot) = self.inner.sink.lock() {
-      if let Some(sink) = sink_slot.as_ref() {
-        let _ = sink.set_volume(self.effective_volume());
+    if let Ok(playback) = self.inner.playback.lock() {
+      if let Some(playback) = playback.as_ref() {
+        let _ = playback.sink.set_volume(self.effective_volume());
       }
     }
   }
@@ -228,9 +233,9 @@ impl AudioEngine {
   /// يكتم أو يُلغي الكتم دون فقدان المستوى المختار.
   pub fn set_muted(&self, muted: bool) {
     self.inner.muted.store(muted, Ordering::SeqCst);
-    if let Ok(sink_slot) = self.inner.sink.lock() {
-      if let Some(sink) = sink_slot.as_ref() {
-        let _ = sink.set_volume(self.effective_volume());
+    if let Ok(playback) = self.inner.playback.lock() {
+      if let Some(playback) = playback.as_ref() {
+        let _ = playback.sink.set_volume(self.effective_volume());
       }
     }
   }
@@ -249,9 +254,9 @@ impl AudioEngine {
 
   /// يوقف أي أذان جارٍ.
   pub fn stop(&self) {
-    if let Ok(mut sink_slot) = self.inner.sink.lock() {
-      if let Some(sink) = sink_slot.take() {
-        sink.stop();
+    if let Ok(mut playback) = self.inner.playback.lock() {
+      if let Some(playback) = playback.take() {
+        playback.sink.stop();
       }
     }
   }
@@ -262,13 +267,13 @@ impl AudioEngine {
   /// @param path مسار الملف الصوتي على القرص
   /// @param now_ms اللحظة الحالية
   /// @param guard يمنع تكرار المعرّف نفسه (اختباريًا يمكن تعطيله)
-  pub fn play(&self, id: &str, path: &std::path::Path, now_ms: i64, guard: bool) -> Result<(), String> {
+  pub fn play(&self, id: &str, path: &std::path::Path, now_ms: i64, guard: bool) -> Result<bool, String> {
     if guard {
       let last_id = self.inner.last_id.lock().map_err(|_| "قفل سجل التشغيل تالف")?;
       let last_at = *self.inner.last_at.lock().map_err(|_| "قفل سجل التشغيل تالف")?;
       if last_id.as_deref() == Some(id) && now_ms - last_at < REPEAT_GUARD_MS {
         /* نفس الصلاة خلال دقيقتين: تكرار من استئناف أو إعادة إدخال. */
-        return Ok(());
+        return Ok(self.is_playing_id(id));
       }
     }
 
@@ -285,15 +290,36 @@ impl AudioEngine {
      * حيًّا. لا حاجة إلى detach: نخزّنه في الحالة فيبقى حيًّا حتى نستبدله
      * أو نوقفه. الإسقاط وحده هو ما يقطع الصوت.
      */
-    *self.inner.sink.lock().map_err(|_| "قفل مسار الصوت تالف")? = Some(Arc::new(sink));
+    *self.inner.playback.lock().map_err(|_| "قفل مسار الصوت تالف")? = Some(Playback {
+      id: id.to_string(),
+      sink: Arc::new(sink),
+    });
     *self.inner.last_id.lock().map_err(|_| "قفل سجل التشغيل تالف")? = Some(id.to_string());
     *self.inner.last_at.lock().map_err(|_| "قفل سجل التشغيل تالف")? = now_ms;
-    Ok(())
+    Ok(true)
+  }
+
+  fn is_playing_id(&self, id: &str) -> bool {
+    self.inner.playback.lock()
+      .map(|slot| slot.as_ref().is_some_and(|playback| playback.id == id && !playback.sink.empty()))
+      .unwrap_or(false)
+  }
+
+  /// يلتقط معرّف تشغيل انتهى طبيعيًا مرة واحدة؛ الإيقاف اليدوي يزيله أولًا.
+  pub fn take_completed_playback(&self) -> Option<String> {
+    let mut slot = self.inner.playback.lock().ok()?;
+    if slot.as_ref().is_some_and(|playback| playback.sink.empty()) {
+      slot.take().map(|playback| playback.id)
+    } else {
+      None
+    }
   }
 
   /// هل الصوت يعمل الآن؟
   pub fn is_playing(&self) -> bool {
-    self.inner.sink.lock().map(|slot| slot.as_ref().map(|s| !s.empty()).unwrap_or(false)).unwrap_or(false)
+    self.inner.playback.lock()
+      .map(|slot| slot.as_ref().map(|playback| !playback.sink.empty()).unwrap_or(false))
+      .unwrap_or(false)
   }
 }
 

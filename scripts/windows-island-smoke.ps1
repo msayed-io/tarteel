@@ -425,14 +425,14 @@ try {
   Assert-SamePlacementAnchor $idle $tools
   Assert-ExpandedBoundsContained $tools
   $null = Capture-Top 'tools-expanded'
-  Click-IslandElement $tools '1.25×'
-  Assert-IslandToggleState $tools '1.25×' $true
-  Click-IslandElement $tools '1×'
-  Assert-IslandToggleState $tools '1×' $true
-  Click-IslandElement $tools '15 د'
-  Assert-IslandToggleState $tools '15 د' $true
-  Click-IslandElement $tools 'إيقاف'
-  Assert-IslandToggleState $tools 'إيقاف' $true
+  foreach ($speed in @('0.75×', '1.25×', '1.5×', '1×')) {
+    Click-IslandElement $tools $speed
+    Assert-IslandToggleState $tools $speed $true
+  }
+  foreach ($sleep in @('15 د', '30 د', '60 د', 'نهاية السورة', 'إيقاف')) {
+    Click-IslandElement $tools $sleep
+    Assert-IslandToggleState $tools $sleep $true
+  }
   Click-IslandElement $tools 'عرض الصلاة القادمة'
   Assert-IslandToggleState $tools 'عرض الصلاة القادمة' $true
   Click-IslandElement $tools 'عرض الصلاة القادمة'
@@ -503,16 +503,22 @@ try {
   $restoreDy = [double]$restored.capsule_anchor_center_screen.y - [double]$savedAnchor.y
   if ([Math]::Abs($restoreDx) -gt 0.5 -or [Math]::Abs($restoreDy) -gt 0.5) { throw "The manual anchor did not survive a process restart: dx=$restoreDx, dy=$restoreDy." }
   Write-Host "Verified saved manual placement after relaunch: anchor delta=($restoreDx,$restoreDy)."
-  $alert = Wait-ForRow 'alert' 25 ([long]$restored.timestamp_unix_ms) -Expanded
-  Assert-ExpandedBoundsContained $alert
-  $null = Capture-Top 'alert-restored'
-  $null = Wait-IslandElement $alert 'إيقاف الأذان'
-  $null = Wait-IslandElement $alert 'استئناف'
-  Click-IslandElement $alert 'إيقاف الأذان'
-  $null = Wait-IslandElement $alert 'إيقاف الأذان' 8 -Absent
-  $null = Wait-IslandElement $alert 'استئناف'
-  Click-IslandElement $alert 'استئناف'
-  Write-Host 'Resume action sent with no active test recitation; successful audio resume is intentionally not claimed.'
+  $autoAlert = Wait-ForRow 'alert' 25 ([long]$restored.timestamp_unix_ms) -Expanded
+  Assert-ExpandedBoundsContained $autoAlert
+  $null = Capture-Top 'alert-before-auto-dismiss'
+  $null = Wait-IslandElement $autoAlert 'تم'
+  $null = Wait-IslandElement $autoAlert 'استئناف'
+  $null = Wait-IslandElement $autoAlert 'إيقاف الأذان' 8 -Absent
+  $null = Wait-IslandElement $autoAlert 'تم' 18 -Absent
+
+  $manualAlert = Wait-ForRow 'alert' 20 ([long]$autoAlert.timestamp_unix_ms) -Expanded
+  Assert-ExpandedBoundsContained $manualAlert
+  $null = Wait-IslandElement $manualAlert 'تم'
+  $null = Wait-IslandElement $manualAlert 'استئناف'
+  Click-IslandElement $manualAlert 'استئناف'
+  Click-IslandElement $manualAlert 'تم'
+  $null = Wait-IslandElement $manualAlert 'تم' 8 -Absent
+  Write-Host 'Verified the automatic completion hides the alert; the single «تم» action closes the next alert. Resume was sent without an active test recitation.'
 
   $summary = @(
     'PASS: launched the built Tarteel Windows executable.',
@@ -520,9 +526,9 @@ try {
     'PASS: visible idle capsule remains 44x24 CSS px with a transparent render gutter on every side.',
     'PASS: music compact rounded rectangle remains 112x24 CSS px with radius 11; all four screenshot corners and antialiased edge pixels pass, and outside hit-testing reaches the window behind.',
     "PASS: physical click expanded the full player to 384x210 CSS px with a measured lower gutter; top-anchor range=$fullMotionSpan CSS px across $($full.motion_sample_count) frames.",
-    'PASS: tools expanded at the same anchor; UI Automation changed and restored speed, sleep timer, and both prayer preferences through the main-window event bridge.',
+    'PASS: tools expanded at the same anchor; every speed, sleep duration/mode, and both prayer preferences changed and restored through the main-window event bridge.',
     "PASS: physical click expanded prayer state without clipping its bottom edge; lower gutter verified; top-anchor range=$motionSpan CSS px across $($prayer.motion_sample_count) frames.",
-    'PASS: synthetic restored adhan alert expanded within bounds; the stop action reached Rust and hid the stop control, and the resume action was sent without an active track. No audio was played; successful recitation resume is not covered.',
+    'PASS: synthetic adhan alert expanded within bounds and auto-dismissed on its completion event; the only «تم» button closed a second alert. No audio was played; actual device audio and recitation resume are not covered.',
     'PASS: physical mouse click returned to idle, the island retained the same manual anchor, and native hit-testing passed through outside its rounded corner and edge.',
     'PASS: a negative Manual Y offset crossed the former top limit across idle, music, prayer, and full states, then restored after process relaunch.',
     "Display: $($collapsed.monitor_rc_monitor.right - $collapsed.monitor_rc_monitor.left)x$($collapsed.monitor_rc_monitor.bottom - $collapsed.monitor_rc_monitor.top); scale_factor=$($collapsed.scale_factor); native_dpi=$($collapsed.native_dpi)."
