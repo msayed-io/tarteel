@@ -129,7 +129,7 @@ function App() {
   const [adhanAlert, setAdhanAlert] = useState(() => readPendingAdhan());
   const [audioPrefs, setAudioPrefs] = useState(() => ({ ...DEFAULT_AUDIO_PREFS, ...(readJson('tarteel.audio.settings', {}) || {}) }));
   const audio = useRef(null);
-  const audioMeter = useRef({ context: null, source: null, stream: null, analyser: null, gate: null, samples: null, levels: Array(5).fill(0), raf: 0, lastSample: 0, disabled: false });
+  const audioMeter = useRef({ context: null, source: null, stream: null, analyser: null, gate: null, samples: null, levels: Array(5).fill(0), raf: 0, lastSample: 0, sourceUrl: '', disabled: false });
   const nextRef = useRef(() => {});
   const tracksRef = useRef(tracks);
   const visibleRef = useRef([]);
@@ -369,9 +369,17 @@ function App() {
       if (meter.context?.state === 'running' && audioState !== 'playing') meter.context.suspend().catch(cause => console.warn('Tarteel audio meter suspend failed', cause));
       if (publish) publishLevels(audioState);
     };
+    const resetMeterSource = () => {
+      if (meter.raf) cancelAnimationFrame(meter.raf);
+      meter.raf = 0;
+      try { meter.source?.disconnect(); meter.analyser?.disconnect(); meter.gate?.disconnect(); } catch {}
+      for (const track of meter.stream?.getTracks() || []) track.stop();
+      Object.assign(meter, { source: null, stream: null, analyser: null, gate: null, samples: null, levels: Array(5).fill(0), lastSample: 0, sourceUrl: '' });
+    };
     const ensureMeter = () => {
       if (meter.disabled) return null;
-      if (meter.analyser) return meter;
+      if (meter.analyser && meter.sourceUrl === a.currentSrc) return meter;
+      if (meter.analyser) resetMeterSource();
       const Context = window.AudioContext || window.webkitAudioContext;
       if (!Context || typeof a.captureStream !== 'function') {
         meter.disabled = true;
@@ -380,7 +388,7 @@ function App() {
       }
       let context, source, analyser, gate, stream;
       try {
-        context = new Context({ latencyHint: 'interactive' });
+        context = meter.context || new Context({ latencyHint: 'interactive' });
         stream = a.captureStream();
         if (!stream?.getAudioTracks().length) throw new Error('The active playback stream has no audio track.');
         source = context.createMediaStreamSource(stream);
@@ -392,12 +400,15 @@ function App() {
         source.connect(analyser);
         analyser.connect(gate);
         gate.connect(context.destination);
-        Object.assign(meter, { context, source, stream, analyser, gate, samples: new Float32Array(analyser.fftSize), levels: Array(5).fill(0) });
+        Object.assign(meter, { context, source, stream, analyser, gate, samples: new Float32Array(analyser.fftSize), levels: Array(5).fill(0), sourceUrl: a.currentSrc });
         return meter;
       } catch (cause) {
         try { source?.disconnect(); analyser?.disconnect(); gate?.disconnect(); } catch {}
         if (stream) for (const track of stream.getTracks()) track.stop();
-        context?.close().catch(() => {});
+        if (context) {
+          context.close().catch(() => {});
+          if (meter.context === context) meter.context = null;
+        }
         meter.disabled = true;
         console.warn('Tarteel could not start non-invasive audio-level monitoring; playback is unchanged.', cause);
         return null;
@@ -440,6 +451,7 @@ function App() {
     const onMetadata = () => setDuration(Number.isFinite(a.duration) ? a.duration : 0);
     const onPlay = () => { setPlaying(true); playingRef.current = true; };
     const onPlaying = () => startMeter();
+    const onEmptied = () => resetMeterSource();
     const onPause = () => { setPlaying(false); playingRef.current = false; stopMeter(currentRef.current === null ? 'no-track' : 'paused'); };
     const onEnded = () => {
       stopMeter('ended');
@@ -465,6 +477,7 @@ function App() {
     a.addEventListener('timeupdate', onTime);
     a.addEventListener('loadedmetadata', onMetadata);
     a.addEventListener('durationchange', onMetadata);
+    a.addEventListener('emptied', onEmptied);
     a.addEventListener('play', onPlay);
     a.addEventListener('playing', onPlaying);
     a.addEventListener('pause', onPause);
@@ -478,6 +491,7 @@ function App() {
       a.removeEventListener('timeupdate', onTime);
       a.removeEventListener('loadedmetadata', onMetadata);
       a.removeEventListener('durationchange', onMetadata);
+      a.removeEventListener('emptied', onEmptied);
       a.removeEventListener('play', onPlay);
       a.removeEventListener('playing', onPlaying);
       a.removeEventListener('pause', onPause);
@@ -487,7 +501,7 @@ function App() {
       try { meter.source?.disconnect(); meter.analyser?.disconnect(); meter.gate?.disconnect(); } catch {}
       for (const track of meter.stream?.getTracks() || []) track.stop();
       meter.context?.close().catch(() => {});
-      Object.assign(meter, { context: null, source: null, stream: null, analyser: null, gate: null, samples: null, levels: Array(5).fill(0), disabled: false });
+      Object.assign(meter, { context: null, source: null, stream: null, analyser: null, gate: null, samples: null, levels: Array(5).fill(0), lastSample: 0, sourceUrl: '', disabled: false });
       stopLocationWatch();
     };
   }, []);

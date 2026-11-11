@@ -53,6 +53,11 @@ describe('selective Dynamic Island update', () => {
     expect(meter).toContain('const onPlaying = () => startMeter()');
     expect(meter).toContain("a.addEventListener('playing', onPlaying)");
     expect(main).toContain("a.removeEventListener('playing', onPlaying)");
+    expect(meter).toContain('if (meter.analyser && meter.sourceUrl === a.currentSrc) return meter');
+    expect(meter).toContain('const onEmptied = () => resetMeterSource()');
+    expect(meter).toContain("a.addEventListener('emptied', onEmptied)");
+    expect(main).toContain("a.removeEventListener('emptied', onEmptied)");
+    expect(meter).toContain('sourceUrl: a.currentSrc');
     expect(island).toContain("listen('audio-levels'");
     expect(meter).not.toContain('setInterval(');
     expect(island).toContain('transform:scaleY(var(--level,.07))');
