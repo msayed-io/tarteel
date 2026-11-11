@@ -108,6 +108,13 @@ describe('selective Dynamic Island update', () => {
     expect(folderPicker).toContain('[System.Windows.Automation.Condition]::TrueCondition');
     expect(folderPicker).toContain("$expectedPathPattern = [regex]::Escape($FolderPath) + '\\s*$'");
     expect(folderPicker).toContain('$info.Name -match $expectedPathPattern');
+    const swipeInput = smoke.slice(smoke.indexOf('function Swipe-IslandOffset'), smoke.indexOf('function Find-IslandElement'));
+    expect(swipeInput).toContain("$compactUpFlick = $Record.state -eq 'compact' -and $OffsetXCss -eq 0 -and $OffsetYCss -lt 0");
+    expect(swipeInput).toContain('$startY = [double]$rect.bottom - 1');
+    expect(swipeInput).toContain('$effectiveDurationMs = [Math]::Min($DurationMs, 24)');
+    expect(swipeInput).toContain('$stepDelayMs = [int][Math]::Max($minimumStepDelayMs, $effectiveDurationMs / $steps)');
+    expect(smoke).toContain("$idleBeforeEmptySwipe = Wait-ForRow 'idle' 15");
+    expect(smoke).toContain("$idleAfterMusic = Wait-ForRow 'idle' 15");
     expect(folderPicker).toContain('$info.IsEnabled');
     expect(folderPicker).toContain('[System.Windows.Automation.InvokePattern]::Pattern');
     expect(folderPicker).toContain('[System.Windows.Automation.LegacyIAccessiblePattern]::Pattern');

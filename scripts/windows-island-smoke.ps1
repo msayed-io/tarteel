@@ -98,18 +98,31 @@ function Swipe-IslandOffset($Record, [double]$OffsetXCss, [double]$OffsetYCss, [
   $cx = ([double]$rect.left + [double]$rect.right) / 2.0
   $cy = ([double]$rect.top + [double]$rect.bottom) / 2.0
   $scale = [double]$Record.scale_factor
-  $x0 = [int][Math]::Round($cx); $y0 = [int][Math]::Round($cy)
+  $compactUpFlick = $Record.state -eq 'compact' -and $OffsetXCss -eq 0 -and $OffsetYCss -lt 0
+  $startY = $cy
+  $steps = 8
+  $minimumStepDelayMs = 8
+  $effectiveDurationMs = $DurationMs
+  if ($compactUpFlick) {
+    # The compact pill is at the desktop top edge; use a measured in-pill start and a real flick.
+    $startY = [double]$rect.bottom - 1
+    $steps = 4
+    $minimumStepDelayMs = 1
+    $effectiveDurationMs = [Math]::Min($DurationMs, 24)
+  }
+  $stepDelayMs = [int][Math]::Max($minimumStepDelayMs, $effectiveDurationMs / $steps)
+  $x0 = [int][Math]::Round($cx); $y0 = [int][Math]::Round($startY)
   $x1 = [int][Math]::Round($cx + $OffsetXCss * $scale)
-  $y1 = [int][Math]::Round($cy + $OffsetYCss * $scale)
+  $y1 = [int][Math]::Round($startY + $OffsetYCss * $scale)
   if (-not [TarteelUiSmokeNative]::SetCursorPos($x0, $y0)) { throw "SetCursorPos failed at ($x0,$y0) before swipe." }
   Start-Sleep -Milliseconds 80
   [TarteelUiSmokeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
   try {
-    for ($step = 1; $step -le 8; $step++) {
-      $x = [int][Math]::Round($x0 + ($x1 - $x0) * $step / 8.0)
-      $y = [int][Math]::Round($y0 + ($y1 - $y0) * $step / 8.0)
+    for ($step = 1; $step -le $steps; $step++) {
+      $x = [int][Math]::Round($x0 + ($x1 - $x0) * $step / [double]$steps)
+      $y = [int][Math]::Round($y0 + ($y1 - $y0) * $step / [double]$steps)
       if (-not [TarteelUiSmokeNative]::SetCursorPos($x, $y)) { throw "SetCursorPos failed at ($x,$y) during swipe." }
-      Start-Sleep -Milliseconds ([int][Math]::Max(8, $DurationMs / 8))
+      Start-Sleep -Milliseconds $stepDelayMs
     }
   } finally {
     [TarteelUiSmokeNative]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
