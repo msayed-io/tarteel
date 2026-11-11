@@ -82,6 +82,9 @@ describe('selective Dynamic Island update', () => {
     expect(folderPicker).toContain('SetCursorPos($x, $y)');
     expect(folderPicker).toContain('mouse_event(0x0002');
     expect(folderPicker).toContain('mouse_event(0x0004');
+    expect(folderPicker).toContain('WindowFromPoint($point)');
+    expect(folderPicker).toContain('GetAncestor($hitHwnd, 2)');
+    expect(folderPicker).toContain('SetForegroundWindow($mainHwnd)');
     expect(rust).toContain('TARTEEL_WINDOWS_SMOKE_CDP');
     expect(rust).toContain('.additional_browser_args(&browser_args)');
     expect(rust).toContain('.data_directory(PathBuf::from(data_directory))');

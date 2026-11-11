@@ -230,7 +230,18 @@ function Select-MainAudioFolder([string]$FolderPath) {
   if ($rect.IsEmpty -or $rect.Width -le 0 -or $rect.Height -le 0) { throw 'The main-window folder button has no usable screen bounds.' }
   $x = [int][Math]::Round($rect.Left + $rect.Width / 2.0)
   $y = [int][Math]::Round($rect.Top + $rect.Height / 2.0)
+  $mainHwnd = [IntPtr]$script:mainWindow.Current.NativeWindowHandle
+  [TarteelUiSmokeNative]::SetForegroundWindow($mainHwnd) | Out-Null
+  Start-Sleep -Milliseconds 100
   if (-not [TarteelUiSmokeNative]::SetCursorPos($x, $y)) { throw "SetCursorPos failed at ($x,$y) for the main-window folder picker button." }
+  $point = [TarteelScreenPoint]::new()
+  $point.X = $x
+  $point.Y = $y
+  $hitHwnd = [TarteelUiSmokeNative]::WindowFromPoint($point)
+  $hitRootHwnd = [TarteelUiSmokeNative]::GetAncestor($hitHwnd, 2)
+  $foregroundHwnd = [TarteelUiSmokeNative]::GetForegroundWindow()
+  Write-Host "Folder-button hit-test: bounds=($($rect.Left),$($rect.Top),$($rect.Width),$($rect.Height)); enabled=$($button.Current.IsEnabled); main=$mainHwnd; hit=$hitHwnd; hitRoot=$hitRootHwnd; foreground=$foregroundHwnd."
+  if ($hitRootHwnd -ne $mainHwnd) { throw "The folder-button point ($x,$y) resolves to HWND $hitRootHwnd, not the visible main-window HWND $mainHwnd." }
   Start-Sleep -Milliseconds 100
   [TarteelUiSmokeNative]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 70
@@ -638,6 +649,9 @@ public static class TarteelUiSmokeNative {
   [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int nIndex);
   [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(TarteelScreenPoint point);
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
 }
 '@
 Add-Type -AssemblyName UIAutomationClient
