@@ -219,8 +219,6 @@ function Get-FolderDialog {
   )
   foreach ($window in $windows) {
     if ($window.Current.Name -match 'اختر مجلد التلاوات|Select|Open|Choose|Browse|Folder|Directory|مجلد|التلاوات|اختيار|تحديد') {
-      $info = $window.Current
-      Write-Host "Folder-dialog candidate: name='$($info.Name)'; class='$($info.ClassName)'; hwnd=$($info.NativeWindowHandle); pid=$($info.ProcessId); offscreen=$($info.IsOffscreen)."
       return $window
     }
   }
@@ -270,6 +268,8 @@ function Select-MainAudioFolder([string]$FolderPath) {
     foreach ($window in $windows) { $windowNames += "$($window.Current.Name) [$($window.Current.ClassName); PID $($window.Current.ProcessId)]" }
     throw "The native folder picker did not open for '$FolderPath'. All UIA windows: $($windowNames -join '; ')"
   }
+  $dialogInfo = $dialog.Current
+  Write-Host "Folder-dialog candidate: name='$($dialogInfo.Name)'; class='$($dialogInfo.ClassName)'; hwnd=$($dialogInfo.NativeWindowHandle); pid=$($dialogInfo.ProcessId); offscreen=$($dialogInfo.IsOffscreen)."
   $dialogHwnd = [IntPtr]$dialog.Current.NativeWindowHandle
   if ($dialogHwnd -eq [IntPtr]::Zero) { throw "The detected folder-dialog candidate '$($dialog.Current.Name)' has no native HWND." }
   $dialogRootHwnd = [TarteelUiSmokeNative]::GetAncestor($dialogHwnd, 2)
@@ -292,11 +292,15 @@ function Select-MainAudioFolder([string]$FolderPath) {
         [System.Windows.Automation.ControlType]::Button
       )
     )
+    $buttonNames = @()
+    foreach ($candidate in $buttons) { $buttonNames += $candidate.Current.Name }
+    Write-Host "Folder-dialog buttons: $($buttonNames -join '; ')"
     $select = $null
     foreach ($candidate in $buttons) {
-      if ($candidate.Current.Name -match 'Select|Choose|Open|Folder|اختر|اختيار|تحديد|موافق') { $select = $candidate; break }
+      if ($candidate.Current.Name -match '^(Select|Choose|Open|اختر|اختيار|تحديد|موافق)(\s|$)') { $select = $candidate; break }
     }
     if ($null -eq $select) { throw "The native folder picker stayed open without a Select/Choose button after navigating to '$FolderPath'." }
+    Write-Host "Invoking folder-dialog action button '$($select.Current.Name)'."
     $select.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
   }
   $deadline = (Get-Date).AddSeconds(8)
