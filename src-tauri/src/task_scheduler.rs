@@ -14,8 +14,9 @@
 //!   • `<RunLevel>LeastPrivilege</RunLevel>` — لا نطلب admin عبثًا.
 //!   • `<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>` —
 //!     الأذان يجب أن يعمل على البطارية أيضًا.
-//!   • `<StartWhenAvailable>true</StartWhenAvailable>` — يُنفّذ عند أول فرصة
-//!     إن كان الجهاز نائمًا وقت الموعد.
+//!   • `<StartWhenAvailable>true</StartWhenAvailable>` مع `<EndBoundary>` —
+//!     يسمح بتدارك المهمة إذا فات الموعد أثناء السكون؛ حد النهاية ضروري
+//!     لتطبيق هذا الخيار على مهمة وقت واحدة غير متكررة.
 //!   • `<WakeToRun>true</WakeToRun>` — إيقاظ الجهاز من السكون للن تطبيق.
 //!   • `<Priority>4</Priority>` — أولوية عالية (المدى 0–10؛ 4 مرتفع بلا خطر).
 //!   • `<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>` بلا حد زمني — التطبيق
@@ -110,7 +111,7 @@ fn local_iso(epoch_ms: i64) -> Result<String, TaskError> {
 }
 
 /// يبني XML المهمة الكامل. مُفصول عن تنفيذ النظام ليكون قابلًا للاختبار.
-pub fn build_task_xml(spec: &TaskSpec, exe_path: &str, local_start: &str) -> String {
+pub fn build_task_xml(spec: &TaskSpec, exe_path: &str, local_start: &str, local_end: &str) -> String {
     /* XML يتطلب &amp; و&lt; داخل المسارات. مسارات ويندوز قد تحتوي & في أسماء المستخدمين. */
     let exe = exe_path
         .replace('&', "&amp;")
@@ -128,6 +129,7 @@ pub fn build_task_xml(spec: &TaskSpec, exe_path: &str, local_start: &str) -> Str
   <Triggers>
     <TimeTrigger>
       <StartBoundary>{start}</StartBoundary>
+      <EndBoundary>{end}</EndBoundary>
       <Enabled>true</Enabled>
     </TimeTrigger>
   </Triggers>
@@ -166,6 +168,7 @@ pub fn build_task_xml(spec: &TaskSpec, exe_path: &str, local_start: &str) -> Str
         label = xml_escape(&spec.label),
         name = xml_escape(&spec.name),
         start = local_start,
+        end = local_end,
         exe = exe,
         id = xml_escape(&spec.name),
     )
@@ -213,7 +216,8 @@ pub fn register_task(spec: &TaskSpec) -> Result<(), TaskError> {
     let exe = current_exe()?;
     let exe = exe.to_string_lossy().to_string();
     let start = local_iso(spec.at_epoch_ms)?;
-    let xml = build_task_xml(spec, &exe, &start);
+    let end = local_iso(spec.at_epoch_ms.saturating_add(crate::alarm::LATE_ALARM_GRACE_MS))?;
+    let xml = build_task_xml(spec, &exe, &start, &end);
 
     /* نكتب XML بترميز UTF-16 لأن schtasks يرفض غير ذلك مع الأحرف العربية. */
     let xml_path = std::env::temp_dir().join(format!("{}.xml", spec.name));
@@ -388,8 +392,9 @@ mod tests {
             at_epoch_ms: 1_800_000_000_000,
             label: "الفجر".into(),
         };
-        let xml = build_task_xml(&spec, r"C:\Program Files\Tarteel\tarteel.exe", "2026-10-31T04:52:00");
+        let xml = build_task_xml(&spec, r"C:\Program Files\Tarteel\tarteel.exe", "2026-10-31T04:52:00", "2026-10-31T05:07:00");
         assert!(xml.contains("<StartBoundary>2026-10-31T04:52:00</StartBoundary>"));
+        assert!(xml.contains("<EndBoundary>2026-10-31T05:07:00</EndBoundary>"));
         assert!(xml.contains("<WakeToRun>true</WakeToRun>"));
         assert!(xml.contains("<StartWhenAvailable>true</StartWhenAvailable>"));
         assert!(xml.contains("<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>"));
@@ -404,7 +409,7 @@ mod tests {
     #[test]
     fn xml_escapes_paths_with_ampersands() {
         let spec = TaskSpec { name: "TarteelAdhan_x".into(), at_epoch_ms: 0, label: "الفجر".into() };
-        let xml = build_task_xml(&spec, r"C:\Tom & Jerry\tarteel.exe", "2026-10-31T04:52:00");
+        let xml = build_task_xml(&spec, r"C:\Tom & Jerry\tarteel.exe", "2026-10-31T04:52:00", "2026-10-31T05:07:00");
         assert!(xml.contains("Tom &amp; Jerry"));
         assert!(!xml.contains("Tom & Jerry"));
     }
@@ -412,7 +417,7 @@ mod tests {
     #[test]
     fn xml_is_well_formed_enough_to_count_balanced_tags() {
         let spec = TaskSpec { name: "TarteelAdhan_y".into(), at_epoch_ms: 0, label: "الظهر".into() };
-        let xml = build_task_xml(&spec, r"C:\t\tarteel.exe", "2026-10-31T12:00:00");
+        let xml = build_task_xml(&spec, r"C:\t\tarteel.exe", "2026-10-31T12:00:00", "2026-10-31T12:15:00");
         for tag in ["<Triggers>", "</Triggers>", "<Settings>", "</Settings>", "<Actions", "</Actions>"] {
             assert_eq!(xml.matches(tag).count(), 1, "tag {tag} must appear once");
         }

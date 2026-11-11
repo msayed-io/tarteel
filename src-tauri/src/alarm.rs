@@ -20,9 +20,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 /// سقف التأخير المقبول لإطلاق منبّه فات. أي شيء أقدم يُسجَّل كمُطلق بلا صوت
-/// حتى لا يصدم المستخدم بأذان بعد منتصف الليل. 90 ثانية: يغطي استئناف
-/// الجهاز من السكون وتأخر الجدولة، ويمنع الإطلاق المتأخر المزعج.
-pub const LATE_ALARM_GRACE_MS: i64 = 90 * 1000;
+/// حتى لا يصدم المستخدم بأذان بعد منتصف الليل. 15 دقيقة لتغطية تأخر مهمة
+/// Windows الفائتة أثناء السكون، مع إبقاء إطلاق الأذان المتأخر محدودًا.
+pub const LATE_ALARM_GRACE_MS: i64 = 15 * 60 * 1000;
 
 /// سقف عدد المعرّفات المحفوظة لمنع تضخّم الملف.
 pub const MAX_FIRED_IDS: usize = 512;
@@ -270,6 +270,16 @@ mod tests {
     }
 
     #[test]
+    fn catches_up_a_missed_sleep_alarm_within_fifteen_minutes() {
+        const AT: i64 = 1_000_000;
+        let mut state = AlarmState { events: vec![event("after-sleep", AT)], ..Default::default() };
+        let result = tick(&mut state, AT + 10 * 60 * 1000);
+        assert_eq!(result.due.len(), 1, "a task delayed by Windows must still play once");
+        assert!(result.skipped.is_empty());
+        assert_eq!(state.fired_ids, vec!["after-sleep".to_string()]);
+    }
+
+    #[test]
     fn late_alarm_beyond_grace_is_recorded_without_sound() {
         let mut state = AlarmState { events: vec![event("old", 1_000_000)], ..Default::default() };
         let result = tick(&mut state, 1_000_000 + LATE_ALARM_GRACE_MS + 1);
@@ -382,6 +392,21 @@ mod tests {
         assert_eq!(claim_scheduled_task(&mut state, &task_name, AT), Some(event.clone()));
         assert!(claim_scheduled_task(&mut state, &task_name, AT + 1).is_none());
         assert!(tick(&mut state, AT + 2).due.is_empty(), "the resident loop must not duplicate the task");
+    }
+
+    #[test]
+    fn scheduled_task_catches_up_after_windows_sleep_delay() {
+        const AT: i64 = 1_800_000_000_000;
+        let id = "2026-11-09|dhuhr";
+        let expected = event(id, AT);
+        let task_name = crate::task_scheduler::task_name_for(id);
+        let mut state = AlarmState { events: vec![expected.clone()], ..Default::default() };
+
+        assert_eq!(
+            claim_scheduled_task(&mut state, &task_name, AT + 10 * 60 * 1000),
+            Some(expected),
+            "the scheduler's missed-task delay must not silence an otherwise recent adhan",
+        );
     }
 
     #[test]
