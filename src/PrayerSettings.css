@@ -907,3 +907,74 @@
     animation: none !important;
   }
 }
+
+/* منتقي أوضاع الصوت المكاني — خيارات واضحة ومضغوطة ضمن بطاقة الإعدادات */
+.ps-audio-card {
+  padding: 10px;
+}
+.ps-audio-options {
+  display: grid;
+  gap: 6px;
+}
+.ps-audio-option {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 11px;
+  border: 1px solid color-mix(in srgb, var(--ps-text) 8%, transparent) !important;
+  border-radius: 12px !important;
+  background: color-mix(in srgb, var(--ps-surface-raised) 58%, transparent) !important;
+  color: var(--ps-text-2) !important;
+  text-align: right;
+  transition: background .18s, border-color .18s, color .18s;
+}
+.ps-audio-option:hover {
+  border-color: color-mix(in srgb, var(--ps-blue) 28%, transparent) !important;
+  background: color-mix(in srgb, var(--ps-surface-hover) 72%, transparent) !important;
+  color: var(--ps-text) !important;
+}
+.ps-audio-option[aria-pressed="true"] {
+  border-color: var(--ps-blue-line) !important;
+  background: var(--ps-blue-bg) !important;
+  color: var(--ps-text) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ps-blue) 8%, transparent) inset;
+}
+.ps-audio-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.ps-audio-option-copy b {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.ps-audio-option-copy small {
+  color: var(--ps-text-3);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.ps-audio-option-mark {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--ps-border-strong);
+  border-radius: 50%;
+  color: var(--ps-blue);
+  font-size: 11px;
+  font-weight: 800;
+}
+.ps-audio-option[aria-pressed="true"] .ps-audio-option-mark {
+  border-color: var(--ps-blue-line);
+  background: color-mix(in srgb, var(--ps-blue) 12%, transparent);
+}
+.ps-audio-hint {
+  margin: 9px 2px 1px;
+  color: var(--ps-text-3);
+  font-size: 11px;
+  line-height: 1.65;
+}

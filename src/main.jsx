@@ -45,7 +45,8 @@ const DEFAULT_PRAYER_CONFIG = {
   notificationsAllowed: false, adhanSound: true, adhanVolume: 80,
   preAlarmMinutes: 0, adjust: {}, methodId: 'auto', school: 'auto',
 };
-const DEFAULT_AUDIO_PREFS = { speed: 1, sleepMode: 'off', sleepMinutes: 0, sleepDeadline: null };
+const DEFAULT_AUDIO_PREFS = { speed: 1, sleepMode: 'off', sleepMinutes: 0, sleepDeadline: null, spatialMode: 'natural' };
+const SPATIAL_MODES = new Set(['spatial', 'mosque']);
 /* بصمة الجدول: الموقع والضبط الدقيق فقط. طريقة الحساب لم تعد اختيارًا
    للمستخدم — تُشتق من الدولة داخل المحرك، فلا معنى لتضمينها هنا. */
 const prayerSignature = config => {
@@ -127,8 +128,15 @@ function App() {
   const [prayerSchedule, setPrayerSchedule] = useState(() => readStoredSchedule(initialConfig));
   const [prayerSettingsOpen, setPrayerSettingsOpen] = useState(() => !initialConfig.location);
   const [adhanAlert, setAdhanAlert] = useState(() => readPendingAdhan());
-  const [audioPrefs, setAudioPrefs] = useState(() => ({ ...DEFAULT_AUDIO_PREFS, ...(readJson('tarteel.audio.settings', {}) || {}) }));
+  const [audioPrefs, setAudioPrefs] = useState(() => {
+    const saved = readJson('tarteel.audio.settings', {}) || {};
+    return { ...DEFAULT_AUDIO_PREFS, ...saved, spatialMode: ['natural', 'spatial', 'mosque'].includes(saved.spatialMode) ? saved.spatialMode : 'natural' };
+  });
+  const [nativeAudioActive, setNativeAudioActive] = useState(false);
   const audio = useRef(null);
+  const nativeAudioActiveRef = useRef(false);
+  const nativeEndedRef = useRef(false);
+  const nativeEndedHandledRef = useRef(false);
   const audioMeter = useRef({ context: null, source: null, stream: null, analyser: null, gate: null, samples: null, levels: Array(5).fill(0), raf: 0, lastSample: 0, sourceUrl: '', disabled: false });
   const nextRef = useRef(() => {});
   const tracksRef = useRef(tracks);
@@ -151,6 +159,7 @@ function App() {
   prayerConfigRef.current = prayerConfig;
   prayerScheduleRef.current = prayerSchedule;
   audioPrefsRef.current = audioPrefs;
+  nativeAudioActiveRef.current = nativeAudioActive;
   currentRef.current = current;
   playingRef.current = playing;
   adhanAlertRef.current = adhanAlert;
@@ -184,6 +193,9 @@ function App() {
     setAudioPrefs(next);
     localStorage.setItem('tarteel.audio.settings', JSON.stringify(next));
     if (audio.current && Number.isFinite(Number(next.speed))) audio.current.playbackRate = Number(next.speed);
+    if (nativeAudioActiveRef.current && Number.isFinite(Number(next.speed))) {
+      invoke('spatial_audio_set_speed', { speed: Number(next.speed) }).catch(cause => console.warn('Tarteel native speed update failed', cause));
+    }
     return next;
   };
 
@@ -436,7 +448,7 @@ function App() {
       meter.raf = requestAnimationFrame(sample);
     };
     const startMeter = () => {
-      if (a.paused || a.ended || !a.currentSrc) return;
+      if (nativeAudioActiveRef.current || a.paused || a.ended || !a.currentSrc) return;
       const state = ensureMeter();
       if (!state) return;
       state.context.resume().then(() => {
@@ -447,13 +459,17 @@ function App() {
         if (!state.raf) state.raf = requestAnimationFrame(sample);
       }).catch(cause => console.warn('Tarteel audio meter resume failed; playback is unchanged.', cause));
     };
-    const onTime = () => setPos(Number.isFinite(a.currentTime) ? a.currentTime : 0);
-    const onMetadata = () => setDuration(Number.isFinite(a.duration) ? a.duration : 0);
-    const onPlay = () => { setPlaying(true); playingRef.current = true; };
+    const onTime = () => { if (!nativeAudioActiveRef.current) setPos(Number.isFinite(a.currentTime) ? a.currentTime : 0); };
+    const onMetadata = () => { if (!nativeAudioActiveRef.current) setDuration(Number.isFinite(a.duration) ? a.duration : 0); };
+    const onPlay = () => { if (!nativeAudioActiveRef.current) { setPlaying(true); playingRef.current = true; } };
     const onPlaying = () => startMeter();
     const onEmptied = () => resetMeterSource();
-    const onPause = () => { setPlaying(false); playingRef.current = false; stopMeter(currentRef.current === null ? 'no-track' : 'paused'); };
+    const onPause = () => {
+      stopMeter(currentRef.current === null ? 'no-track' : 'paused');
+      if (!nativeAudioActiveRef.current) { setPlaying(false); playingRef.current = false; }
+    };
     const onEnded = () => {
+      if (nativeAudioActiveRef.current) return;
       stopMeter('ended');
       const prefs = audioPrefsRef.current;
       const sleepEnded = prefs.sleepMode === 'end';
@@ -467,6 +483,7 @@ function App() {
       nextRef.current(1);
     };
     const onError = () => {
+      if (nativeAudioActiveRef.current) return;
       const code = a.error?.code || 0;
       console.error('Tarteel audio engine error', { code, mediaError: a.error?.message || 'unknown' });
       setPlaying(false);
@@ -534,21 +551,36 @@ function App() {
       const track = tracksRef.current[index], pending = pendingResumeRef.current;
       const position = pending?.trackPath === track.path ? Number(pending.position) : Number(saved.position);
       const a = audio.current;
-      a.src = await invoke('audio_url', { path: track.path });
-      a.playbackRate = Number(audioPrefsRef.current.speed) || 1;
-      await new Promise((resolve, reject) => {
-        const cleanup = () => { a.removeEventListener('loadedmetadata', success); a.removeEventListener('error', failure); clearTimeout(timeout); };
-        const success = () => { cleanup(); resolve(); };
-        const failure = () => { cleanup(); reject(new Error(a.error?.message || 'تعذر تحميل بيانات الملف السابق')); };
-        const timeout = setTimeout(() => { cleanup(); reject(new Error('انتهت مهلة استعادة بيانات الملف')); }, 12000);
-        a.addEventListener('loadedmetadata', success, { once: true });
-        a.addEventListener('error', failure, { once: true });
-        a.load();
-      });
-      const target = Number.isFinite(a.duration) ? Math.max(0, Math.min(position || 0, a.duration)) : 0;
-      if (Number.isFinite(a.duration)) a.currentTime = target;
-      a.pause();
-      setCurrent(index); currentRef.current = index; setDuration(Number.isFinite(a.duration) ? a.duration : Number(track.duration) || 0); setPos(target); setPlaying(false);
+      if (SPATIAL_MODES.has(audioPrefsRef.current.spatialMode)) {
+        const status = await invoke('start_spatial_recitation', {
+          path: track.path, mode: audioPrefsRef.current.spatialMode, position: Math.max(0, Number(position) || 0),
+          volume, speed: Number(audioPrefsRef.current.speed) || 1, autoplay: false,
+        });
+        nativeAudioActiveRef.current = true;
+        setNativeAudioActive(true);
+        nativeEndedRef.current = false;
+        a.pause();
+        setCurrent(index); currentRef.current = index;
+        setDuration(Number(status.duration) || Number(track.duration) || 0);
+        setPos(Number(status.position) || 0);
+        setPlaying(false); playingRef.current = false;
+      } else {
+        a.src = await invoke('audio_url', { path: track.path });
+        a.playbackRate = Number(audioPrefsRef.current.speed) || 1;
+        await new Promise((resolve, reject) => {
+          const cleanup = () => { a.removeEventListener('loadedmetadata', success); a.removeEventListener('error', failure); clearTimeout(timeout); };
+          const success = () => { cleanup(); resolve(); };
+          const failure = () => { cleanup(); reject(new Error(a.error?.message || 'تعذر تحميل بيانات الملف السابق')); };
+          const timeout = setTimeout(() => { cleanup(); reject(new Error('انتهت مهلة استعادة بيانات الملف')); }, 12000);
+          a.addEventListener('loadedmetadata', success, { once: true });
+          a.addEventListener('error', failure, { once: true });
+          a.load();
+        });
+        const target = Number.isFinite(a.duration) ? Math.max(0, Math.min(position || 0, a.duration)) : 0;
+        if (Number.isFinite(a.duration)) a.currentTime = target;
+        a.pause();
+        setCurrent(index); currentRef.current = index; setDuration(Number.isFinite(a.duration) ? a.duration : Number(track.duration) || 0); setPos(target); setPlaying(false);
+      }
       if (pending?.trackPath && pending.trackPath !== track.path) clearPendingResume();
       restoreReadyRef.current = true;
       if (adhanAlertRef.current) emit('prayer-alarm-restore', adhanAlertRef.current).catch(() => {});
@@ -559,6 +591,56 @@ function App() {
       if (adhanAlertRef.current) emit('prayer-alarm-restore', adhanAlertRef.current).catch(() => {});
     });
   }, []);
+
+  useEffect(() => {
+    if (!nativeAudioActive) return undefined;
+    let disposed = false;
+    let inFlight = false;
+    const syncNativePlayback = async () => {
+      if (disposed || inFlight) return;
+      inFlight = true;
+      try {
+        const status = await invoke('spatial_audio_state');
+        if (disposed) return;
+        const position = Math.max(0, Number(status.position) || 0);
+        const total = Math.max(0, Number(status.duration) || 0);
+        const peak = Math.max(0, Math.min(1, Number(status.peak) || 0));
+        const rms = Math.max(0, Math.min(1, Number(status.rms) || 0));
+        setPos(position);
+        if (total > 0) setDuration(total);
+        setPlaying(Boolean(status.playing));
+        playingRef.current = Boolean(status.playing);
+        nativeEndedRef.current = Boolean(status.ended);
+        const level = Math.max(0.07, Math.min(1, peak * 0.72 + rms * 1.8));
+        const levels = [0.68, 0.86, 1, 0.84, 0.64].map(weight => Math.max(0.07, Math.min(1, level * weight)));
+        emit('audio-levels', {
+          audioState: status.ended ? 'ended' : status.playing ? 'playing' : 'paused',
+          levels: status.playing ? levels : Array(5).fill(0.07), rms, peak,
+        }).catch(() => {});
+        if (status.ended && !nativeEndedHandledRef.current) {
+          nativeEndedHandledRef.current = true;
+          if (audioPrefsRef.current.sleepMode === 'end') {
+            await invoke('spatial_audio_stop').catch(() => {});
+            nativeAudioActiveRef.current = false;
+            setNativeAudioActive(false);
+            setPlaying(false); playingRef.current = false;
+            persistAudioPrefs({ sleepMode: 'off', sleepMinutes: 0, sleepDeadline: null });
+            setNativeSleepDeadline(null);
+            statePublisherRef.current();
+          } else {
+            nextRef.current(1);
+          }
+        }
+      } catch (cause) {
+        if (!disposed) console.warn('Tarteel native audio state polling failed', cause);
+      } finally {
+        inFlight = false;
+      }
+    };
+    syncNativePlayback();
+    const timer = setInterval(syncNativePlayback, 120);
+    return () => { disposed = true; clearInterval(timer); };
+  }, [nativeAudioActive]);
 
   useEffect(() => {
     const config = prayerConfigRef.current;
@@ -657,6 +739,11 @@ function App() {
     if (!picked) return;
     try {
       setBusy(true);
+      if (nativeAudioActiveRef.current) {
+        await invoke('spatial_audio_stop');
+        nativeAudioActiveRef.current = false;
+        setNativeAudioActive(false);
+      }
       await invoke('set_audio_root', { path: picked });
       const found = await invoke('scan_directory', { path: picked });
       setTracks(found);
@@ -675,7 +762,7 @@ function App() {
     } finally { setBusy(false); }
   };
 
-  const load = async (index, autoplay = true) => {
+  const load = async (index, autoplay = true, startPosition = 0) => {
     const track = tracksRef.current[index];
     if (!track) return;
     const mime = mimeFor(track.path);
@@ -684,12 +771,55 @@ function App() {
       setError('');
       if (adhanAlertRef.current) disableAdhanResume(); else clearPendingResume();
       const a = audio.current;
+      const requestedMode = audioPrefsRef.current.spatialMode;
+      if (SPATIAL_MODES.has(requestedMode)) {
+        try {
+          const status = await invoke('start_spatial_recitation', {
+            path: track.path, mode: requestedMode, position: Math.max(0, Number(startPosition) || 0),
+            volume, speed: Number(audioPrefsRef.current.speed) || 1, autoplay,
+          });
+          nativeAudioActiveRef.current = true;
+          setNativeAudioActive(true);
+          nativeEndedRef.current = false;
+          nativeEndedHandledRef.current = false;
+          a.pause();
+          setCurrent(index); currentRef.current = index;
+          setPos(Number(status.position) || 0);
+          setDuration(Number(status.duration) || Number(track.duration) || 0);
+          setPlaying(Boolean(status.playing)); playingRef.current = Boolean(status.playing);
+          return;
+        } catch (cause) {
+          console.warn('Tarteel spatial audio is unavailable; falling back to the original player.', cause);
+          await invoke('spatial_audio_stop').catch(() => {});
+          nativeAudioActiveRef.current = false;
+          setNativeAudioActive(false);
+          nativeEndedRef.current = false;
+          persistAudioPrefs({ spatialMode: 'natural' });
+          setError(`تعذّر تشغيل المؤثرات المكانية؛ استُخدم الصوت الطبيعي بدلًا منها. ${String(cause?.message || cause)}`);
+        }
+      }
+      if (nativeAudioActiveRef.current) {
+        await invoke('spatial_audio_stop').catch(() => {});
+        nativeAudioActiveRef.current = false;
+        setNativeAudioActive(false);
+      }
       a.pause();
       a.src = await invoke('audio_url', { path: track.path });
       a.volume = volume / 100;
       a.playbackRate = Number(audioPrefsRef.current.speed) || 1;
       a.load();
       setCurrent(index); currentRef.current = index; setPos(0); setDuration(0);
+      if (Number(startPosition) > 0) {
+        await new Promise((resolve, reject) => {
+          const cleanup = () => { a.removeEventListener('loadedmetadata', ready); a.removeEventListener('error', failed); clearTimeout(timeout); };
+          const ready = () => { cleanup(); resolve(); };
+          const failed = () => { cleanup(); reject(new Error(a.error?.message || 'تعذر تحميل بيانات التلاوة')); };
+          const timeout = setTimeout(() => { cleanup(); reject(new Error('انتهت مهلة استعادة موضع التلاوة')); }, 12000);
+          a.addEventListener('loadedmetadata', ready, { once: true });
+          a.addEventListener('error', failed, { once: true });
+        });
+        if (Number.isFinite(a.duration)) a.currentTime = Math.max(0, Math.min(Number(startPosition), a.duration));
+      }
       if (autoplay) await a.play();
     } catch (cause) {
       console.error('Tarteel audio load failed', { mime, message: String(cause) });
@@ -698,10 +828,57 @@ function App() {
     }
   };
 
+  const setSpatialMode = async mode => {
+    if (!['natural', 'spatial', 'mosque'].includes(mode)) return;
+    const previousMode = audioPrefsRef.current.spatialMode;
+    if (mode === previousMode) return;
+    const index = currentRef.current;
+    const position = Math.max(0, Number(nativeAudioActiveRef.current ? pos : audio.current.currentTime) || 0);
+    const wasPlaying = nativeAudioActiveRef.current ? playingRef.current : !audio.current.paused;
+    persistAudioPrefs({ spatialMode: mode });
+    nativeEndedHandledRef.current = false;
+    if (index === null) return;
+    const track = tracksRef.current[index];
+    if (!track) return;
+    if (SPATIAL_MODES.has(mode)) {
+      try {
+        const status = await invoke('start_spatial_recitation', {
+          path: track.path, mode, position, volume, speed: Number(audioPrefsRef.current.speed) || 1, autoplay: wasPlaying,
+        });
+        nativeAudioActiveRef.current = true;
+        setNativeAudioActive(true);
+        nativeEndedRef.current = false;
+        audio.current.pause();
+        setPos(Number(status.position) || position);
+        setDuration(Number(status.duration) || Number(track.duration) || 0);
+        setPlaying(Boolean(status.playing)); playingRef.current = Boolean(status.playing);
+        return;
+      } catch (cause) {
+        console.warn('Tarteel could not switch to spatial audio; returning to the original route.', cause);
+        await invoke('spatial_audio_stop').catch(() => {});
+        nativeAudioActiveRef.current = false;
+        setNativeAudioActive(false);
+        nativeEndedRef.current = false;
+        persistAudioPrefs({ spatialMode: 'natural' });
+        await load(index, wasPlaying, position);
+        setError(`تعذّر تفعيل هذا الوضع المكاني؛ عادت التلاوة إلى المسار الطبيعي. ${String(cause?.message || cause)}`);
+        return;
+      }
+    }
+    if (nativeAudioActiveRef.current) {
+      await invoke('spatial_audio_stop').catch(() => {});
+      nativeAudioActiveRef.current = false;
+      setNativeAudioActive(false);
+    }
+    nativeEndedRef.current = false;
+    await load(index, wasPlaying, position);
+  };
+
   const step = direction => {
     const shown = visibleRef.current;
     if (!shown.length) return;
-    if (direction < 0 && audio.current.currentTime > 3) { audio.current.currentTime = 0; setPos(0); return; }
+    const activePosition = nativeAudioActiveRef.current ? pos : audio.current.currentTime;
+    if (direction < 0 && activePosition > 3) { seekTo(0); return; }
     const ids = shown.map(track => tracksRef.current.indexOf(track));
     const at = currentRef.current === null ? -1 : ids.indexOf(currentRef.current);
     const target = ids[at < 0 ? (direction > 0 ? 0 : ids.length - 1) : (at + direction + ids.length) % ids.length];
@@ -713,7 +890,17 @@ function App() {
     if (adhanAlertRef.current) disableAdhanResume();
     if (currentRef.current === null) { if (tracksRef.current.length) await load(0, true); return; }
     try {
-      if (audio.current.paused) await audio.current.play(); else audio.current.pause();
+      if (nativeAudioActiveRef.current) {
+        if (nativeEndedRef.current || (duration > 0 && pos >= duration - 0.25)) {
+          await load(currentRef.current, true, 0);
+        } else if (playingRef.current) {
+          await invoke('spatial_audio_pause');
+          setPlaying(false); playingRef.current = false;
+        } else {
+          await invoke('spatial_audio_resume');
+          setPlaying(true); playingRef.current = true;
+        }
+      } else if (audio.current.paused) await audio.current.play(); else audio.current.pause();
     } catch (cause) {
       console.error('Tarteel audio toggle failed', cause);
       setError('تعذّر تشغيل الملف. تحقّق من أن الصيغة MP3 أو WAV أو OGG وأن الملف قابل للقراءة.');
@@ -721,11 +908,24 @@ function App() {
   };
 
   const seekTo = value => {
-    if (!Number.isFinite(value) || !Number.isFinite(audio.current.duration)) return;
+    if (!Number.isFinite(value)) return;
+    if (nativeAudioActiveRef.current) {
+      if (!Number.isFinite(duration) || duration <= 0) return;
+      const position = Math.max(0, Math.min(value, duration));
+      nativeEndedRef.current = false;
+      nativeEndedHandledRef.current = false;
+      setPos(position);
+      invoke('spatial_audio_seek', { position }).catch(cause => {
+        console.error('Tarteel native seek failed', cause);
+        setError(`تعذر البحث في التلاوة المكانية: ${String(cause?.message || cause)}`);
+      });
+      return;
+    }
+    if (!Number.isFinite(audio.current.duration)) return;
     audio.current.currentTime = Math.max(0, Math.min(value, audio.current.duration));
     setPos(audio.current.currentTime);
   };
-  const seekBy = seconds => seekTo((Number(audio.current.currentTime) || 0) + seconds);
+  const seekBy = seconds => seekTo((Number(nativeAudioActiveRef.current ? pos : audio.current.currentTime) || 0) + seconds);
   const seek = event => seekTo(Number(event.target.value));
 
   const resumeAfterAdhan = async () => {
@@ -738,7 +938,10 @@ function App() {
     }
     try {
       await invoke('stop_adhan').catch(() => {});
-      await audio.current.play();
+      if (nativeAudioActiveRef.current) {
+        await invoke('spatial_audio_resume');
+        setPlaying(true); playingRef.current = true;
+      } else await audio.current.play();
       clearPendingResume();
       adhanAlertRef.current = null; setAdhanAlert(null);
       localStorage.removeItem('tarteel.adhan.alert');
@@ -771,7 +974,8 @@ function App() {
     if (!prayerConfigRef.current.adhanSound || prayerConfigRef.current.adhanMuted) {
       emit('adhan-playback-state', { playing: false }).catch(() => {});
     }
-    const wasPlaying = !audio.current.paused;
+    const wasPlaying = nativeAudioActiveRef.current ? playingRef.current : !audio.current.paused;
+    const playbackPosition = nativeAudioActiveRef.current ? pos : Number(audio.current.currentTime) || 0;
     const shouldPause = wasPlaying && Boolean(prayerConfigRef.current.pauseAtAdhan);
     const record = {
       id: payload.id, key: payload.key || '', name: payload.name, at: payload.at,
@@ -779,10 +983,13 @@ function App() {
     };
     if (shouldPause) {
       const activeTrack = currentRef.current === null ? null : tracksRef.current[currentRef.current];
-      const pending = { id: payload.id, trackPath: activeTrack?.path || '', position: Number(audio.current.currentTime) || 0, canResume: Boolean(activeTrack) };
+      const pending = { id: payload.id, trackPath: activeTrack?.path || '', position: playbackPosition, canResume: Boolean(activeTrack) };
       pendingResumeRef.current = pending;
       localStorage.setItem('tarteel.adhan.resume', JSON.stringify(pending));
-      audio.current.pause();
+      if (nativeAudioActiveRef.current) {
+        invoke('spatial_audio_pause').catch(cause => console.warn('Tarteel could not pause native recitation for adhan', cause));
+        setPlaying(false); playingRef.current = false;
+      } else audio.current.pause();
     } else clearPendingResume();
     adhanAlertRef.current = record; setAdhanAlert(record);
     localStorage.setItem('tarteel.adhan.alert', JSON.stringify(record));
@@ -833,7 +1040,7 @@ function App() {
     localStorage.setItem('tarteel.player.last-playback', JSON.stringify({ path: active.path, position: Number(pos) || 0, wasPlaying: Boolean(playing), savedAt: Date.now() }));
   }, [active?.path, pos, playing]);
   const publishPlayerState = () => emit('player-state', {
-    state: active ? 'compact' : 'idle', audioState: !active ? 'no-track' : audio.current?.ended ? 'ended' : playing ? 'playing' : 'paused', playing, fileName: active?.title || active?.file_name || '', artist: active?.artist || '',
+    state: active ? 'compact' : 'idle', audioState: !active ? 'no-track' : (nativeEndedRef.current || audio.current?.ended) ? 'ended' : playing ? 'playing' : 'paused', playing, fileName: active?.title || active?.file_name || '', artist: active?.artist || '',
     cover: active?.cover || null, duration: Number.isFinite(duration) ? duration : 0, position: Number.isFinite(pos) ? pos : 0,
     speed: audioPrefsRef.current.speed, sleepMode: audioPrefsRef.current.sleepMode, sleepMinutes: audioPrefsRef.current.sleepMinutes,
   }).catch(cause => console.error('Tarteel island player state event failed', cause));
@@ -898,7 +1105,10 @@ function App() {
         clearAdhanAlert();
       }),
       listen('sleep-deadline', () => {
-        audio.current.pause();
+        if (nativeAudioActiveRef.current) {
+          invoke('spatial_audio_pause').catch(cause => console.warn('Tarteel sleep timer could not pause native audio', cause));
+          setPlaying(false); playingRef.current = false;
+        } else audio.current.pause();
         disableAdhanResume();
         persistAudioPrefs({ sleepMode: 'off', sleepMinutes: 0, sleepDeadline: null });
         setError('انتهى مؤقت النوم وأُوقفت التلاوة.');
@@ -919,6 +1129,7 @@ function App() {
   const changeVolume = event => {
     const value = Number(event.target.value);
     setVolume(value); audio.current.volume = value / 100;
+    if (nativeAudioActiveRef.current) invoke('spatial_audio_set_volume', { volume: value }).catch(cause => console.warn('Tarteel native volume update failed', cause));
   };
 
   return <>
@@ -936,7 +1147,7 @@ function App() {
       })}</div> : <p className="empty">{query.trim() ? 'لا توجد نتائج' : 'لم تُضف أي تلاوة إلى المفضلة بعد'}</p>}
     </main>
     <footer className="player glass big"><div className="pr"><div className="now">{active ? <div className="cover">{active.cover ? <img src={active.cover} alt=""/> : active.file_name.slice(0, 1)}</div> : <div className="cover">ت</div>}<div className="meta"><b title={active?.file_name || ''}>{active?.title || active?.file_name || ''}</b><span>{active?.artist || ''}</span></div></div><div className="ctl"><button className="tbtn rim" onClick={() => step(-1)} aria-label="السابق"><Transport type="prev"/></button><button className="tbtn play rim" onClick={toggle} aria-label={playing ? 'إيقاف مؤقت' : 'تشغيل'}>{playing ? <Transport type="pause"/> : <Transport type="play"/>}</button><button className="tbtn rim" onClick={() => step(1)} aria-label="التالي"><Transport type="next"/></button></div><div className="vol"><input type="range" min="0" max="100" value={volume} onChange={changeVolume} style={{ '--p': `${volume}%` }} aria-label="مستوى الصوت"/><Icon name="volume"/></div></div><div className="seek"><span>{fmt(pos)}</span><input type="range" min="0" max={duration || 0} step="any" value={Math.min(pos, duration || 0)} onChange={seek} style={{ '--p': `${duration ? pos / duration * 100 : 0}%` }} aria-label="التقدّم"/><span>{fmt(duration)}</span></div></footer>
-    {prayerSettingsOpen && <PrayerSettings config={prayerConfig} schedule={prayerSchedule} onClose={() => setPrayerSettingsOpen(false)} onSave={savePrayerSettings} onPreviewAlarm={previewAlarm}/>}
+    {prayerSettingsOpen && <PrayerSettings config={prayerConfig} schedule={prayerSchedule} audioMode={audioPrefs.spatialMode} onAudioModeChange={setSpatialMode} onClose={() => setPrayerSettingsOpen(false)} onSave={savePrayerSettings} onPreviewAlarm={previewAlarm}/>}
   </>;
 }
 

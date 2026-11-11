@@ -31,7 +31,8 @@ function Icon({ name, className = '' }) {
   );
 }
 
-export default function PrayerSettings({ config, schedule, onSave, onClose, onPreviewAlarm }) {
+export default function PrayerSettings({ config, schedule, audioMode, onAudioModeChange, onSave, onClose, onPreviewAlarm }) {
+  const activeAudioMode = audioMode || 'natural';
   const [location, setLocation] = useState(config.location || null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
@@ -423,6 +424,31 @@ export default function PrayerSettings({ config, schedule, onSave, onClose, onPr
                   </button>
                 </div>
               )}
+            </div>
+          </section>
+
+          <section className="ps-section" aria-labelledby="ps-audio-title">
+            <h3 className="ps-section-title" id="ps-audio-title">صوت التلاوة</h3>
+            <div className="ps-card ps-audio-card">
+              <div className="ps-audio-options" role="group" aria-label="وضع معالجة صوت التلاوة">
+                {[
+                  { id: 'natural', title: 'طبيعي', detail: 'الصوت الأصلي بلا مؤثرات إضافية.' },
+                  { id: 'spatial', title: 'العمق المكاني', detail: 'محاكاة HRTF ثابتة وخفيفة لتوسيع المجال.' },
+                  { id: 'mosque', title: 'محاكاة المسجد', detail: 'صدى تلافيفي متزن يحافظ على وضوح التلاوة.' },
+                ].map(option => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className="ps-audio-option"
+                    aria-pressed={activeAudioMode === option.id}
+                    onClick={() => onAudioModeChange?.(option.id)}
+                  >
+                    <span className="ps-audio-option-copy"><b>{option.title}</b><small>{option.detail}</small></span>
+                    <span className="ps-audio-option-mark" aria-hidden="true">{activeAudioMode === option.id ? '✓' : ''}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="ps-audio-hint">المعالجة المكانية اختيارية وتعمل محليًا في Rust؛ اختيار «طبيعي» يبقي مشغل التلاوة الحالي دون تغيير.</p>
             </div>
           </section>
 

@@ -19,6 +19,8 @@ mod alarm;
 mod task_scheduler;
 use audio::AudioEngine;
 mod audio;
+mod spatial_audio;
+use spatial_audio::{DspMode, RecitationStatus, SpatialAudioEngine};
 mod frame;
 mod geometry;
 mod hittest;
@@ -856,6 +858,51 @@ fn audio_url(server: State<AudioServer>, path: String) -> Result<String, String>
   Ok(format!("http://127.0.0.1:{}/audio/{}/{encoded}", server.port, server.token))
 }
 
+fn checked_spatial_audio_path(server: &AudioServer, path: &str) -> Result<PathBuf, String> {
+  let candidate = PathBuf::from(path).canonicalize().map_err(|error| format!("تعذر فتح ملف التلاوة: {error}"))?;
+  let allowed = server.root.read().map_err(|_| "تعذر قراءة مجلد مكتبة الصوت".to_string())?
+    .as_ref().is_some_and(|root| candidate.starts_with(root));
+  let extension = candidate.extension().and_then(|value| value.to_str()).unwrap_or_default().to_ascii_lowercase();
+  let decodable = matches!(extension.as_str(), "mp3" | "flac" | "wav" | "m4a" | "mp4" | "ogg" | "oga");
+  if !allowed || !candidate.is_file() || !supported(&candidate) || !decodable {
+    return Err("الملف خارج مجلد المكتبة أو أن صيغته غير مدعومة للمعالجة المكانية".into());
+  }
+  Ok(candidate)
+}
+
+#[tauri::command]
+fn start_spatial_recitation(
+  server: State<AudioServer>, engine: State<SpatialAudioEngine>, path: String,
+  mode: String, position: f64, volume: u32, speed: f32, autoplay: bool,
+) -> Result<RecitationStatus, String> {
+  if !position.is_finite() || position < 0.0 || position > 86_400.0 {
+    return Err("موضع التلاوة المطلوب غير صالح".into());
+  }
+  let file = checked_spatial_audio_path(&server, &path)?;
+  engine.play(&file, DspMode::parse(&mode)?, Duration::from_secs_f64(position), volume, speed, autoplay)
+}
+
+#[tauri::command]
+fn spatial_audio_state(engine: State<SpatialAudioEngine>) -> RecitationStatus { engine.state() }
+#[tauri::command]
+fn spatial_audio_pause(engine: State<SpatialAudioEngine>) -> Result<(), String> { engine.pause() }
+#[tauri::command]
+fn spatial_audio_resume(engine: State<SpatialAudioEngine>) -> Result<(), String> { engine.resume() }
+#[tauri::command]
+fn spatial_audio_seek(engine: State<SpatialAudioEngine>, position: f64) -> Result<(), String> {
+  if !position.is_finite() || position < 0.0 || position > 86_400.0 { return Err("موضع البحث غير صالح".into()); }
+  engine.seek(Duration::from_secs_f64(position))
+}
+#[tauri::command]
+fn spatial_audio_set_volume(engine: State<SpatialAudioEngine>, volume: u32) -> Result<(), String> { engine.set_volume(volume) }
+#[tauri::command]
+fn spatial_audio_set_speed(engine: State<SpatialAudioEngine>, speed: f32) -> Result<(), String> {
+  if ![0.75_f32, 1.0, 1.25, 1.5].contains(&speed) { return Err("سرعة التشغيل غير مدعومة".into()); }
+  engine.set_speed(speed)
+}
+#[tauri::command]
+fn spatial_audio_stop(engine: State<SpatialAudioEngine>) { engine.stop(); }
+
 #[tauri::command]
 fn scan_directory(path: String) -> Result<Vec<Track>, String> {
   let root = PathBuf::from(&path); if !root.is_dir() { return Err("المجلد غير موجود أو غير قابل للقراءة".into()); }
@@ -918,6 +965,7 @@ pub fn run() {
     }))
     .manage(server)
     .manage(audio::AudioEngine::new())
+    .manage(SpatialAudioEngine::new())
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_notification::init())
     .plugin(tauri_plugin_autostart::init(
@@ -1158,7 +1206,10 @@ pub fn run() {
       }
     })
     .invoke_handler(tauri::generate_handler![
-      scan_directory, set_audio_root, audio_url, resize_island, get_island_placement, set_island_placement,
+      scan_directory, set_audio_root, audio_url,
+      start_spatial_recitation, spatial_audio_state, spatial_audio_pause, spatial_audio_resume,
+      spatial_audio_seek, spatial_audio_set_volume, spatial_audio_set_speed, spatial_audio_stop,
+      resize_island, get_island_placement, set_island_placement,
       get_island_appearance, set_island_appearance,
       set_alarm_schedule, set_sleep_deadline, sync_windows_tasks, clear_windows_tasks,
       alarm_status,
