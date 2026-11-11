@@ -71,7 +71,9 @@ describe('selective Dynamic Island update', () => {
     expect(smoke).toContain('Wait-WebViewDebugPort 30');
     expect(smoke).toContain('Process diagnostics: $details');
     expect(smoke).toContain('Choose|Browse|Folder|Directory');
-    expect(smoke).toContain('Top-level UIA windows:');
+    expect(smoke).toContain('All UIA windows:');
+    const folderDialogSearch = smoke.slice(smoke.indexOf('function Get-FolderDialog'), smoke.indexOf('function Select-MainAudioFolder'));
+    expect(folderDialogSearch).toContain('[System.Windows.Automation.TreeScope]::Descendants');
     expect(smoke).toContain('$script:mainWindow = $ancestor');
     const mainButtonSearch = smoke.slice(smoke.indexOf('function Find-MainButton'), smoke.indexOf('function Wait-MainTrack'));
     expect(mainButtonSearch).toContain('$mainWindow = $script:mainWindow');

@@ -211,7 +211,7 @@ function Wait-MainTrack([string]$FileName, [int]$TimeoutSeconds = 15) {
 
 function Get-FolderDialog {
   $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-    [System.Windows.Automation.TreeScope]::Children,
+    [System.Windows.Automation.TreeScope]::Descendants,
     [System.Windows.Automation.PropertyCondition]::new(
       [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
       [System.Windows.Automation.ControlType]::Window
@@ -256,7 +256,7 @@ function Select-MainAudioFolder([string]$FolderPath) {
   } while ((Get-Date) -lt $deadline)
   if ($null -eq $dialog) {
     $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-      [System.Windows.Automation.TreeScope]::Children,
+      [System.Windows.Automation.TreeScope]::Descendants,
       [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Window
@@ -264,7 +264,7 @@ function Select-MainAudioFolder([string]$FolderPath) {
     )
     $windowNames = @()
     foreach ($window in $windows) { $windowNames += "$($window.Current.Name) [$($window.Current.ClassName); PID $($window.Current.ProcessId)]" }
-    throw "The native folder picker did not open for '$FolderPath'. Top-level UIA windows: $($windowNames -join '; ')"
+    throw "The native folder picker did not open for '$FolderPath'. All UIA windows: $($windowNames -join '; ')"
   }
   $dialog.SetFocus()
   Start-Sleep -Milliseconds 150
