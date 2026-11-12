@@ -946,6 +946,21 @@ pub fn run() {
   if let Some(task_name) = scheduled_task_argument(&args) {
     if let Ok(mut queue) = pending.task_names.lock() { queue.push(task_name); }
   }
+  let context = tauri::generate_context!();
+  #[cfg(windows)]
+  let context = {
+    let mut context = context;
+    if std::env::var("TARTEEL_WINDOWS_SETTINGS_SMOKE_CDP").ok().as_deref() == Some("1") {
+      let port = std::env::var("TARTEEL_WINDOWS_SMOKE_DEBUG_PORT")
+        .expect("Windows smoke CDP requires TARTEEL_WINDOWS_SMOKE_DEBUG_PORT");
+      let browser_args = format!("--remote-debugging-port={port} --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
+      let main_window = context.config_mut().app.windows.iter_mut()
+        .find(|window| window.label == "main")
+        .expect("Windows smoke CDP requires a configured main window");
+      main_window.additional_browser_args = Some(browser_args);
+    }
+    context
+  };
   tauri::Builder::default()
     .manage(pending)
     /* نسخة واحدة فقط. بلا هذا السطر يفتح المستخدم التطبيق مرتين فيجد
@@ -1083,17 +1098,19 @@ pub fn run() {
          الآن تُولد بالحجم النهائي الصحيح منذ اللحظة الأولى. */
       let boot_size = island_boot_size_logical();
       let island_builder = WebviewWindowBuilder::new(app, "island", WebviewUrl::App("island.html".into()));
-      // Windows smoke only: enable CDP for the island WebView with its own data directory.
+      // Windows settings smoke leaves the profile unset to share CDP with main; the existing island smoke may pass its own.
       #[cfg(windows)]
       let island_builder = if std::env::var("TARTEEL_WINDOWS_SMOKE_CDP").ok().as_deref() == Some("1") {
         let port = std::env::var("TARTEEL_WINDOWS_SMOKE_DEBUG_PORT")
           .expect("Windows smoke CDP requires TARTEEL_WINDOWS_SMOKE_DEBUG_PORT");
-        let data_directory = std::env::var("TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR")
-          .expect("Windows smoke CDP requires TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR");
+        let data_directory = std::env::var("TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR").ok();
         let browser_args = format!("--remote-debugging-port={port} --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
-        island_builder
-          .additional_browser_args(&browser_args)
-          .data_directory(PathBuf::from(data_directory))
+        let island_builder = island_builder.additional_browser_args(&browser_args);
+        if let Some(data_directory) = data_directory {
+          island_builder.data_directory(PathBuf::from(data_directory))
+        } else {
+          island_builder
+        }
       } else {
         island_builder
       };
@@ -1219,7 +1236,7 @@ pub fn run() {
       set_next_prayer_label,
       is_autostart_enabled, set_autostart
     ])
-    .run(tauri::generate_context!())
+    .run(context)
     .expect("error while running Tauri application");
 }
 

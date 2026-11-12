@@ -107,14 +107,21 @@ describe('صفحة إعدادات تَرتيل', () => {
     expect(windowsRunner).toContain('Preserving $testRoot because a runner data backup could not be restored.');
   });
 
-  it('يستخدم منفذ WebView2 مشتركًا ويستعيد سياسة Registry المؤقتة', () => {
+  it('يمرر CDP إلى نافذة main قبل الإنشاء ويستخدم endpoint مشتركًا مع الجزيرة', () => {
     const windowsTest = source('test/windows-settings-smoke.mjs');
     const windowsRunner = source('scripts/windows-settings-smoke.ps1');
-    expect(windowsRunner).toContain('Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments');
-    expect(windowsRunner).toContain('Save-WebViewDebugPolicySnapshot');
-    expect(windowsRunner).toContain('Set-WebViewDebugPolicy $script:mainPort');
-    expect(windowsRunner).toContain('Restore-WebViewDebugPolicy');
-    expect(windowsRunner).not.toContain('$script:islandPort = Get-FreeLoopbackPort');
+    const native = source('src-tauri/src/lib.rs');
+    expect(native).toContain('TARTEEL_WINDOWS_SMOKE_CDP');
+    expect(native).toContain('TARTEEL_WINDOWS_SETTINGS_SMOKE_CDP');
+    expect(native).toContain('context.config_mut().app.windows.iter_mut()');
+    expect(native).toContain('main_window.additional_browser_args = Some(browser_args);');
+    expect(native).toContain('WebviewWindowBuilder::new(app, "island"');
+    expect(native).toContain('TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR');
+    expect(windowsRunner).toContain('$script:mainPort = Get-FreeLoopbackPort');
+    expect(windowsRunner).toContain('shared WebView2 CDP=$script:mainPort');
+    expect(windowsRunner).toContain("$env:TARTEEL_WINDOWS_SETTINGS_SMOKE_CDP = '1'");
+    expect(windowsRunner).toContain('Remove-Item Env:TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR');
+    expect(windowsRunner).not.toContain('Set-WebViewDebugPolicy');
     expect(windowsTest).toContain('shared CDP endpoint');
     expect(windowsTest).not.toContain('islandPort');
     expect(windowsTest).not.toContain('islandBrowser');

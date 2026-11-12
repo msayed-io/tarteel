@@ -132,6 +132,8 @@ describe('selective Dynamic Island update', () => {
     expect(folderPicker).toContain("Capture-Top 'folder-picker-navigation-failed'");
     expect(folderPicker).toContain("^(Select|Choose|Open|اختر|اختيار|تحديد|موافق)(\\s|$)");
     expect(rust).toContain('TARTEEL_WINDOWS_SMOKE_CDP');
+    expect(rust).toContain('TARTEEL_WINDOWS_SETTINGS_SMOKE_CDP');
+    expect(rust).toContain('main_window.additional_browser_args = Some(browser_args);');
     expect(rust).toContain('.additional_browser_args(&browser_args)');
     expect(rust).toContain('.data_directory(PathBuf::from(data_directory))');
     expect(rust).toContain('--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection');
