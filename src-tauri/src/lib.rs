@@ -30,14 +30,14 @@ mod tray;
 #[derive(Serialize, Clone)]
 pub struct Track { pub path: String, pub file_name: String, pub title: String, pub artist: String, pub duration: Option<u64>, pub cover: Option<String> }
 
-fn supported(p: &Path) -> bool { matches!(p.extension().and_then(|x| x.to_str()).map(|x| x.to_ascii_lowercase()).as_deref(), Some("mp3"|"m4a"|"mp4"|"flac"|"ogg"|"oga"|"wav"|"webm")) }
+fn supported(p: &Path) -> bool { matches!(p.extension().and_then(|x| x.to_str()).map(|x| x.to_ascii_lowercase()).as_deref(), Some("mp3"|"m4a"|"mp4"|"flac"|"ogg"|"oga"|"opus"|"wav"|"webm")) }
 
 #[derive(Clone)]
 struct AudioServer { root: Arc<RwLock<Option<PathBuf>>>, token: String, port: u16 }
 
 fn mime_for(path: &Path) -> &'static str {
   match path.extension().and_then(|x| x.to_str()).unwrap_or_default().to_ascii_lowercase().as_str() {
-    "mp3" => "audio/mpeg", "wav" => "audio/wav", "ogg"|"oga" => "audio/ogg", "webm" => "audio/webm",
+    "mp3" => "audio/mpeg", "wav" => "audio/wav", "ogg"|"oga"|"opus" => "audio/ogg", "webm" => "audio/webm",
     "flac" => "audio/flac", "m4a"|"mp4" => "audio/mp4", _ => "application/octet-stream"
   }
 }
@@ -863,7 +863,7 @@ fn checked_spatial_audio_path(server: &AudioServer, path: &str) -> Result<PathBu
   let allowed = server.root.read().map_err(|_| "تعذر قراءة مجلد مكتبة الصوت".to_string())?
     .as_ref().is_some_and(|root| candidate.starts_with(root));
   let extension = candidate.extension().and_then(|value| value.to_str()).unwrap_or_default().to_ascii_lowercase();
-  let decodable = matches!(extension.as_str(), "mp3" | "flac" | "wav" | "m4a" | "mp4" | "ogg" | "oga");
+  let decodable = matches!(extension.as_str(), "mp3" | "flac" | "wav" | "m4a" | "mp4" | "ogg" | "oga" | "opus" | "webm");
   if !allowed || !candidate.is_file() || !supported(&candidate) || !decodable {
     return Err("الملف خارج مجلد المكتبة أو أن صيغته غير مدعومة للمعالجة المكانية".into());
   }
@@ -1226,6 +1226,14 @@ pub fn run() {
 #[cfg(test)]
 mod island_tests {
   use super::*;
+
+  #[test]
+  fn supported_audio_extensions_include_opus_and_map_its_mime_type() {
+    for extension in ["mp3", "m4a", "mp4", "flac", "ogg", "oga", "opus", "wav", "webm"] {
+      assert!(supported(Path::new(&format!("recitation.{extension}"))), "{extension}");
+    }
+    assert_eq!(mime_for(Path::new("recitation.opus")), "audio/ogg");
+  }
 
   #[test]
   fn adhan_preferences_persist_and_clamp_volume() {

@@ -4,6 +4,8 @@ const EMBEDDED_MHR: &[u8] = include_bytes!("../../assets/hrtf/sadie-ii-d1-48000.
 const MHR_MAGIC: &[u8; 8] = b"MinPHR03";
 const MAX_HRIR_COUNT: usize = 50_000;
 const RESAMPLE_RADIUS: isize = 12;
+const MONO_LEFT_WEIGHT: f32 = 0.55;
+const MONO_RIGHT_WEIGHT: f32 = 0.45;
 
 #[derive(Debug)]
 struct HrtfDataset {
@@ -248,10 +250,10 @@ impl HrtfRenderer {
             ));
         }
         let dataset = embedded_dataset()?;
-        // A mono recitation is spread gently across two measured near-center
-        // speaker directions; this keeps the image centered without synthetic taps.
-        let mono_left = dataset.response(348.0, 0.0, sample_rate)?;
-        let mono_right = dataset.response(12.0, 0.0, sample_rate)?;
+        // Mono recitation uses measured ±30° HRIRs with a slight balance offset;
+        // an equal symmetric sum can collapse to identical left/right samples.
+        let mono_left = dataset.response(330.0, 0.0, sample_rate)?;
+        let mono_right = dataset.response(30.0, 0.0, sample_rate)?;
         // Stereo recitations are rendered as two virtual loudspeakers at the
         // conventional ±30° stereo positions, using measured SADIE II HRIRs.
         let left_source = dataset.response(330.0, 0.0, sample_rate)?;
@@ -287,11 +289,13 @@ impl HrtfRenderer {
         let cursor = self.cursor;
         let (out_left, out_right) = if mono_input {
             self.mono_history[cursor] = 0.5 * (left + right);
-            let out_left = convolve(&self.mono_history, cursor, &self.mono_left.left)
-                + convolve(&self.mono_history, cursor, &self.mono_right.left);
-            let out_right = convolve(&self.mono_history, cursor, &self.mono_left.right)
-                + convolve(&self.mono_history, cursor, &self.mono_right.right);
-            (0.5 * out_left, 0.5 * out_right)
+            let out_left = MONO_LEFT_WEIGHT
+                * convolve(&self.mono_history, cursor, &self.mono_left.left)
+                + MONO_RIGHT_WEIGHT * convolve(&self.mono_history, cursor, &self.mono_right.left);
+            let out_right = MONO_LEFT_WEIGHT
+                * convolve(&self.mono_history, cursor, &self.mono_left.right)
+                + MONO_RIGHT_WEIGHT * convolve(&self.mono_history, cursor, &self.mono_right.right);
+            (out_left, out_right)
         } else {
             self.left_history[cursor] = left;
             self.right_history[cursor] = right;

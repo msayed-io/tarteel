@@ -94,7 +94,7 @@ const Transport = ({ type }) => type === 'play'
 
 const mimeFor = path => {
   const ext = path.split('.').pop()?.toLowerCase();
-  return ({ mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg',
+  return ({ mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg',
     webm: 'audio/webm', flac: 'audio/flac', m4a: 'audio/mp4', mp4: 'audio/mp4' })[ext] || '';
 };
 
@@ -604,6 +604,22 @@ function App() {
         if (disposed) return;
         const position = Math.max(0, Number(status.position) || 0);
         const total = Math.max(0, Number(status.duration) || 0);
+        if (status.error) {
+          const failedIndex = currentRef.current;
+          const resumeAfterFailure = playingRef.current;
+          const detail = String(status.error);
+          nativeEndedHandledRef.current = true;
+          await invoke('spatial_audio_stop').catch(() => {});
+          nativeAudioActiveRef.current = false;
+          setNativeAudioActive(false);
+          nativeEndedRef.current = false;
+          persistAudioPrefs({ spatialMode: 'natural' });
+          if (failedIndex !== null && !adhanAlertRef.current) {
+            await load(failedIndex, resumeAfterFailure, position);
+          }
+          setError(`توقف فك التلاوة المكانية عند هذه النقطة؛ عادت إلى المسار الطبيعي. ${detail}`);
+          return;
+        }
         const peak = Math.max(0, Math.min(1, Number(status.peak) || 0));
         const rms = Math.max(0, Math.min(1, Number(status.rms) || 0));
         setPos(position);

@@ -77,6 +77,7 @@ pub struct RecitationStatus {
     pub duration: f64,
     pub rms: f32,
     pub peak: f32,
+    pub error: Option<String>,
 }
 
 #[derive(Clone)]
@@ -100,6 +101,7 @@ struct RecitationPlayback {
     duration: Duration,
     levels: Arc<LevelSnapshot>,
     position_offset: Duration,
+    error: Arc<Mutex<Option<String>>>,
 }
 
 impl Default for SpatialAudioEngine {
@@ -167,6 +169,7 @@ impl SpatialAudioEngine {
             .map(|value| value.saturating_add(mode.tail_duration()))
             .unwrap_or_else(|| mode.tail_duration());
         let levels = Arc::new(LevelSnapshot::default());
+        let error = decoder.error.clone();
         let source = SpatialSource::new(decoder.convert_samples::<f32>(), mode, levels.clone())?;
         let handle = self.ensure_handle()?;
         let sink = Sink::try_new(handle.as_ref())
@@ -187,6 +190,7 @@ impl SpatialAudioEngine {
             duration,
             levels,
             position_offset: position,
+            error,
         });
         Ok(self.state())
     }
@@ -294,6 +298,7 @@ impl SpatialAudioEngine {
             duration,
             rms,
             peak,
+            error: playback.error.lock().ok().and_then(|error| error.clone()),
         }
     }
 }
@@ -307,6 +312,7 @@ fn empty_status() -> RecitationStatus {
         duration: 0.0,
         rms: 0.0,
         peak: 0.0,
+        error: None,
     }
 }
 
@@ -318,10 +324,28 @@ fn normalize_speed(value: f32) -> f32 {
     }
 }
 
+const MAX_CONSECUTIVE_DECODE_ERRORS: usize = 3;
+
+fn decode_failure_message(
+    file_label: &str,
+    codec_label: &str,
+    packet_timestamp: u64,
+    consecutive_errors: usize,
+    decoder_error: &str,
+) -> Option<String> {
+    (consecutive_errors > MAX_CONSECUTIVE_DECODE_ERRORS).then(|| {
+        format!(
+            "الملف «{file_label}» يستخدم الترميز {codec_label}؛ فشل فك {consecutive_errors} حزم صوت متتالية عند الطابع الزمني {packet_timestamp}. آخر سبب من المفكك: {decoder_error}"
+        )
+    })
+}
+
 pub(crate) struct SymphoniaSource {
     format: Box<dyn FormatReader>,
     decoder: Box<dyn CodecDecoder>,
     track_id: u32,
+    file_label: String,
+    codec_label: String,
     time_base: Option<symphonia::core::units::TimeBase>,
     sample_buffer: Option<SampleBuffer<f32>>,
     sample_cursor: usize,
@@ -330,17 +354,24 @@ pub(crate) struct SymphoniaSource {
     duration: Option<Duration>,
     pending_seek: Option<Duration>,
     decode_errors: usize,
+    error: Arc<Mutex<Option<String>>>,
     ended: bool,
 }
 
 impl SymphoniaSource {
     pub(crate) fn open(path: &Path) -> Result<Self, String> {
-        let file = File::open(path).map_err(|error| format!("تعذر فتح ملف التلاوة: {error}"))?;
+        let file_label = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("unknown file")
+            .to_string();
         let extension = path
             .extension()
             .and_then(|value| value.to_str())
             .unwrap_or_default()
             .to_ascii_lowercase();
+        let file = File::open(path)
+            .map_err(|error| format!("تعذر فتح ملف التلاوة «{file_label}»: {error}"))?;
         let mut hint = Hint::new();
         if !extension.is_empty() {
             hint.with_extension(&extension);
@@ -356,15 +387,26 @@ impl SymphoniaSource {
                 },
                 &MetadataOptions::default(),
             )
-            .map_err(|error| format!("تعذر قراءة حاوية التلاوة محليًا: {error}"))?;
+            .map_err(|error| {
+                format!("تعذر قراءة حاوية التلاوة «{file_label}» (امتداد .{extension}): {error}")
+            })?;
         let format = probed.format;
         let track = format
             .tracks()
             .iter()
-            .find(|track| track.codec_params.codec != CODEC_TYPE_NULL)
+            .find(|track| {
+                let params = &track.codec_params;
+                params.codec != CODEC_TYPE_NULL && params.sample_rate.is_some()
+            })
             .ok_or_else(|| "ملف التلاوة لا يحتوي مسارًا صوتيًا مدعومًا".to_string())?;
         let track_id = track.id;
-        let codec_params = track.codec_params.clone();
+        let codec_label = format!("{:?}", track.codec_params.codec);
+        let mut codec_params = track.codec_params.clone();
+        if codec_params.channels.is_none() {
+            codec_params.channels = codec_params
+                .channel_layout
+                .map(|layout| layout.into_channels());
+        }
         let time_base = codec_params.time_base;
         let duration = time_base.zip(codec_params.n_frames).map(|(base, frames)| {
             let time = base.calc_time(frames);
@@ -375,13 +417,20 @@ impl SymphoniaSource {
             .map(|channels| channels.count() as u16)
             .unwrap_or(2);
         let sample_rate = codec_params.sample_rate.unwrap_or(44_100);
-        let decoder = symphonia::default::get_codecs()
+        let mut codecs = symphonia::core::codecs::CodecRegistry::new();
+        symphonia::default::register_enabled_codecs(&mut codecs);
+        codecs.register_all::<symphonia_adapter_libopus::OpusDecoder>();
+        let decoder = codecs
             .make(&codec_params, &DecoderOptions::default())
-            .map_err(|error| format!("تعذر تهيئة مفكك التلاوة المحلي: {error}"))?;
+            .map_err(|error| {
+                format!("تعذر تهيئة مفكك التلاوة «{file_label}» للترميز {codec_label}: {error}")
+            })?;
         let mut source = Self {
             format,
             decoder,
             track_id,
+            file_label,
+            codec_label,
             time_base,
             sample_buffer: None,
             sample_cursor: 0,
@@ -390,26 +439,43 @@ impl SymphoniaSource {
             duration,
             pending_seek: None,
             decode_errors: 0,
+            error: Arc::new(Mutex::new(None)),
             ended: false,
         };
         if !source
             .read_next_packet()
             .map_err(|error| format!("تعذر فك ترميز التلاوة محليًا: {error}"))?
         {
-            return Err("لم ينتج الملف أي عينات صوتية قابلة للتشغيل".into());
+            return Err(format!(
+                "الملف «{}» لم ينتج أي عينات صوتية قابلة للتشغيل",
+                source.file_label
+            ));
         }
         Ok(source)
     }
 
-    fn read_next_packet(&mut self) -> Result<bool, SymphoniaError> {
+    fn read_next_packet(&mut self) -> Result<bool, String> {
         loop {
             let packet = match self.format.next_packet() {
                 Ok(packet) => packet,
-                Err(SymphoniaError::IoError(_)) => {
+                Err(SymphoniaError::IoError(error))
+                    if error.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
                     self.ended = true;
                     return Ok(false);
                 }
-                Err(error) => return Err(error),
+                Err(SymphoniaError::IoError(error)) => {
+                    return Err(format!(
+                        "تعذر قراءة ملف التلاوة «{}»: {error}",
+                        self.file_label
+                    ))
+                }
+                Err(error) => {
+                    return Err(format!(
+                        "تعذرت قراءة حزمة من «{}»: {error}",
+                        self.file_label
+                    ))
+                }
             };
             if packet.track_id() != self.track_id {
                 continue;
@@ -454,15 +520,32 @@ impl SymphoniaSource {
                     self.ended = false;
                     return Ok(true);
                 }
-                Err(SymphoniaError::DecodeError(_)) => {
+                Err(SymphoniaError::DecodeError(error)) => {
                     self.decode_errors += 1;
-                    if self.decode_errors > 3 {
-                        return Err(SymphoniaError::DecodeError(
-                            "too many consecutive audio packet decode errors",
-                        ));
+                    let decoder_error = error.to_string();
+                    eprintln!(
+                        "Tarteel spatial decode error: file={} codec={} packet_ts={} consecutive={} reason={}",
+                        self.file_label, self.codec_label, packet.ts, self.decode_errors, decoder_error
+                    );
+                    if let Some(message) = decode_failure_message(
+                        &self.file_label,
+                        &self.codec_label,
+                        packet.ts,
+                        self.decode_errors,
+                        &decoder_error,
+                    ) {
+                        if let Ok(mut failure) = self.error.lock() {
+                            *failure = Some(message.clone());
+                        }
+                        return Err(message);
                     }
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    return Err(format!(
+                        "تعذر فك حزمة التلاوة «{}» عند الطابع الزمني {} باستخدام {}: {error}",
+                        self.file_label, packet.ts, self.codec_label
+                    ))
+                }
             }
         }
     }
@@ -485,8 +568,15 @@ impl Iterator for SymphoniaSource {
             }
             match self.read_next_packet() {
                 Ok(true) => {}
-                Ok(false) | Err(_) => {
+                Ok(false) => {
                     self.ended = true;
+                    return None;
+                }
+                Err(error) => {
+                    self.ended = true;
+                    if let Ok(mut failure) = self.error.lock() {
+                        *failure = Some(error);
+                    }
                     return None;
                 }
             }
@@ -532,6 +622,9 @@ impl Source for SymphoniaSource {
         self.sample_cursor = 0;
         self.pending_seek = Some(position);
         self.decode_errors = 0;
+        if let Ok(mut failure) = self.error.lock() {
+            *failure = None;
+        }
         self.ended = false;
         Ok(())
     }
@@ -932,6 +1025,138 @@ mod tests {
     }
 
     #[test]
+    fn decode_error_threshold_preserves_the_original_decoder_reason() {
+        assert!(decode_failure_message("recitation.mp3", "MP3", 4_608, 3, "bad frame").is_none());
+        let error =
+            decode_failure_message("recitation.mp3", "MP3", 6_144, 4, "invalid frame header")
+                .expect("the existing fourth consecutive error remains fatal");
+        for detail in [
+            "recitation.mp3",
+            "MP3",
+            "6144",
+            "4 حزم",
+            "invalid frame header",
+        ] {
+            assert!(error.contains(detail), "missing {detail:?} in {error:?}");
+        }
+    }
+
+    fn assert_audio_fixture_decodes_and_seeks(relative_path: &str) {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../test/fixtures")
+            .join(relative_path);
+        let mut source = SymphoniaSource::open(&fixture)
+            .unwrap_or_else(|error| panic!("{relative_path} should decode: {error}"));
+        assert!(source.channels() > 0, "{relative_path} has audio channels");
+        assert!(
+            source.sample_rate() >= 8_000,
+            "{relative_path} has an audio sample rate"
+        );
+        assert!(
+            source.find(|sample| *sample != 0.0).is_some(),
+            "{relative_path} contains audible samples"
+        );
+        let total_samples = source.by_ref().count();
+        assert!(
+            total_samples > 1_000,
+            "{relative_path} decodes a complete clip"
+        );
+        source
+            .try_seek(Duration::from_millis(500))
+            .unwrap_or_else(|error| panic!("{relative_path} should seek: {error:?}"));
+        let remaining_samples = source.count();
+        assert!(
+            remaining_samples > 0,
+            "{relative_path} produces samples after seeking"
+        );
+        assert!(
+            remaining_samples < total_samples,
+            "{relative_path} seek does not restart at zero"
+        );
+    }
+
+    #[test]
+    fn symphonia_decodes_and_seeks_real_files_in_every_supported_audio_format() {
+        for fixture in [
+            "audio-formats/recitation-short.wav",
+            "audio-formats/recitation-short-24bit.wav",
+            "audio-formats/recitation-short.flac",
+            "audio-formats/recitation-short.mp3",
+            "audio-formats/recitation-short-vbr.mp3",
+            "audio-formats/recitation-short.m4a",
+            "audio-formats/recitation-alac.m4a",
+            "audio-formats/recitation-short.ogg",
+            "audio-formats/recitation-short.oga",
+            "audio-formats/recitation-opus.ogg",
+            "audio-formats/recitation-short.opus",
+            "audio-formats/recitation-audio-only.mp4",
+            "audio-formats/recitation-video-first.mp4",
+            "audio-formats/recitation-webm-opus.webm",
+            "audio-formats/recitation-webm-vorbis.webm",
+        ] {
+            assert_audio_fixture_decodes_and_seeks(fixture);
+        }
+    }
+
+    #[test]
+    fn malformed_and_truncated_local_audio_are_rejected_with_the_file_name() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../test/fixtures/audio-formats/recitation-short.ogg");
+        let valid_bytes = std::fs::read(fixture).expect("read valid OGG fixture");
+        for (label, bytes) in [
+            ("garbage", b"this is not an audio container".to_vec()),
+            ("truncated", valid_bytes[..16].to_vec()),
+        ] {
+            let path = std::env::temp_dir().join(format!(
+                "tarteel-spatial-invalid-{}-{label}.ogg",
+                std::process::id()
+            ));
+            std::fs::write(&path, bytes).expect("write malformed test input");
+            let result = SymphoniaSource::open(&path);
+            let error = match result {
+                Ok(_) => panic!("{label} audio must not be accepted"),
+                Err(error) => error,
+            };
+            assert!(
+                error.contains(&format!(
+                    "tarteel-spatial-invalid-{}-{label}.ogg",
+                    std::process::id()
+                )),
+                "{error}"
+            );
+            assert!(!error.contains("too many consecutive audio packet decode errors"));
+            std::fs::remove_file(path).expect("remove malformed test input");
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_default_output_supports_spatial_playback_controls_when_available() {
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../test/fixtures/Al-Fatiha-CC0.ogg");
+        let engine = SpatialAudioEngine::new();
+        if let Err(error) = engine.play(&fixture, DspMode::Spatial, Duration::ZERO, 75, 1.0, true) {
+            if error.contains("تعذر فتح مخرج الصوت المكاني") {
+                eprintln!(
+                    "SKIP Windows spatial output smoke: no usable default audio output ({error})"
+                );
+                return;
+            }
+            panic!("Windows spatial playback failed: {error}");
+        }
+        engine.set_volume(60).expect("set spatial output volume");
+        engine.set_speed(1.25).expect("set spatial output speed");
+        engine.pause().expect("pause spatial output");
+        assert!(engine.state().paused, "Windows output enters paused state");
+        engine.resume().expect("resume spatial output");
+        engine
+            .seek(Duration::from_millis(500))
+            .expect("seek spatial output");
+        engine.stop();
+        assert!(!engine.state().playing, "Windows output stops cleanly");
+    }
+
+    #[test]
     fn limiter_is_finite_and_never_exceeds_safe_peak() {
         for value in [
             -100.0,
@@ -988,7 +1213,7 @@ mod tests {
         assert!(output.chunks_exact(2).any(|frame| frame[0].abs() > 0.001));
         assert!(output
             .chunks_exact(2)
-            .all(|frame| (frame[0] - frame[1]).abs() < 0.001));
+            .any(|frame| (frame[0] - frame[1]).abs() > 0.001));
         let hrir_tail = &output[64 * 2..];
         assert!(hrir_tail
             .chunks_exact(2)
@@ -998,6 +1223,42 @@ mod tests {
             .rev()
             .take(8)
             .all(|frame| frame[0].abs() < 1e-6 && frame[1].abs() < 1e-6));
+    }
+
+    #[test]
+    fn mono_hrtf_real_recitation_has_stereo_cues_without_clipping() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../test/fixtures/audio-formats/recitation-short.wav");
+        let input = SymphoniaSource::open(&fixture).expect("mono recitation decodes");
+        assert_eq!(input.channels(), 1);
+        let sample_count = input.sample_rate() as usize * 2;
+        let levels = Arc::new(LevelSnapshot::default());
+        let output: Vec<f32> = SpatialSource::new(input, DspMode::Spatial, levels)
+            .unwrap()
+            .take(sample_count)
+            .collect();
+        assert!(output.len() >= 2_000);
+        assert!(output
+            .iter()
+            .all(|sample| sample.is_finite() && sample.abs() <= LIMIT));
+        let (difference, energy) = output
+            .chunks_exact(2)
+            .fold((0.0_f64, 0.0_f64), |acc, frame| {
+                (
+                    acc.0 + f64::from(frame[0] - frame[1]).powi(2),
+                    acc.1 + f64::from(frame[0]).powi(2) + f64::from(frame[1]).powi(2),
+                )
+            });
+        assert!(energy > 1e-8, "recitation produces audible samples");
+        let channel_difference = (difference / energy).sqrt();
+        println!(
+            "mono HRTF relative channel difference: {:.1}%",
+            channel_difference * 100.0
+        );
+        assert!(
+            channel_difference > 0.15,
+            "HRTF mono output should have measurable stereo cues: {channel_difference}"
+        );
     }
 
     #[test]
