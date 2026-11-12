@@ -128,6 +128,12 @@ describe('صفحة إعدادات تَرتيل', () => {
     expect(windowsTest).toContain('Attached to the rendered main WebView');
     expect(windowsTest).toContain('scriptSources');
     expect(windowsTest).toContain('failure-${phase}-main-webview.png');
+    expect(windowsTest).toContain('await autostartControl.click();');
+    expect(windowsTest).toContain("invoke(page, 'is_autostart_enabled')");
+    expect(windowsTest).toContain('the autostart switch to reflect the Windows registration');
+    expect(windowsTest).toContain('the autostart switch to reflect removal of the Windows registration');
+    expect(windowsTest).toContain('Windows autostart interaction did not persist');
+    expect(windowsTest).not.toContain('autostart.uncheck()');
     expect(windowsTest).not.toContain('islandPort');
     expect(windowsTest).not.toContain('islandBrowser');
   });

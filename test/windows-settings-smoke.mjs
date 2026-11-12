@@ -737,9 +737,27 @@ async function firstRun(page) {
   check((await readJson(page, 'tarteel.audio.settings'))?.spatialMode === 'mosque', 'mosque mode is persisted by its existing handler');
   await radios.nth(0).check();
   check((await readJson(page, 'tarteel.audio.settings'))?.spatialMode === 'natural', 'natural mode is persisted by its existing handler');
-  await page.locator('#ps-autostart').check();
-  await waitUntil(() => invoke(page, 'is_autostart_enabled'), value => value === true, 'Windows autostart registration', 10_000);
-  evidence.autostart = true;
+  const autostartControl = page.locator('#ps-autostart');
+  const autostartBefore = await invoke(page, 'is_autostart_enabled');
+  await waitUntil(() => autostartControl.isChecked(), value => value === autostartBefore, 'the autostart switch to read the real Windows state before testing', 10_000);
+  if (autostartBefore) {
+    await autostartControl.click();
+    await waitUntil(() => invoke(page, 'is_autostart_enabled'), value => value === false, 'Windows autostart to turn off before the interaction test', 10_000);
+    await waitUntil(() => autostartControl.isChecked(), value => value === false, 'the autostart switch to reflect the disabled Windows state', 5_000);
+  }
+  await autostartControl.click();
+  try {
+    const systemEnabled = await waitUntil(() => invoke(page, 'is_autostart_enabled'), value => value === true, 'Windows autostart registration', 10_000);
+    const controlChecked = await waitUntil(() => autostartControl.isChecked(), value => value === true, 'the autostart switch to reflect the Windows registration', 5_000);
+    evidence.autostart = { enabled: systemEnabled, controlChecked, before: autostartBefore };
+  } catch (cause) {
+    const systemState = await invoke(page, 'is_autostart_enabled').catch(error => `IPC error: ${String(error)}`);
+    const controlChecked = await autostartControl.isChecked().catch(() => null);
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const uiError = bodyText.match(/تعذّر تغيير البدء مع ويندوز:[^\n]*/)?.[0] || '';
+    evidence.autostart = { enabled: false, before: autostartBefore, systemState, controlChecked, uiError };
+    throw new Error(`Windows autostart interaction did not persist; details=${JSON.stringify(evidence.autostart)}`, { cause });
+  }
 
   await switchTab(page, 'settings-tab-island', 'settings-dynamic-first-run.png');
   await waitUntil(() => page.locator('#pane-island .card[aria-busy="false"]').count(), count => count >= 2, 'Dynamic native services to finish loading', 10_000);
@@ -870,8 +888,9 @@ async function verifyAfterRestart(page) {
   const autostart = page.locator('#ps-autostart');
   await waitUntil(() => autostart.isChecked(), value => value === true, 'the Windows autostart switch to re-read the real registry value', 10_000);
   check(await invoke(page, 'is_autostart_enabled') === true, 'Windows autostart registration is present after app relaunch');
-  await autostart.uncheck();
+  await autostart.click();
   await waitUntil(() => invoke(page, 'is_autostart_enabled'), value => value === false, 'Windows autostart to be disabled through the real control', 10_000);
+  await waitUntil(() => autostart.isChecked(), value => value === false, 'the autostart switch to reflect removal of the Windows registration', 5_000);
   check(await invoke(page, 'is_autostart_enabled') === false, 'the real autostart control removes its registration');
 
   await switchTab(page, 'settings-tab-island', 'settings-dynamic-after-restart.png');
