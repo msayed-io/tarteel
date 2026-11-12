@@ -16,7 +16,6 @@ $outDir = Join-Path $workspace 'artifacts/settings-ui-smoke'
 $tempRoot = if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) { [System.IO.Path]::GetTempPath() } else { $env:RUNNER_TEMP }
 $testRoot = Join-Path $tempRoot ("tarteel-settings-smoke-" + [Guid]::NewGuid().ToString('N'))
 $sessionDir = Join-Path $testRoot 'session'
-$islandWebViewProfile = Join-Path $testRoot 'island-webview2-profile'
 $backupDir = Join-Path $testRoot 'saved-runner-data'
 $roamingAppData = Join-Path $env:APPDATA 'com.tarteel.desktop'
 $localAppData = Join-Path $env:LOCALAPPDATA 'com.tarteel.desktop'
@@ -24,15 +23,28 @@ $roamingBackup = Join-Path $backupDir 'roaming-app-data'
 $localBackup = Join-Path $backupDir 'local-app-data'
 $roamingOriginallyExisted = Test-Path $roamingAppData
 $localOriginallyExisted = Test-Path $localAppData
+$webViewPolicyKeyPath = 'Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+$webViewPolicyValueName = [System.IO.Path]::GetFileName($resolvedExe)
+$webViewPolicyPaths = @(
+  $webViewPolicyKeyPath,
+  'Software\Policies\Microsoft\Edge\WebView2',
+  'Software\Policies\Microsoft\Edge',
+  'Software\Policies\Microsoft',
+  'Software\Policies'
+)
+$webViewPolicyPathSnapshot = @{}
 $runKeyPath = 'Software\Microsoft\Windows\CurrentVersion\Run'
 $runKeyExisted = $false
 $runKeySnapshot = @{}
+$webViewPolicyKeyExisted = $false
+$webViewPolicyValueExisted = $false
+$webViewPolicyValue = $null
+$webViewPolicyValueKind = $null
 $script:initialTarteelTaskNames = @()
 $script:testCreatedTarteelTaskNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 $cleanupFailures = [System.Collections.Generic.List[string]]::new()
 $process = $null
 $mainPort = 0
-$islandPort = 0
 $previousWebViewArgs = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
 $previousSmokeCdpFlag = $env:TARTEEL_WINDOWS_SMOKE_CDP
 $previousSmokeCdpPort = $env:TARTEEL_WINDOWS_SMOKE_DEBUG_PORT
@@ -108,22 +120,24 @@ function Wait-WebViewTarget([int]$Port, [System.Diagnostics.Process]$Child, [str
     } catch { }
     Start-Sleep -Milliseconds 300
   } while ((Get-Date) -lt $deadline)
-  throw "Timed out waiting for $Label WebView2 CDP at $uri."
+  $webViewProcesses = @(Get-CimInstance -ClassName Win32_Process -Filter "Name='msedgewebview2.exe'" -ErrorAction SilentlyContinue | Select-Object ProcessId, CommandLine)
+  $appProcesses = @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq [System.IO.Path]::GetFileName($resolvedExe) } | Select-Object ProcessId, CommandLine)
+  $policy = $null
+  $policyKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($webViewPolicyKeyPath, $false)
+  if ($policyKey) { $policy = $policyKey.GetValue($webViewPolicyValueName, $null); $policyKey.Close() }
+  $details = @{ port = $Port; label = $Label; policy = $policy; webViewProcesses = $webViewProcesses; appProcesses = $appProcesses } | ConvertTo-Json -Compress -Depth 5
+  throw "Timed out waiting for $Label WebView2 CDP at $uri. Process diagnostics: $details"
 }
 
 function Start-TarteelForSmoke {
   $script:mainPort = Get-FreeLoopbackPort
-  $script:islandPort = Get-FreeLoopbackPort
-  while ($script:islandPort -eq $script:mainPort) { $script:islandPort = Get-FreeLoopbackPort }
-  $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$script:mainPort"
-  $env:TARTEEL_WINDOWS_SMOKE_CDP = '1'
-  $env:TARTEEL_WINDOWS_SMOKE_DEBUG_PORT = "$script:islandPort"
-  $env:TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR = $islandWebViewProfile
-  $env:TARTEEL_SETTINGS_ISLAND_PORT = "$script:islandPort"
+  Set-WebViewDebugPolicy $script:mainPort
+  foreach ($name in @('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS','TARTEEL_WINDOWS_SMOKE_CDP','TARTEEL_WINDOWS_SMOKE_DEBUG_PORT','TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR','TARTEEL_SETTINGS_ISLAND_PORT')) {
+    Remove-Item "Env:$name" -ErrorAction SilentlyContinue
+  }
   $script:process = Start-Process -FilePath $resolvedExe -WorkingDirectory (Split-Path $resolvedExe) -PassThru
-  Write-Host "Started isolated Tarteel process $($script:process.Id); main CDP=$script:mainPort, island CDP=$script:islandPort."
-  Wait-WebViewTarget $script:mainPort $script:process 'main settings'
-  Wait-WebViewTarget $script:islandPort $script:process 'Dynamic Island'
+  Write-Host "Started isolated Tarteel process $($script:process.Id); shared WebView2 CDP=$script:mainPort."
+  Wait-WebViewTarget $script:mainPort $script:process 'application windows'
 }
 
 function Stop-TarteelForSmoke {
@@ -139,7 +153,7 @@ function Stop-TarteelForSmoke {
   }
   $script:process = $null
   Start-Sleep -Milliseconds 700
-  $ownedProfiles = @($localAppData, $islandWebViewProfile)
+  $ownedProfiles = @($localAppData)
   foreach ($webView in @(Get-CimInstance -ClassName Win32_Process -Filter "Name='msedgewebview2.exe'" -ErrorAction SilentlyContinue)) {
     if (-not $webView.CommandLine) { continue }
     $owned = $false
@@ -168,6 +182,81 @@ function Save-RunKeySnapshot {
     }
   }
   $key.Close()
+}
+
+function Save-WebViewDebugPolicySnapshot {
+  foreach ($path in $script:webViewPolicyPaths) {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($path, $false)
+    $script:webViewPolicyPathSnapshot[$path] = [bool]$key
+    if ($key) { $key.Close() }
+  }
+  $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($script:webViewPolicyKeyPath, $false)
+  if (-not $key) { return }
+  $script:webViewPolicyKeyExisted = $true
+  if (@($key.GetValueNames()) -contains $script:webViewPolicyValueName) {
+    $script:webViewPolicyValueExisted = $true
+    $script:webViewPolicyValue = $key.GetValue($script:webViewPolicyValueName, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    $script:webViewPolicyValueKind = $key.GetValueKind($script:webViewPolicyValueName).ToString()
+  }
+  $key.Close()
+}
+
+function Set-WebViewDebugPolicy([int]$Port) {
+  $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($script:webViewPolicyKeyPath)
+  if (-not $key) { throw 'Could not create the temporary WebView2 debugging policy key.' }
+  try {
+    $key.SetValue($script:webViewPolicyValueName, "--remote-debugging-port=$Port", [Microsoft.Win32.RegistryValueKind]::String)
+  } finally { $key.Close() }
+}
+
+function Remove-EmptyUserRegistryKey([string]$Path) {
+  $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($Path, $false)
+  if (-not $key) { return }
+  $empty = ($key.GetValueNames().Count -eq 0) -and ($key.GetSubKeyNames().Count -eq 0)
+  $key.Close()
+  if (-not $empty) { return }
+  $separator = $Path.LastIndexOf('\')
+  if ($separator -lt 0) { return }
+  $parentPath = $Path.Substring(0, $separator)
+  $name = $Path.Substring($separator + 1)
+  $parent = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($parentPath, $true)
+  if ($parent) { try { $parent.DeleteSubKey($name, $false) } finally { $parent.Close() } }
+}
+
+function Restore-WebViewDebugPolicy {
+  $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($script:webViewPolicyKeyPath, $true)
+  if ($script:webViewPolicyKeyExisted -and -not $key) { throw 'The original WebView2 debugging policy key disappeared before restoration.' }
+  if ($key) {
+    if ($script:webViewPolicyValueExisted) {
+      $kind = [System.Enum]::Parse([Microsoft.Win32.RegistryValueKind], $script:webViewPolicyValueKind)
+      $key.SetValue($script:webViewPolicyValueName, $script:webViewPolicyValue, $kind)
+    } elseif (@($key.GetValueNames()) -contains $script:webViewPolicyValueName) {
+      $key.DeleteValue($script:webViewPolicyValueName, $false)
+    }
+    $key.Close()
+  }
+  $verify = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($script:webViewPolicyKeyPath, $false)
+  $hasPolicyValue = $false
+  if ($verify) { $hasPolicyValue = @($verify.GetValueNames()) -contains $script:webViewPolicyValueName }
+  if ($script:webViewPolicyValueExisted) {
+    if (-not $verify -or -not $hasPolicyValue) { if ($verify) { $verify.Close() }; throw 'The original WebView2 debugging policy value was not restored.' }
+    $actualValue = $verify.GetValue($script:webViewPolicyValueName, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    $actualJson = ConvertTo-Json -Compress -InputObject $actualValue
+    $expectedJson = ConvertTo-Json -Compress -InputObject $script:webViewPolicyValue
+    if ($verify.GetValueKind($script:webViewPolicyValueName).ToString() -ne $script:webViewPolicyValueKind -or $actualJson -ne $expectedJson) { $verify.Close(); throw 'The original WebView2 debugging policy value differs after restoration.' }
+  } elseif ($hasPolicyValue) {
+    $verify.Close()
+    throw 'The temporary WebView2 debugging policy value remains after restoration.'
+  }
+  if ($verify) { $verify.Close() }
+  foreach ($path in $script:webViewPolicyPaths) {
+    if (-not $script:webViewPolicyPathSnapshot[$path]) { Remove-EmptyUserRegistryKey $path }
+    $check = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($path, $false)
+    $exists = [bool]$check
+    if ($check) { $check.Close() }
+    if ($script:webViewPolicyPathSnapshot[$path] -and -not $exists) { throw "Original WebView2 policy registry path was not restored: $path" }
+    if (-not $script:webViewPolicyPathSnapshot[$path] -and $exists) { throw "A newly created WebView2 policy registry path remains after restoration: $path" }
+  }
 }
 
 function Test-TarteelRunEntry([string]$Name, [object]$Value) {
@@ -263,7 +352,8 @@ if ($runningTarteelProcesses.Count -gt 0) {
   throw "Refusing to run the isolated settings test while another '$tarteelProcessName' process is active."
 }
 Save-RunKeySnapshot
-New-Item -ItemType Directory -Force -Path $outDir, $testRoot, $sessionDir, $islandWebViewProfile, $backupDir | Out-Null
+Save-WebViewDebugPolicySnapshot
+New-Item -ItemType Directory -Force -Path $outDir, $testRoot, $sessionDir, $backupDir | Out-Null
 
 try {
   Clear-TarteelRunEntriesForTest
@@ -292,6 +382,7 @@ try {
   }
   try { Remove-TestCreatedTarteelTasks } catch { $cleanupFailures.Add("Task Scheduler: $($_.Exception.Message)"); Write-Warning $cleanupFailures[$cleanupFailures.Count - 1] }
   try { Restore-RunKeySnapshot } catch { $cleanupFailures.Add("Autostart registry: $($_.Exception.Message)"); Write-Warning $cleanupFailures[$cleanupFailures.Count - 1] }
+  try { Restore-WebViewDebugPolicy } catch { $cleanupFailures.Add("WebView2 debugging policy: $($_.Exception.Message)"); Write-Warning $cleanupFailures[$cleanupFailures.Count - 1] }
   try { Restore-Directory $roamingAppData $roamingBackup $roamingOriginallyExisted } catch { $cleanupFailures.Add("Roaming app data: $($_.Exception.Message)"); Write-Warning $cleanupFailures[$cleanupFailures.Count - 1] }
   try { Restore-Directory $localAppData $localBackup $localOriginallyExisted } catch { $cleanupFailures.Add("Local app data: $($_.Exception.Message)"); Write-Warning $cleanupFailures[$cleanupFailures.Count - 1] }
   foreach ($name in @('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS','TARTEEL_WINDOWS_SMOKE_CDP','TARTEEL_WINDOWS_SMOKE_DEBUG_PORT','TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR','TARTEEL_SETTINGS_ISLAND_PORT','TARTEEL_SETTINGS_ARTIFACT_DIR','TARTEEL_SETTINGS_SESSION_DIR')) {

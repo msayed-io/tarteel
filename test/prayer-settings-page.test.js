@@ -107,6 +107,19 @@ describe('صفحة إعدادات تَرتيل', () => {
     expect(windowsRunner).toContain('Preserving $testRoot because a runner data backup could not be restored.');
   });
 
+  it('يستخدم منفذ WebView2 مشتركًا ويستعيد سياسة Registry المؤقتة', () => {
+    const windowsTest = source('test/windows-settings-smoke.mjs');
+    const windowsRunner = source('scripts/windows-settings-smoke.ps1');
+    expect(windowsRunner).toContain('Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments');
+    expect(windowsRunner).toContain('Save-WebViewDebugPolicySnapshot');
+    expect(windowsRunner).toContain('Set-WebViewDebugPolicy $script:mainPort');
+    expect(windowsRunner).toContain('Restore-WebViewDebugPolicy');
+    expect(windowsRunner).not.toContain('$script:islandPort = Get-FreeLoopbackPort');
+    expect(windowsTest).toContain('shared CDP endpoint');
+    expect(windowsTest).not.toContain('islandPort');
+    expect(windowsTest).not.toContain('islandBrowser');
+  });
+
   it('يقرأ حالة إذن الإشعارات الحقيقية قبل حفظ الإعدادات تلقائيًا', () => {
     expect(logic).toContain('isPermissionGranted()');
     expect(logic).toContain('setNotificationsAllowed(Boolean(granted))');

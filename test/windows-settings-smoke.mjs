@@ -8,7 +8,6 @@ import { chromium } from 'playwright';
 const port = Number(process.argv[2] || 0);
 const phase = process.argv[3] || 'first';
 const endpoint = `http://127.0.0.1:${port}`;
-const islandPort = Number(process.env.TARTEEL_SETTINGS_ISLAND_PORT || 0);
 const artifactDir = process.env.TARTEEL_SETTINGS_ARTIFACT_DIR || join(process.cwd(), 'artifacts', 'settings-ui-smoke');
 const sessionDir = process.env.TARTEEL_SETTINGS_SESSION_DIR || join(process.cwd(), '.settings-smoke-session');
 const appConfigDir = join(process.env.APPDATA || '', 'com.tarteel.desktop');
@@ -17,7 +16,6 @@ const resultPath = join(artifactDir, 'result.json');
 const pageErrors = [];
 const evidence = { phase, startedAt: new Date().toISOString(), checks: [], environment: 'isolated Windows WebView2 runner' };
 let browser;
-let islandBrowser;
 let referenceBrowser;
 let mainPage;
 
@@ -56,7 +54,7 @@ async function connect() {
   let lastError = '';
   while (Date.now() < deadline) {
     try {
-      browser = await chromium.connectOverCDP(endpoint, { timeout: 4_000 });
+      if (!browser) browser = await chromium.connectOverCDP(endpoint, { timeout: 4_000 });
       for (const context of browser.contexts()) {
         for (const page of context.pages()) {
           if (!/island\.html(?:$|[?#])/i.test(page.url())) {
@@ -67,11 +65,14 @@ async function connect() {
         if (mainPage) break;
       }
       if (mainPage) break;
-      await delay(200);
+      const targets = browser.contexts().flatMap(context => context.pages().map(page => page.url()));
+      lastError = `CDP connected but no main WebView target appeared; current targets: ${JSON.stringify(targets)}`;
     } catch (cause) {
       lastError = String(cause);
-      await delay(300);
+      if (browser) await browser.close().catch(() => {});
+      browser = undefined;
     }
+    await delay(300);
   }
   if (!browser || !mainPage) throw new Error(`Could not attach to the main WebView2 page at ${endpoint}: ${lastError}`);
   mainPage.on('pageerror', error => pageErrors.push(String(error)));
@@ -83,14 +84,19 @@ async function connect() {
 }
 
 async function connectIsland() {
-  if (!islandPort) throw new Error('The isolated Dynamic WebView2 CDP port was not provided.');
-  islandBrowser = await chromium.connectOverCDP(`http://127.0.0.1:${islandPort}`, { timeout: 10_000 });
-  for (const context of islandBrowser.contexts()) {
-    for (const page of context.pages()) {
-      if (/island\.html(?:$|[?#])/i.test(page.url())) return page;
+  const deadline = Date.now() + 10_000;
+  let targets = [];
+  while (Date.now() < deadline) {
+    if (!browser) throw new Error('The shared WebView2 CDP connection is unavailable.');
+    for (const context of browser.contexts()) {
+      for (const page of context.pages()) {
+        if (/island\.html(?:$|[?#])/i.test(page.url())) return page;
+      }
     }
+    targets = browser.contexts().flatMap(context => context.pages().map(page => page.url()));
+    await delay(200);
   }
-  throw new Error(`No Dynamic Island WebView target was found on CDP port ${islandPort}.`);
+  throw new Error(`No Dynamic Island WebView target was found on shared CDP endpoint ${endpoint}; current targets: ${JSON.stringify(targets)}.`);
 }
 
 async function openSettings(page) {
@@ -945,7 +951,6 @@ try {
   } catch {}
   throw cause;
 } finally {
-  if (islandBrowser) await islandBrowser.close().catch(() => {});
   if (referenceBrowser) await referenceBrowser.close().catch(() => {});
   if (browser) await browser.close().catch(() => {});
 }
