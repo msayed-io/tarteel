@@ -80,6 +80,33 @@ describe('صفحة إعدادات تَرتيل', () => {
     expect(logic).toContain("invoke('set_adhan_preferences'");
   });
 
+  it('يعزل عرض لوحات الإعدادات عن قاعدة main العامة في المكتبة', () => {
+    expect(source('src/styles.css')).toContain('main{max-width:1040px;margin:0 auto;padding:112px 32px 168px}');
+    expect(css).toMatch(/\.settings-page \.panes\{[^}]*max-width:none[^}]*margin:0[^}]*padding-inline:0/);
+  });
+
+  it('يبقي مرجع المقارنة البصري HTML ثابتًا بلا سكربتات أو معالجات inline', () => {
+    const reference = source('test/fixtures/settings-reference-static.html');
+    expect(reference).not.toMatch(/<script\b/i);
+    expect(reference).not.toMatch(/\son(?:click|input|change)\s*=/i);
+    expect(reference).not.toMatch(/\sdata-[\w-]+\s*=/i);
+    for (const id of ['pane-prayer', 'pane-audio', 'pane-island']) expect(reference).toContain(`id="${id}"`);
+  });
+
+  it('يحصر تنظيف Windows في مهام الاختبار ويحمي بيانات التطبيق عند فشل backup', () => {
+    const windowsTest = source('test/windows-settings-smoke.mjs');
+    const windowsRunner = source('scripts/windows-settings-smoke.ps1');
+    expect(windowsTest).not.toContain("invoke(page, 'clear_windows_tasks'");
+    expect(windowsTest).not.toContain("'clearTasks', 'clear_windows_tasks'");
+    expect(windowsTest).toContain('assert.equal(errors.length, 0,');
+    expect(windowsRunner).toContain('Record-TestCreatedTarteelTasks');
+    expect(windowsRunner).toContain('Unregister-ScheduledTask -TaskPath');
+    expect(windowsRunner).toContain('APPDATA is unavailable; refusing to move application data.');
+    expect(windowsRunner).toContain('every task action must target this test executable.');
+    expect(windowsRunner).toContain("No backup exists for '$Path'; the original path is still present and will be left untouched.");
+    expect(windowsRunner).toContain('Preserving $testRoot because a runner data backup could not be restored.');
+  });
+
   it('يقرأ حالة إذن الإشعارات الحقيقية قبل حفظ الإعدادات تلقائيًا', () => {
     expect(logic).toContain('isPermissionGranted()');
     expect(logic).toContain('setNotificationsAllowed(Boolean(granted))');
@@ -97,6 +124,7 @@ describe('صفحة إعدادات تَرتيل', () => {
       'clip-path:path(', 'width:248px;height:248px', 'prefers-reduced-transparency:reduce',
       'prefers-reduced-motion:reduce',
     ]) expect(css).toContain(value);
+    expect(css).not.toMatch(/\[data-reduce-transparency\]/i);
     expect(css).not.toContain('--accent');
     expect(css).not.toContain('--ps-blue');
   });

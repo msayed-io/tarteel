@@ -91,8 +91,6 @@ body.settings-page-active{
   .settings-page{--rim:.5;--glass-fill:#1d1f22;--glass-hover:#26282b}
   .settings-page .glass{-webkit-backdrop-filter:none;backdrop-filter:none}
 }
-.settings-page[data-reduce-transparency]{--rim:.5;--glass-fill:#1d1f22;--glass-hover:#26282b}
-.settings-page[data-reduce-transparency] .glass{-webkit-backdrop-filter:none;backdrop-filter:none}
 
 /* ==========================================================================
    الهيكل
@@ -155,7 +153,7 @@ body.settings-page-active{
 .settings-page .page-head .sub svg{color:var(--text-2)}
 
 /* اللوحات (التبويبات) */
-.settings-page .panes{padding-block:26px 64px}
+.settings-page .panes{max-width:none;margin:0;padding-inline:0;padding-block:26px 64px}
 .settings-page .pane{display:none}
 .settings-page .pane.is-active{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start;animation:paneIn .32s cubic-bezier(.3,.9,.3,1)}
 @keyframes paneIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
