@@ -123,6 +123,11 @@ describe('صفحة إعدادات تَرتيل', () => {
     expect(windowsRunner).toContain('Remove-Item Env:TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR');
     expect(windowsRunner).not.toContain('Set-WebViewDebugPolicy');
     expect(windowsTest).toContain('shared CDP endpoint');
+    expect(windowsTest).toContain("url !== 'about:blank'");
+    expect(windowsTest).toContain("document.querySelector('#root')");
+    expect(windowsTest).toContain('Attached to the rendered main WebView');
+    expect(windowsTest).toContain('scriptSources');
+    expect(windowsTest).toContain('failure-${phase}-main-webview.png');
     expect(windowsTest).not.toContain('islandPort');
     expect(windowsTest).not.toContain('islandBrowser');
   });

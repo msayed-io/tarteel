@@ -14,6 +14,8 @@ const appConfigDir = join(process.env.APPDATA || '', 'com.tarteel.desktop');
 const expectedPath = join(sessionDir, 'expected.json');
 const resultPath = join(artifactDir, 'result.json');
 const pageErrors = [];
+const consoleErrors = [];
+const failedRequests = [];
 const evidence = { phase, startedAt: new Date().toISOString(), checks: [], environment: 'isolated Windows WebView2 runner' };
 let browser;
 let referenceBrowser;
@@ -57,16 +59,20 @@ async function connect() {
       if (!browser) browser = await chromium.connectOverCDP(endpoint, { timeout: 4_000 });
       for (const context of browser.contexts()) {
         for (const page of context.pages()) {
-          if (!/island\.html(?:$|[?#])/i.test(page.url())) {
-            mainPage = page;
-            break;
+          const url = page.url();
+          if (url && url !== 'about:blank' && !/^(?:devtools|chrome|edge):/i.test(url) && !/island\.html(?:$|[?#])/i.test(url)) {
+            const hasAppRoot = await page.evaluate(() => Boolean(document.querySelector('#root'))).catch(() => false);
+            if (hasAppRoot) {
+              mainPage = page;
+              break;
+            }
           }
         }
         if (mainPage) break;
       }
       if (mainPage) break;
       const targets = browser.contexts().flatMap(context => context.pages().map(page => page.url()));
-      lastError = `CDP connected but no main WebView target appeared; current targets: ${JSON.stringify(targets)}`;
+      lastError = `CDP connected but no rendered main WebView target with #root appeared; current targets: ${JSON.stringify(targets)}`;
     } catch (cause) {
       lastError = String(cause);
       if (browser) await browser.close().catch(() => {});
@@ -75,9 +81,31 @@ async function connect() {
     await delay(300);
   }
   if (!browser || !mainPage) throw new Error(`Could not attach to the main WebView2 page at ${endpoint}: ${lastError}`);
+  console.log(`Attached to the rendered main WebView at ${mainPage.url()}.`);
   mainPage.on('pageerror', error => pageErrors.push(String(error)));
+  mainPage.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  mainPage.on('requestfailed', request => failedRequests.push({ url: request.url(), error: request.failure()?.errorText || 'unknown request failure' }));
   mainPage.setDefaultTimeout(12_000);
-  await mainPage.waitForFunction(() => document.querySelector('#root')?.textContent?.trim().length > 0, null, { timeout: 30_000 });
+  try {
+    await mainPage.waitForFunction(() => document.querySelector('#root')?.textContent?.trim().length > 0, null, { timeout: 30_000 });
+  } catch (cause) {
+    const dom = await mainPage.evaluate(() => {
+      const root = document.querySelector('#root');
+      return {
+        href: location.href,
+        title: document.title,
+        readyState: document.readyState,
+        rootFound: Boolean(root),
+        rootText: root?.textContent?.slice(0, 500) ?? null,
+        rootHtml: root?.innerHTML?.slice(0, 1500) ?? null,
+        bodyText: document.body?.innerText?.slice(0, 1000) ?? null,
+        scriptSources: [...document.scripts].map(script => script.src || '(inline)'),
+      };
+    }).catch(error => ({ evaluationError: String(error) }));
+    const screenshot = join(artifactDir, `failure-${phase}-main-webview.png`);
+    await mainPage.screenshot({ path: screenshot, fullPage: true }).catch(() => {});
+    throw new Error(`Main WebView did not render #root; url=${mainPage.url()} dom=${JSON.stringify(dom)} pageErrors=${JSON.stringify(pageErrors)} consoleErrors=${JSON.stringify(consoleErrors)} failedRequests=${JSON.stringify(failedRequests)} screenshot=${screenshot}`, { cause });
+  }
   const crash = await mainPage.locator('body').innerText();
   assert.ok(!crash.includes('تعذّر عرض واجهة تَرتيل'), `The packaged app hit its React error boundary: ${crash.slice(0, 500)}`);
   return mainPage;
