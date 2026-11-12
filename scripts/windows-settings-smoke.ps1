@@ -215,8 +215,9 @@ function Restore-RunKeySnapshot {
     if (-not (Test-TarteelRunEntry $name $entry.Value)) { continue }
     if ($actualNames -notcontains $name) { throw "Original Tarteel startup registry value was not restored: $name" }
     $actualValue = $verify.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-    if ($verify.GetValueKind($name).ToString() -ne $entry.Kind
-      -or (ConvertTo-Json -Compress -InputObject $actualValue) -ne (ConvertTo-Json -Compress -InputObject $entry.Value)) {
+    $actualJson = ConvertTo-Json -Compress -InputObject $actualValue
+    $expectedJson = ConvertTo-Json -Compress -InputObject $entry.Value
+    if ($verify.GetValueKind($name).ToString() -ne $entry.Kind -or $actualJson -ne $expectedJson) {
       throw "Original Tarteel startup registry value differs after restoration: $name"
     }
   }
