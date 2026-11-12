@@ -134,6 +134,9 @@ describe('صفحة إعدادات تَرتيل', () => {
     expect(windowsTest).toContain('the autostart switch to reflect removal of the Windows registration');
     expect(windowsTest).toContain('Windows autostart interaction did not persist');
     expect(windowsTest).not.toContain('autostart.uncheck()');
+    expect(windowsTest).toContain('const arrowClickPoints = {');
+    expect(windowsTest).toContain('arrowClickPoints[direction]');
+    expect(windowsTest).toContain('button.click({ position: { x: box.width * point.x, y: box.height * point.y } });');
     expect(windowsTest).not.toContain('islandPort');
     expect(windowsTest).not.toContain('islandBrowser');
   });

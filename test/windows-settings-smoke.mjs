@@ -772,10 +772,20 @@ async function firstRun(page) {
     ['down', 'تحريك لأسفل', 'offsetY', 2],
     ['left', 'تحريك لليسار', 'offsetX', -2],
   ];
+  const arrowClickPoints = {
+    up: { x: 0.5, y: 0.16 },
+    right: { x: 0.84, y: 0.5 },
+    down: { x: 0.5, y: 0.84 },
+    left: { x: 0.16, y: 0.5 },
+  };
   let current = await readPlacement(page);
-  for (const [, label, field, delta] of steps) {
+  for (const [direction, label, field, delta] of steps) {
     const before = Number(current[field]);
-    await page.getByRole('button', { name: label, exact: true }).click();
+    const button = page.getByRole('button', { name: label, exact: true });
+    const box = await button.boundingBox();
+    assert.ok(box, `${label} remote segment has a bounding box`);
+    const point = arrowClickPoints[direction];
+    await button.click({ position: { x: box.width * point.x, y: box.height * point.y } });
     current = await waitUntil(() => readPlacement(page), value => Math.abs(Number(value[field]) - (before + delta)) < 0.001, `${label} nudge to update the native position`, 10_000);
     check(Math.abs(Number(current[field]) - (before + delta)) < 0.001, `${label} nudge changes the real Dynamic offset by two logical pixels`);
   }
