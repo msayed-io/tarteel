@@ -45,12 +45,13 @@ describe('اختيار مظهر Dynamic', () => {
   });
 
   it('uses persistent Rust commands for the two settings choices and defaults storage safely', () => {
-    const settings = read('src/PrayerSettings.jsx');
+    const settings = read('src/PrayerSettingsPage.jsx');
+    const logic = read('src/PrayerSettings.jsx');
     const rust = read('src-tauri/src/lib.rs');
-    expect(settings).toContain("invoke('get_island_appearance')");
-    expect(settings).toContain("invoke('set_island_appearance', { appearance: next })");
-    expect(settings).toContain('aria-pressed={islandAppearance === \'glass\'}');
-    expect(settings).toContain('aria-pressed={islandAppearance === \'black\'}');
+    expect(logic).toContain("invoke('get_island_appearance')");
+    expect(logic).toContain("invoke('set_island_appearance', { appearance: next })");
+    expect(settings).toContain('aria-checked={islandAppearance === \'glass\'}');
+    expect(settings).toContain('aria-checked={islandAppearance === \'black\'}');
     expect(settings).toContain('تمويه سطح المكتب خلف الجزيرة غير مضمون');
     expect(rust).toContain('const ISLAND_APPEARANCE_FILE: &str = "island-appearance.json"');
     expect(rust).toContain('fn read_island_appearance(');

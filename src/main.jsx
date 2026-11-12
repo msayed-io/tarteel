@@ -1148,6 +1148,10 @@ function App() {
     if (nativeAudioActiveRef.current) invoke('spatial_audio_set_volume', { volume: value }).catch(cause => console.warn('Tarteel native volume update failed', cause));
   };
 
+  if (prayerSettingsOpen) {
+    return <PrayerSettings config={prayerConfig} schedule={prayerSchedule} audioMode={audioPrefs.spatialMode} onAudioModeChange={setSpatialMode} onClose={() => setPrayerSettingsOpen(false)} onSave={savePrayerSettings} onPreviewAlarm={previewAlarm} />;
+  }
+
   return <>
     <header className="bar">
       <div className="brand glass rim"><div className="mark">ت</div><b>تَرتيل</b></div>
@@ -1163,7 +1167,6 @@ function App() {
       })}</div> : <p className="empty">{query.trim() ? 'لا توجد نتائج' : 'لم تُضف أي تلاوة إلى المفضلة بعد'}</p>}
     </main>
     <footer className="player glass big"><div className="pr"><div className="now">{active ? <div className="cover">{active.cover ? <img src={active.cover} alt=""/> : active.file_name.slice(0, 1)}</div> : <div className="cover">ت</div>}<div className="meta"><b title={active?.file_name || ''}>{active?.title || active?.file_name || ''}</b><span>{active?.artist || ''}</span></div></div><div className="ctl"><button className="tbtn rim" onClick={() => step(-1)} aria-label="السابق"><Transport type="prev"/></button><button className="tbtn play rim" onClick={toggle} aria-label={playing ? 'إيقاف مؤقت' : 'تشغيل'}>{playing ? <Transport type="pause"/> : <Transport type="play"/>}</button><button className="tbtn rim" onClick={() => step(1)} aria-label="التالي"><Transport type="next"/></button></div><div className="vol"><input type="range" min="0" max="100" value={volume} onChange={changeVolume} style={{ '--p': `${volume}%` }} aria-label="مستوى الصوت"/><Icon name="volume"/></div></div><div className="seek"><span>{fmt(pos)}</span><input type="range" min="0" max={duration || 0} step="any" value={Math.min(pos, duration || 0)} onChange={seek} style={{ '--p': `${duration ? pos / duration * 100 : 0}%` }} aria-label="التقدّم"/><span>{fmt(duration)}</span></div></footer>
-    {prayerSettingsOpen && <PrayerSettings config={prayerConfig} schedule={prayerSchedule} audioMode={audioPrefs.spatialMode} onAudioModeChange={setSpatialMode} onClose={() => setPrayerSettingsOpen(false)} onSave={savePrayerSettings} onPreviewAlarm={previewAlarm}/>}
   </>;
 }
 

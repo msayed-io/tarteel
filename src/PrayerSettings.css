@@ -1,980 +1,370 @@
-:root {
-  color-scheme: dark;
+
+/* ==========================================================================
+   ترتيل — صفحة الإعدادات (تصميم بصري فقط، بلا أي منطق للخدمات)
+   الهوية: ألوان الواجهة الرئيسية الفعلية (مقروءة من لقطة المكتبة) — رمادي داكن
+   محايد بلا أي لون مميز. الكبسولات عائمة زجاجية بحافة لامعة (Specular Rim).
+   ========================================================================== */
+
+.settings-page{
+  --app-font:"SF Arabic","Segoe UI Variable Text","Segoe UI","Noto Sans Arabic",system-ui,sans-serif;
+  /* الأسطح — قيم مسحوبة من لقطة الواجهة الرئيسية */
+  --bg:#0a0b0d;            /* خلفية الصفحة */
+  --card:#151617;          /* البطاقات (نفس بطاقة قائمة المكتبة) */
+  --card-line:#252628;     /* حد البطاقة */
+  --raised:#1d1f22;        /* أيقونات، شرائح، خيارات */
+  --raised-2:#242629;
+  --sep:#222325;           /* فواصل الصفوف */
+  --pill:#36383b;          /* الكبسولة النشطة داخل التبويبات */
+
+  /* النصوص */
+  --text:#f5f5f7;
+  --text-2:#b8b9bc;
+  --text-3:#8f9094;
+
+  /* الزجاج */
+  --glass-fill:rgba(52,56,60,.30);   /* يعطي ≈ #15181b فوق الخلفية = كبسولات الواجهة */
+  --glass-hover:rgba(74,78,84,.38);
+  --glass-blur:blur(22px) saturate(1.8);
+  --glass-shadow:0 8px 20px rgba(0,0,0,.4);
+
+  /* الحافة اللامعة */
+  --rim-rgb:255 255 255;   /* أبيض دائمًا */
+  --rim:1;                 /* شدة الحافة 0..1 (من الإعدادات) */
+  --rim-w:1px;             /* السماكة */
+
+  --font:var(--app-font,"Segoe UI Variable Text","Segoe UI",Tahoma,system-ui,sans-serif);
 }
 
-.prayer-settings-backdrop {
-  --ps-bg-backdrop: var(--bg);
-  --ps-surface-modal: var(--bg);
-  --ps-surface-card: var(--surface);
-  --ps-surface-raised: var(--glass);
-  --ps-surface-hover: var(--glass-hover);
-  --ps-border: var(--hairline);
-  --ps-border-strong: color-mix(in srgb, var(--text) 18%, transparent);
-  --ps-text: var(--text);
-  --ps-text-2: var(--text-2);
-  --ps-text-3: var(--text-3);
-  --ps-blue: var(--accent);
-  --ps-blue-solid: var(--accent);
-  --ps-blue-bg: var(--accent-soft);
-  --ps-blue-bg-hover: color-mix(in srgb, var(--accent) 22%, transparent);
-  --ps-blue-line: color-mix(in srgb, var(--accent) 36%, transparent);
-  --ps-r-card: 16px;
-  --ps-r-control: 12px;
-
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  background: var(--ps-bg-backdrop);
-  background: color-mix(in srgb, var(--bg) 76%, transparent);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+.settings-page, .settings-page *{box-sizing:border-box;margin:0;padding:0}
+html.settings-page-active{background:var(--bg);scrollbar-width:none;-ms-overflow-style:none}
+html.settings-page-active::-webkit-scrollbar,body.settings-page-active::-webkit-scrollbar{display:none;width:0;height:0}
+body.settings-page-active{
+  font-family:var(--font);background:var(--bg);color:var(--text);
+  min-height:100vh;-webkit-font-smoothing:antialiased;
 }
+.settings-page button,.settings-page select,.settings-page input{font:inherit;color:inherit}
+.settings-page button{cursor:pointer;background:none;border:0}
+.settings-page :focus-visible{outline:2px solid rgba(245,245,247,.55);outline-offset:3px}
 
-.prayer-settings-backdrop,
-.prayer-settings-backdrop * {
-  box-sizing: border-box;
+/* ==========================================================================
+   الحافة اللامعة (Specular Rim) — حلقة 1px مقصوصة بالقناع، ضوء من أعلى اليسار
+   .rim  = حافة فقط   |   .glass = حافة + سطح زجاجي
+   --R  = نصف قطر العنصر (للكبسولة = الارتفاع ÷ 2)
+   --o  = إزاحة بداية التدرج حتى تقع القمة 0.60 على نقطة 45° الفعلية من القوس
+   --k  = معامل الشدة (1، و0.85 للعنصر الذي فوق عنصر زجاجي)
+   ========================================================================== */
+.settings-page .rim,.settings-page .glass{--R:22px;--o:calc(var(--R) * .4142);--k:1;position:relative;border-radius:var(--R)}
+.settings-page .glass{
+  background:var(--glass-fill);
+  -webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);
+  box-shadow:var(--glass-shadow);
 }
-
-.ps-icon-sprite {
-  position: absolute;
-  width: 0;
-  height: 0;
-  overflow: hidden;
+.settings-page .on-glass{--k:.85}
+.settings-page .rim::after,.settings-page .glass::after{
+  content:"";position:absolute;inset:0;box-sizing:border-box;border-radius:inherit;
+  padding:var(--rim-w,1px);pointer-events:none;opacity:var(--rim,1);
+  background:linear-gradient(135deg,
+    rgb(var(--rim-rgb) / calc(.60  * var(--k))) 0,
+    rgb(var(--rim-rgb) / calc(.60  * var(--k))) var(--o),
+    rgb(var(--rim-rgb) / calc(.29  * var(--k))) calc(var(--o) + min(12px,8%)),
+    rgb(var(--rim-rgb) / calc(.13  * var(--k))) calc(var(--o) + min(24px,16%)),
+    rgb(var(--rim-rgb) / calc(.07  * var(--k))) calc(var(--o) + min(36px,24%)),
+    rgb(var(--rim-rgb) / calc(.06  * var(--k))) calc(var(--o) + min(48px,32%)),
+    rgb(var(--rim-rgb) / calc(.06  * var(--k))) calc(100% - var(--o) - min(36px,30%)),
+    rgb(var(--rim-rgb) / calc(.067 * var(--k))) calc(100% - var(--o) - min(27px,22.5%)),
+    rgb(var(--rim-rgb) / calc(.095 * var(--k))) calc(100% - var(--o) - min(18px,15%)),
+    rgb(var(--rim-rgb) / calc(.178 * var(--k))) calc(100% - var(--o) - min(9px,7.5%)),
+    rgb(var(--rim-rgb) / calc(.34  * var(--k))) calc(100% - var(--o)),
+    rgb(var(--rim-rgb) / calc(.34  * var(--k))) 100%);
+  /* الترتيب إلزامي: القناع ثم الدمج بعده، بالصيغتين */
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;
+  mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  mask-composite:exclude;
 }
-
-.prayer-settings {
-  width: min(500px, 100%);
-  max-height: min(680px, calc(100vh - 32px));
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--ps-border);
-  border-radius: 22px;
-  background: var(--ps-surface-modal);
-  color: var(--ps-text);
-  box-shadow: 0 28px 70px rgba(0, 0, 0, .65), 0 0 0 1px rgba(255, 255, 255, .015) inset;
-  direction: rtl;
-  font-family: "Segoe UI", "Segoe UI Variable Text", Tahoma, system-ui, sans-serif;
-  -webkit-font-smoothing: antialiased;
+@supports not ((-webkit-mask-composite:xor) or (mask-composite:exclude)){
+  .settings-page .rim::after,.settings-page .glass::after{display:none}
+  .settings-page .glass{box-shadow:inset 0 0 0 .5px rgba(255,255,255,.14),var(--glass-shadow)}
 }
-
-.prayer-settings button,
-.prayer-settings select,
-.prayer-settings input {
-  color: inherit;
-  font: inherit;
+/* تقليل الشفافية: تعبئة معتمة بلا تمويه، والحافة بنصف الشدة */
+@media (prefers-reduced-transparency:reduce){
+  .settings-page{--rim:.5;--glass-fill:#1d1f22;--glass-hover:#26282b}
+  .settings-page .glass{-webkit-backdrop-filter:none;backdrop-filter:none}
 }
+.settings-page[data-reduce-transparency]{--rim:.5;--glass-fill:#1d1f22;--glass-hover:#26282b}
+.settings-page[data-reduce-transparency] .glass{-webkit-backdrop-filter:none;backdrop-filter:none}
 
-.prayer-settings button {
-  border: 0;
-  cursor: pointer;
+/* ==========================================================================
+   الهيكل
+   ========================================================================== */
+.settings-page .wrap{max-width:1134px;margin-inline:auto;padding-inline:42px}
+
+/* الشريط العلوي: كبسولات عائمة */
+.settings-page .topbar{
+  position:sticky;top:0;z-index:30;
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;
+  padding-block:18px 12px;
 }
-
-.prayer-settings :focus-visible {
-  outline: 2px solid var(--ps-blue-solid);
-  outline-offset: 2px;
+.settings-page .topbar::before{ /* ستار تدريجي خلف الكبسولات ليبقى المحتوى المار تحتها مقروءًا */
+  content:"";position:absolute;inset:0 -42px -22px;z-index:-1;pointer-events:none;
+  background:linear-gradient(to bottom,var(--bg) 0,var(--bg) 58%,rgba(10,11,13,0));
 }
-
-.ps-icon {
-  display: block;
-  width: 18px;
-  height: 18px;
-  flex: none;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.settings-page .brand{--R:27px;justify-self:start;display:flex;align-items:center;gap:12px;height:54px;padding:0 8px 0 20px}
+.settings-page .brand-mark{
+  width:38px;height:38px;border-radius:50%;background:var(--text);color:#0a0b0d;
+  display:grid;place-items:center;font-size:20px;font-weight:800;line-height:1;
 }
+.settings-page .brand-name{font-size:18px;font-weight:700;letter-spacing:.2px}
 
-/* الرأس ثابت، ولا يتحرك مع الجسم */
-.ps-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: none;
-  padding: 18px 20px 14px;
-  border-bottom: 1px solid transparent;
-  transition: border-color .2s;
+.settings-page .circle{
+  --R:26px;justify-self:end;width:52px;height:52px;display:grid;place-items:center;
+  color:var(--text);transition:background .15s,transform .12s;
 }
+.settings-page .circle:hover{background:var(--glass-hover)}
+.settings-page .circle:active{transform:scale(.97)}
 
-.ps-head.is-scrolled {
-  border-bottom-color: var(--ps-border);
+/* التبويب المقسّم (نفس نظام «المكتبة | المفضلة») */
+.settings-page .seg{
+  --R:27px;--n:3;--i:0;
+  position:relative;display:grid;grid-template-columns:repeat(var(--n),1fr);
+  height:54px;padding:5px;
 }
-
-.ps-head-icon {
-  display: grid;
-  width: 40px;
-  height: 40px;
-  flex: none;
-  place-items: center;
-  border: 1px solid var(--ps-blue-line);
-  border-radius: 12px;
-  background: var(--ps-blue-bg);
-  color: var(--ps-blue);
+.settings-page .seg-thumb{
+  --R:22px;position:absolute;inset-block:5px;inset-inline-start:5px;
+  width:calc((100% - 10px) / var(--n));background:var(--pill);
+  transform:translateX(calc(var(--i) * -100%));
+  transition:transform .38s cubic-bezier(.3,.9,.3,1);
 }
-
-.ps-head-icon .ps-icon {
-  width: 22px;
-  height: 22px;
+.settings-page .seg-item{
+  position:relative;z-index:1;height:44px;border-radius:22px;padding-inline:18px;
+  font-size:14.5px;font-weight:700;white-space:nowrap;color:var(--text-3);
+  transition:color .2s;
 }
+.settings-page .seg-item:hover{color:var(--text-2)}
+.settings-page .seg-item[aria-selected="true"]{color:var(--text)}
+.settings-page .seg.nav{min-width:0}
+.settings-page .seg.nav .seg-item{min-width:132px}
+.settings-page .seg.card-seg{--R:26px;height:52px;margin-bottom:0}
+.settings-page .seg.card-seg .seg-thumb{--R:21px;inset-block:5px}
+.settings-page .seg.card-seg .seg-item{height:42px;border-radius:21px;font-size:14.5px}
 
-.ps-head-copy {
-  min-width: 0;
+/* رأس الصفحة */
+.settings-page .page-head{padding:18px 0 0;text-align:start}
+.settings-page .page-head h1{font-size:48px;line-height:1.2;font-weight:800;letter-spacing:-.2px}
+.settings-page .page-head .sub{display:flex;align-items:center;gap:7px;margin-top:6px;font-size:15px;color:var(--text-3)}
+.settings-page .page-head .sub svg{color:var(--text-2)}
+
+/* اللوحات (التبويبات) */
+.settings-page .panes{padding-block:26px 64px}
+.settings-page .pane{display:none}
+.settings-page .pane.is-active{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start;animation:paneIn .32s cubic-bezier(.3,.9,.3,1)}
+@keyframes paneIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.settings-page .col{display:grid;gap:26px;align-content:start}
+.settings-page .sec{display:grid;gap:11px}
+.settings-page .sec-title{display:flex;align-items:center;gap:9px;padding-inline:6px;font-size:15px;font-weight:700}
+.settings-page .sec-title::before{content:"";width:3px;height:15px;border-radius:2px;background:var(--text);opacity:.85}
+.settings-page .card{background:var(--card);border:1px solid var(--card-line);border-radius:26px}
+.settings-page .hint{padding-inline:8px;font-size:13px;line-height:1.75;color:var(--text-3)}
+.settings-page .card > .hint{padding:0}
+.settings-page .lead{font-size:15px;line-height:1.7;color:var(--text)}
+.settings-page .pad{padding:20px}
+.settings-page .stack{display:grid;gap:16px}
+
+/* الأزرار الزجاجية */
+.settings-page .btn{
+  --R:20px;display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  height:40px;padding:0 18px;font-size:13.5px;font-weight:700;white-space:nowrap;color:var(--text);
+  --glass-shadow:0 4px 12px rgba(0,0,0,.3);
+  transition:background .15s,transform .12s;
 }
+.settings-page .btn:hover{background:var(--glass-hover)}
+.settings-page .btn:active{transform:scale(.98)}
+.settings-page .btn.sm{--R:17px;height:34px;padding:0 15px;font-size:13px}
+.settings-page .btn.block{--R:23px;width:100%;height:46px;font-size:14.5px}
+.settings-page .btn.is-spinning svg{animation:spin .8s linear}
+@keyframes spin{to{transform:rotate(-360deg)}}
+.settings-page .play-dot{width:26px;height:26px;border-radius:50%;background:var(--text);color:#0a0b0d;display:grid;place-items:center}
+.settings-page .btn.granted{color:var(--text)}
+.settings-page .btn.granted svg{color:var(--text-2)}
 
-.ps-head h2 {
-  margin: 0;
-  color: var(--ps-text);
-  font-size: 17px;
-  font-weight: 700;
-  line-height: 1.3;
+/* القوائم المنسدلة (غلاف كبسولي لأن select لا يقبل ::after) */
+.settings-page .sel{
+  --R:22px;display:block;width:100%;height:44px;
+  --glass-shadow:0 4px 12px rgba(0,0,0,.3);transition:background .15s;
 }
-
-.ps-head-sub {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 2px 0 0;
-  color: var(--ps-text-3);
-  font-size: 12.5px;
-  font-weight: 400;
+.settings-page .sel:hover{background:var(--glass-hover)}
+.settings-page .sel select{
+  -webkit-appearance:none;appearance:none;color-scheme:dark;position:absolute;inset:0;
+  width:100%;height:100%;border:0;border-radius:inherit;background:transparent;cursor:pointer;
+  padding-inline:20px 44px;font-size:14px;font-weight:600;color:var(--text);outline:none;
 }
+.settings-page .sel select option{background:#1d1f22;color:var(--text)}
+.settings-page .sel .chev{position:absolute;inset-inline-end:16px;top:50%;translate:0 -50%;color:var(--text-3);pointer-events:none}
+.settings-page .sel:focus-within{outline:2px solid rgba(245,245,247,.55);outline-offset:3px}
+.settings-page .sel.sm{--R:20px;width:148px;height:40px}
+.settings-page .sel.sm select{padding-inline:16px 38px;font-size:13.5px}
 
-.ps-head-sub .ps-icon {
-  width: 14px;
-  height: 14px;
-  color: var(--ps-blue);
+/* الحقول */
+.settings-page .fields{display:grid;gap:16px;padding:20px}
+.settings-page .field{display:grid;gap:9px}
+.settings-page .field-label{padding-inline:6px;font-size:13px;font-weight:700;color:var(--text-2)}
+
+/* الشرائح (Chips) */
+.settings-page .chips{display:flex;flex-wrap:wrap;gap:7px}
+.settings-page .chip{
+  display:inline-flex;align-items:center;height:28px;padding:0 12px;border-radius:14px;
+  background:var(--raised);border:1px solid var(--card-line);font-size:12.5px;color:var(--text-2);
 }
-
-.ps-close {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  flex: none;
-  place-items: center;
-  margin-inline-start: auto;
-  border: 1px solid var(--ps-border) !important;
-  border-radius: 50%;
-  background: var(--ps-surface-raised) !important;
-  color: var(--ps-text-2) !important;
-  transition: background .15s, color .15s, transform .1s;
-}
-
-.ps-close:hover {
-  background: var(--ps-surface-hover) !important;
-  color: var(--ps-text) !important;
-}
-
-.ps-close:active {
-  transform: scale(.94);
-}
-
-.ps-close .ps-icon {
-  width: 16px;
-  height: 16px;
-}
-
-/* الجسم يتمرر بعجلة الفأرة واللمس ولوحة المفاتيح، بلا أي شريط مرئي */
-.ps-body {
-  --ps-fade-top: 0px;
-  --ps-fade-bottom: 0px;
-  min-height: 0;
-  flex: 1;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 8px 20px 22px;
-  display: grid;
-  align-content: start;
-  gap: 20px;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--ps-fade-top), #000 calc(100% - var(--ps-fade-bottom)), transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--ps-fade-top), #000 calc(100% - var(--ps-fade-bottom)), transparent 100%);
-}
-
-.ps-body::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
-}
-
-.ps-section {
-  min-width: 0;
-}
-
-.ps-section-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 9px;
-  color: var(--ps-text-2);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.ps-section-title::before {
-  width: 3px;
-  height: 14px;
-  flex: none;
-  border-radius: 2px;
-  background: var(--ps-blue);
-  content: "";
-}
-
-.ps-card {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--ps-border);
-  border-radius: var(--ps-r-card);
-  background: var(--ps-surface-card);
-}
-
-.ps-hint {
-  margin: 8px 0 0;
-  padding-inline: 4px;
-  color: var(--ps-text-3);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.6;
-}
-
-.ps-placement-card {
-  padding: 14px;
-}
-
-.ps-appearance-card {
-  padding: 14px;
-}
-
-.ps-placement-intro {
-  margin: 0 0 2px;
-  color: var(--ps-text-2);
-  font-size: 12.5px;
-  line-height: 1.6;
-}
-
-.ps-placement-modes {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  margin-top: 12px;
-  padding: 4px;
-  border: 1px solid var(--ps-border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--ps-surface-raised) 72%, transparent);
-}
-
-.ps-placement-mode {
-  height: 34px;
-  border-radius: 9px !important;
-  background: transparent !important;
-  color: var(--ps-text-3) !important;
-  font-size: 12.5px !important;
-  font-weight: 650 !important;
-  transition: background .18s, color .18s, transform .12s;
-}
-
-.ps-placement-mode[aria-pressed="true"] {
-  background: var(--ps-surface-hover) !important;
-  color: var(--ps-text) !important;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, .08) inset, 0 3px 8px rgba(0, 0, 0, .2);
-}
-
-.ps-placement-mode:active {
-  transform: scale(.98);
-}
-
-.ps-placement-remote {
-  margin-top: 12px;
-  padding: 13px 10px;
-  border: 1px solid color-mix(in srgb, var(--ps-text) 10%, transparent);
-  border-radius: 16px;
-  background: linear-gradient(155deg, color-mix(in srgb, var(--ps-surface-raised) 92%, white 8%), var(--ps-surface-card) 72%);
-  box-shadow: 0 9px 22px rgba(0, 0, 0, .18), 0 1px 0 rgba(255, 255, 255, .045) inset;
-  transition: border-color .2s, box-shadow .2s;
-}
-
-.ps-placement-remote.is-manual {
-  border-color: var(--ps-blue-line);
-  box-shadow: 0 9px 22px rgba(0, 0, 0, .18), 0 0 0 1px color-mix(in srgb, var(--ps-blue) 8%, transparent) inset;
-}
-
-.ps-dpad {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 44px;
-  grid-template-rows: 42px 46px 42px;
-  align-items: center;
-  justify-items: center;
-  gap: 5px;
-  direction: ltr;
-}
-
-.ps-dpad-button {
-  display: grid;
-  width: 42px;
-  height: 40px;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--ps-text) 13%, transparent) !important;
-  border-radius: 12px !important;
-  background: linear-gradient(160deg, color-mix(in srgb, var(--ps-surface-hover) 90%, white 10%), var(--ps-surface-raised)) !important;
-  color: var(--ps-text-2) !important;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, .28), 0 1px 0 rgba(255, 255, 255, .08) inset;
-  transition: transform .16s cubic-bezier(.2,.9,.3,1), border-color .16s, color .16s, box-shadow .16s;
-}
-
-.ps-dpad-button:hover:not(:disabled) {
-  border-color: var(--ps-blue-line) !important;
-  color: var(--ps-text) !important;
-  box-shadow: 0 3px 9px rgba(0, 0, 0, .32), 0 0 12px color-mix(in srgb, var(--ps-blue) 10%, transparent);
-}
-
-.ps-dpad-button:active:not(:disabled) {
-  transform: scale(.92);
-}
-
-.ps-dpad-button:disabled {
-  cursor: default;
-  opacity: .38;
-}
-
-.ps-dpad-button .ps-icon {
-  width: 19px;
-  height: 19px;
-}
-
-.ps-dpad-up { grid-column: 2; grid-row: 1; }
-.ps-dpad-left { grid-column: 1; grid-row: 2; }
-.ps-dpad-right { grid-column: 3; grid-row: 2; }
-.ps-dpad-down { grid-column: 2; grid-row: 3; }
-
-.ps-dpad-center {
-  display: flex;
-  min-width: 0;
-  min-height: 40px;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  grid-column: 2;
-  grid-row: 2;
-  color: var(--ps-text-3);
-  text-align: center;
-}
-
-.ps-dpad-center span {
-  font-size: 10.5px;
-  line-height: 1.25;
-}
-
-.ps-dpad-center bdi {
-  color: var(--ps-text-2);
-  font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.ps-placement-hint {
-  margin: 11px 2px 0;
-  color: var(--ps-text-3);
-  font-size: 11.5px;
-  line-height: 1.65;
-}
-
-.ps-appearance-hint {
-  margin: 10px 2px 0;
-  color: var(--ps-text-3);
-  font-size: 11.5px;
-  line-height: 1.65;
-}
-
-.ps-placement-card .ps-feedback {
-  margin-top: 9px;
-}
-
-/* الأزرار */
-.ps-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-width: 0;
-  height: 38px;
-  padding: 0 14px;
-  border: 1px solid transparent !important;
-  border-radius: var(--ps-r-control);
-  font-size: 13px !important;
-  font-weight: 600 !important;
-  line-height: 1;
-  white-space: nowrap;
-  transition: background .15s, border-color .15s, transform .1s;
-}
-
-.ps-button:active {
-  transform: scale(.975);
-}
-
-.ps-button:disabled {
-  opacity: .5;
-  pointer-events: none;
-}
-
-.ps-button-blue {
-  flex: none;
-  border-color: var(--ps-blue-line) !important;
-  background: var(--ps-blue-bg) !important;
-  color: var(--ps-blue) !important;
-}
-
-.ps-button-blue:hover {
-  background: var(--ps-blue-bg-hover) !important;
-}
-
-.ps-button-blue.is-spinning .ps-icon {
-  animation: ps-spin .8s linear;
-}
-
-.ps-button-ghost {
-  height: 32px;
-  padding: 0 12px;
-  border-color: var(--ps-border-strong) !important;
-  background: var(--ps-surface-raised) !important;
-  color: var(--ps-text) !important;
-  font-size: 12.5px !important;
-}
-
-.ps-button-ghost:hover {
-  background: var(--ps-surface-hover) !important;
-}
-
-.ps-button-preview {
-  width: 100%;
-  height: 42px;
-  border-color: var(--ps-blue-line) !important;
-  background: var(--ps-blue-bg) !important;
-  color: var(--ps-blue) !important;
-}
-
-.ps-button-preview:hover {
-  background: var(--ps-blue-bg-hover) !important;
-}
-
-@keyframes ps-spin {
-  to { transform: rotate(-360deg); }
-}
+.settings-page .applied{padding:14px 20px 18px;border-top:1px solid var(--sep);border-radius:0 0 25px 25px;background:rgba(255,255,255,.022)}
+.settings-page .applied-label{display:flex;align-items:center;gap:7px;margin-bottom:10px;font-size:12.5px;font-weight:700;color:var(--text-2)}
+.settings-page .applied .chip{background:rgba(255,255,255,.055);border-color:rgba(255,255,255,.13);color:#e6e7e9}
 
 /* الموقع */
-.ps-location {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px;
-}
+.settings-page .loc{display:flex;align-items:center;gap:14px;padding:18px 20px}
+.settings-page .loc-pin{flex:none;width:46px;height:46px;border-radius:50%;background:var(--raised);display:grid;place-items:center;color:var(--text)}
+.settings-page .loc-main{flex:1;min-width:0;display:grid;gap:9px}
+.settings-page .loc-name{font-size:15.5px;line-height:1.45;font-weight:700;text-wrap:balance}
+.settings-page .loc-foot{padding:0 20px 18px}
 
-.ps-location-icon {
-  display: grid;
-  width: 42px;
-  height: 42px;
-  flex: none;
-  place-items: center;
-  border: 1px solid var(--ps-blue-line);
-  border-radius: 50%;
-  background: var(--ps-blue-bg);
-  color: var(--ps-blue);
-}
+/* الصفوف */
+.settings-page .row{display:flex;align-items:center;gap:14px;min-height:64px;padding:11px 20px}
+.settings-page .row + .row{border-top:1px solid var(--sep)}
+.settings-page .ico{flex:none;width:36px;height:36px;border-radius:50%;background:var(--raised);display:grid;place-items:center;color:var(--text-2)}
+.settings-page .row-label{flex:1;font-size:14.5px;font-weight:600;min-width:0}
+.settings-page .row-ctl{flex:none;margin-inline-start:auto}
+.settings-page .row.note-row{align-items:flex-start;padding-block:16px}
+.settings-page .row.note-row p{font-size:13.5px;line-height:1.8;color:var(--text-3)}
+.settings-page .row.note-row strong{color:var(--text);font-weight:700}
+.settings-page .card-foot{padding:14px 20px 20px;border-top:1px solid var(--sep)}
 
-.ps-location-icon .ps-icon {
-  width: 21px;
-  height: 21px;
+/* مستوى الصوت */
+.settings-page .row-vol{flex-direction:column;align-items:stretch;gap:12px;padding-block:14px 16px}
+.settings-page .row-vol-top{display:flex;align-items:center;gap:14px}
+.settings-page .pill{--R:15px;height:30px;min-width:56px;padding:0 13px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;--glass-shadow:0 3px 8px rgba(0,0,0,.28)}
+.settings-page .slider-line{display:flex;align-items:center;gap:12px;padding-inline:3px;color:var(--text-3)}
+.settings-page .range{
+  --p:1;--fill:calc(11px + (100% - 22px) * var(--p));
+  -webkit-appearance:none;appearance:none;flex:1;height:24px;background:transparent;cursor:pointer;
 }
+.settings-page .range::-webkit-slider-runnable-track{
+  height:6px;border-radius:999px;
+  background:linear-gradient(to left,var(--text) var(--fill),#2c2e31 var(--fill));
+}
+.settings-page .range::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:22px;height:22px;margin-top:-8px;border-radius:50%;
+  background:var(--text);border:3px solid var(--card);
+  box-shadow:0 0 0 1px rgba(255,255,255,.12),0 3px 10px rgba(0,0,0,.6);
+  transition:transform .15s,box-shadow .15s;
+}
+.settings-page .range:hover::-webkit-slider-thumb{box-shadow:0 0 0 6px rgba(245,245,247,.1),0 3px 10px rgba(0,0,0,.6)}
+.settings-page .range:active::-webkit-slider-thumb{transform:scale(1.08)}
+.settings-page .range:focus-visible{outline:none}
+.settings-page .range:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 6px rgba(245,245,247,.2),0 3px 10px rgba(0,0,0,.6)}
 
-.ps-location-main {
-  min-width: 0;
-  flex: 1;
+/* المفتاح (Switch) */
+.settings-page .switch{
+  --R:14px;position:relative;display:inline-block;flex:none;width:48px;height:28px;border-radius:14px;
+  --glass-shadow:none;
 }
+.settings-page .switch input{position:absolute;inset:0;width:100%;height:100%;opacity:0;margin:0;cursor:pointer;z-index:2}
+.settings-page .switch .track{position:absolute;inset:0;border-radius:inherit;background:rgba(58,62,66,.6);transition:background .22s}
+.settings-page .switch .track::before{
+  content:"";position:absolute;top:4px;inset-inline-start:4px;width:20px;height:20px;border-radius:50%;
+  background:#9b9ca1;box-shadow:0 1px 3px rgba(0,0,0,.5);transition:transform .22s cubic-bezier(.3,.9,.3,1),background .22s;
+}
+.settings-page .switch input:checked + .track{background:#f0f0f2}
+.settings-page .switch input:checked + .track::before{transform:translateX(-20px);background:#0a0b0d}
+.settings-page .switch input:focus-visible + .track{outline:2px solid rgba(245,245,247,.55);outline-offset:3px}
 
-.ps-location-name {
-  color: var(--ps-text);
-  font-size: 14.5px;
-  font-weight: 700;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-  text-wrap: balance;
+/* خيارات صوت التلاوة */
+.settings-page .opts{display:grid;gap:10px;padding:16px}
+.settings-page .opt{
+  position:relative;display:flex;align-items:center;gap:14px;padding:15px 18px;cursor:pointer;
+  background:var(--raised);border:1px solid var(--card-line);border-radius:20px;
+  transition:background .18s,border-color .18s;
 }
+.settings-page .opt:hover{background:var(--raised-2)}
+.settings-page .opt input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+.settings-page .opt-txt{flex:1;display:grid;gap:4px;min-width:0}
+.settings-page .opt-txt b{font-size:15px;font-weight:700}
+.settings-page .opt-txt small{font-size:13px;line-height:1.6;color:var(--text-3)}
+.settings-page .opt-ind{
+  flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid #4a4c50;display:grid;place-items:center;
+  color:#0a0b0d;transition:background .18s,border-color .18s;
+}
+.settings-page .opt-ind svg{opacity:0;transform:scale(.6);transition:opacity .18s,transform .18s}
+.settings-page .opt:has(input:checked){background:#1f2124;border-color:rgba(245,245,247,.42)}
+.settings-page .opt:has(input:checked) .opt-ind{background:var(--text);border-color:var(--text)}
+.settings-page .opt:has(input:checked) .opt-ind svg{opacity:1;transform:none}
+.settings-page .opt:has(input:focus-visible){outline:2px solid rgba(245,245,247,.55);outline-offset:3px}
+.settings-page .opts + .hint{padding:0 22px 20px}
 
-.ps-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
+/* الريموت الدائري (موضع Dynamic) */
+.settings-page .remote-panel{
+  position:relative;display:grid;place-items:center;overflow:hidden;
+  padding:26px 16px;border:1px solid var(--card-line);border-radius:24px;
+  background:
+    radial-gradient(circle at 50% 50%,transparent 0 150px,rgba(255,255,255,.04) 150px 151px,transparent 151px 186px,rgba(255,255,255,.028) 186px 187px,transparent 187px),
+    #101113;
+  transition:opacity .25s;
 }
+.settings-page .remote{
+  --R:124px;position:relative;width:248px;height:248px;border-radius:50%;
+  background:radial-gradient(circle at 50% 26%,#212326 0,#141517 74%);
+  box-shadow:0 22px 44px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.04);
+  transition:opacity .25s,filter .25s;
+}
+.settings-page .remote.is-off{opacity:.38;filter:saturate(0);pointer-events:none}
+.settings-page .dp{
+  position:absolute;inset:0;width:248px;height:248px;color:#d4d5d8;
+  background:rgba(255,255,255,.05);transition:background .15s,color .15s;
+}
+.settings-page .dp:hover{background:rgba(255,255,255,.1)}
+.settings-page .dp:active{background:rgba(255,255,255,.2)}
+.settings-page .dp:focus-visible{outline:none;background:rgba(255,255,255,.16);color:#fff}
+.settings-page .dp svg{position:absolute;width:24px;height:24px}
+.settings-page .dp-up   {clip-path:path("M 44.15 39.86 A 116 116 0 0 1 203.85 39.86 L 162.55 83.38 A 56 56 0 0 0 85.45 83.38 Z")}
+.settings-page .dp-right{clip-path:path("M 208.14 44.15 A 116 116 0 0 1 208.14 203.85 L 164.62 162.55 A 56 56 0 0 0 164.62 85.45 Z")}
+.settings-page .dp-down {clip-path:path("M 203.85 208.14 A 116 116 0 0 1 44.15 208.14 L 85.45 164.62 A 56 56 0 0 0 162.55 164.62 Z")}
+.settings-page .dp-left {clip-path:path("M 39.86 203.85 A 116 116 0 0 1 39.86 44.15 L 83.38 85.45 A 56 56 0 0 0 83.38 162.55 Z")}
+.settings-page .dp-up svg{left:112px;top:26px}
+.settings-page .dp-right svg{left:198px;top:112px}
+.settings-page .dp-down svg{left:112px;top:198px}
+.settings-page .dp-left svg{left:26px;top:112px}
+.settings-page .remote-core{
+  --R:54px;position:absolute;left:50%;top:50%;translate:-50% -50%;width:108px;height:108px;
+  display:grid;align-content:center;justify-items:center;gap:3px;text-align:center;
+  --glass-shadow:0 6px 16px rgba(0,0,0,.45);pointer-events:none;
+}
+.settings-page .remote-core .cap{font-size:10.5px;font-weight:600;color:var(--text-3);margin-bottom:2px}
+.settings-page .remote-core .xy{font-size:13.5px;font-weight:700;display:flex;gap:5px;align-items:baseline;direction:ltr}
+.settings-page .remote-core .xy i{font-style:normal;font-size:11px;color:var(--text-3);font-weight:600}
+.settings-page .remote-core .xy em{font-style:normal;font-size:10.5px;color:var(--text-3);font-weight:600}
 
-.ps-chip {
-  max-width: 100%;
-  padding: 5px 8px;
-  border: 1px solid var(--ps-border);
-  border-radius: 6px;
-  background: var(--ps-surface-raised);
-  color: var(--ps-text-2);
-  font-size: 11.5px;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
+/* ==========================================================================
+   استجابة
+   ========================================================================== */
+@media (max-width:860px){
+  .settings-page .pane.is-active{grid-template-columns:1fr}
+  .settings-page .wrap{padding-inline:18px}
+  .settings-page .topbar::before{inset-inline:-18px}
+  .settings-page .page-head h1{font-size:38px}
+  .settings-page .seg.nav .seg-item{min-width:0;padding-inline:12px;font-size:13.5px}
 }
-
-/* طريقة الحساب والقوائم */
-.ps-fields {
-  display: grid;
-  gap: 12px;
-  padding: 14px;
+@media (max-width:640px){
+  .settings-page .topbar{grid-template-columns:auto 1fr auto}
+  .settings-page .brand-name{display:none}
+  .settings-page .brand{padding-inline:8px}
 }
-
-.ps-field {
-  display: grid;
-  min-width: 0;
-  gap: 6px;
-  color: var(--ps-text-2);
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.ps-field-label {
-  color: var(--ps-text-2);
-}
-
-.ps-select {
-  width: 100%;
-  min-width: 0;
-  height: 40px;
-  appearance: none;
-  padding: 0 12px 0 36px;
-  border: 1px solid var(--ps-border-strong) !important;
-  border-radius: var(--ps-r-control);
-  background-color: var(--ps-surface-raised) !important;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a9aa3' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  background-position: left 12px center;
-  background-repeat: no-repeat;
-  background-size: 14px;
-  color: var(--ps-text) !important;
-  color-scheme: dark;
-  font-size: 13px !important;
-  cursor: pointer;
-  transition: border-color .15s, background-color .15s;
-}
-
-.ps-select:hover {
-  border-color: color-mix(in srgb, var(--text) 28%, transparent) !important;
-}
-
-.ps-select option {
-  background: var(--ps-surface-raised);
-  color: var(--ps-text);
-}
-
-.ps-select-sm {
-  width: 132px;
-  height: 36px;
-  flex: none;
-}
-
-.ps-applied {
-  padding: 12px 14px 14px;
-  border-top: 1px solid var(--ps-border);
-  border-radius: 0 0 var(--ps-r-card) var(--ps-r-card);
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-}
-
-.ps-applied-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-  color: var(--ps-blue);
-  font-size: 11.5px;
-  font-weight: 700;
-}
-
-.ps-applied-label .ps-icon {
-  width: 14px;
-  height: 14px;
-}
-
-.ps-chip-applied {
-  padding: 6px 10px;
-  border-color: var(--ps-blue-line);
-  border-radius: 8px;
-  background: var(--ps-blue-bg);
-  color: var(--ps-text);
-  font-size: 12px;
-}
-
-/* صفوف التنبيهات */
-.ps-control-row {
-  display: flex;
-  min-height: 54px;
-  align-items: center;
-  gap: 12px;
-  padding: 9px 14px;
-}
-
-.ps-control-row + .ps-control-row {
-  border-top: 1px solid var(--ps-border);
-}
-
-.ps-row-icon {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  flex: none;
-  place-items: center;
-  border-radius: 10px;
-  background: var(--ps-surface-raised);
-  color: var(--ps-text-2);
-}
-
-.ps-row-icon .ps-icon {
-  width: 17px;
-  height: 17px;
-}
-
-.ps-row-label {
-  min-width: 0;
-  flex: 1;
-  color: var(--ps-text);
-  font-size: 13.5px;
-  font-weight: 600;
-  line-height: 1.45;
-}
-
-.ps-control {
-  flex: none;
-  margin-inline-start: auto;
-}
-
-/* مفتاح تشغيل فعلي: checkbox يبقى قابلًا للوحة المفاتيح وقارئ الشاشة */
-.ps-switch {
-  position: relative;
-  display: inline-block;
-  width: 44px;
-  height: 26px;
-  flex: none;
-  cursor: pointer;
-}
-
-.ps-switch input {
-  position: absolute;
-  z-index: 1;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.ps-switch-track {
-  position: absolute;
-  inset: 0;
-  border: 1px solid var(--ps-border-strong);
-  border-radius: 999px;
-  background: var(--ps-surface-raised);
-  transition: background .2s, border-color .2s;
-}
-
-.ps-switch-track::after {
-  position: absolute;
-  top: 3px;
-  inset-inline-start: 3px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--ps-text-2);
-  content: "";
-  transition: transform .2s, background .2s;
-}
-
-.ps-switch input:checked + .ps-switch-track {
-  border-color: var(--ps-blue-solid);
-  background: var(--ps-blue-solid);
-}
-
-.ps-switch input:checked + .ps-switch-track::after {
-  transform: translateX(-18px);
-  background: var(--ps-bg-backdrop);
-}
-
-.ps-switch input:focus-visible + .ps-switch-track {
-  outline: 2px solid var(--ps-blue-solid);
-  outline-offset: 2px;
-}
-
-/* شريط الصوت: قيمة حقيقية من الحالة، مع تعبئة ومقبض قابلين للتحكم */
-.ps-volume-row {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
-  padding-block: 12px;
-}
-
-.ps-volume-heading {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.ps-volume-badge {
-  min-width: 48px;
-  padding: 4px 10px;
-  border: 1px solid var(--ps-blue-line);
-  border-radius: 999px;
-  background: var(--ps-blue-bg);
-  color: var(--ps-blue);
-  font-size: 12.5px;
-  font-weight: 700;
-  text-align: center;
-}
-
-.ps-slider-line {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-inline: 2px;
-  color: var(--ps-text-3);
-}
-
-.ps-slider-line > .ps-icon {
-  width: 16px;
-  height: 16px;
-}
-
-.ps-rim-endpoint {
-  min-width: 28px;
-  color: var(--ps-text-3);
-  font-size: 11px;
-  text-align: center;
-}
-
-.prayer-settings input.ps-range {
-  --ps-fill: var(--ps-range-progress, 0%);
-  width: auto;
-  min-width: 0;
-  height: 22px;
-  flex: 1;
-  appearance: none;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  outline: none;
-  background: transparent;
-  direction: rtl;
-  cursor: pointer;
-  touch-action: pan-y;
-}
-
-.prayer-settings input.ps-range::-webkit-slider-runnable-track {
-  height: 6px;
-  border: 0;
-  border-radius: 999px;
-  background: linear-gradient(to left, var(--ps-blue-solid) var(--ps-fill), var(--ps-border-strong) var(--ps-fill));
-}
-
-.prayer-settings input.ps-range::-webkit-slider-thumb {
-  width: 18px;
-  height: 18px;
-  appearance: none;
-  margin-top: -6px;
-  border: 4px solid var(--ps-blue-solid);
-  border-radius: 50%;
-  background: var(--ps-surface-modal);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, .55);
-  transition: box-shadow .15s, transform .15s;
-}
-
-.prayer-settings input.ps-range:hover::-webkit-slider-thumb {
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--ps-blue-solid) 16%, transparent), 0 2px 8px rgba(0, 0, 0, .55);
-}
-
-.prayer-settings input.ps-range:active::-webkit-slider-thumb {
-  transform: scale(1.08);
-}
-
-.prayer-settings input.ps-range:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--ps-blue-solid) 28%, transparent);
-}
-
-.prayer-settings input.ps-range::-moz-range-track {
-  height: 6px;
-  border: 0;
-  border-radius: 999px;
-  background: linear-gradient(to left, var(--ps-blue-solid) var(--ps-fill), var(--ps-border-strong) var(--ps-fill));
-}
-
-.prayer-settings input.ps-range::-moz-range-thumb {
-  width: 10px;
-  height: 10px;
-  border: 4px solid var(--ps-blue-solid);
-  border-radius: 50%;
-  background: var(--ps-surface-modal);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, .55);
-}
-
-.prayer-settings input.ps-range:disabled {
-  opacity: .45;
-  cursor: not-allowed;
-}
-
-/* تذييل تجربة التنبيه */
-.ps-card-foot {
-  padding: 12px 14px 14px;
-  border-top: 1px solid var(--ps-border);
-}
-
-.ps-card-foot .ps-icon {
-  width: 15px;
-  height: 15px;
-}
-
-/* التطبيق في الخلفية مع الحفاظ على خيار البدء الحالي */
-.ps-background-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px;
-}
-
-.ps-background-note p {
-  margin: 0;
-  color: var(--ps-text-3);
-  font-size: 12.5px;
-  font-weight: 400;
-  line-height: 1.75;
-}
-
-.ps-background-note strong {
-  color: var(--ps-text);
-  font-weight: 700;
-}
-
-.ps-autostart-row {
-  border-top: 1px solid var(--ps-border);
-}
-
-.ps-feedback {
-  margin: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--ps-blue-line);
-  border-radius: var(--ps-r-control);
-  background: var(--ps-blue-bg);
-  color: var(--ps-text-2);
-  font-size: 12.5px;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-
-@media (max-width: 520px) {
-  .prayer-settings-backdrop {
-    padding: 12px;
-  }
-
-  .prayer-settings {
-    max-height: min(680px, calc(100vh - 24px));
-  }
-
-  .ps-body {
-    padding-inline: 14px;
-  }
-
-  .ps-head {
-    padding-inline: 14px;
-  }
-
-  .ps-location {
-    flex-wrap: wrap;
-  }
-
-  .ps-location .ps-button-blue {
-    width: 100%;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .prayer-settings * {
-    transition: none !important;
-    animation: none !important;
-  }
-}
-
-/* منتقي أوضاع الصوت المكاني — خيارات واضحة ومضغوطة ضمن بطاقة الإعدادات */
-.ps-audio-card {
-  padding: 10px;
-}
-.ps-audio-options {
-  display: grid;
-  gap: 6px;
-}
-.ps-audio-option {
-  display: flex;
-  width: 100%;
-  min-height: 48px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 11px;
-  border: 1px solid color-mix(in srgb, var(--ps-text) 8%, transparent) !important;
-  border-radius: 12px !important;
-  background: color-mix(in srgb, var(--ps-surface-raised) 58%, transparent) !important;
-  color: var(--ps-text-2) !important;
-  text-align: right;
-  transition: background .18s, border-color .18s, color .18s;
-}
-.ps-audio-option:hover {
-  border-color: color-mix(in srgb, var(--ps-blue) 28%, transparent) !important;
-  background: color-mix(in srgb, var(--ps-surface-hover) 72%, transparent) !important;
-  color: var(--ps-text) !important;
-}
-.ps-audio-option[aria-pressed="true"] {
-  border-color: var(--ps-blue-line) !important;
-  background: var(--ps-blue-bg) !important;
-  color: var(--ps-text) !important;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ps-blue) 8%, transparent) inset;
-}
-.ps-audio-option-copy {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-.ps-audio-option-copy b {
-  font-size: 12.5px;
-  font-weight: 700;
-}
-.ps-audio-option-copy small {
-  color: var(--ps-text-3);
-  font-size: 11px;
-  line-height: 1.45;
-}
-.ps-audio-option-mark {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  flex: none;
-  place-items: center;
-  border: 1px solid var(--ps-border-strong);
-  border-radius: 50%;
-  color: var(--ps-blue);
-  font-size: 11px;
-  font-weight: 800;
-}
-.ps-audio-option[aria-pressed="true"] .ps-audio-option-mark {
-  border-color: var(--ps-blue-line);
-  background: color-mix(in srgb, var(--ps-blue) 12%, transparent);
-}
-.ps-audio-hint {
-  margin: 9px 2px 1px;
-  color: var(--ps-text-3);
-  font-size: 11px;
-  line-height: 1.65;
-}
+@media (prefers-reduced-motion:reduce){.settings-page, .settings-page *{transition:none!important;animation:none!important}}
+/* Keep the reference page isolated from the library's global window rules. */
+html.settings-page-active{scrollbar-gutter:auto}
+body.settings-page-active{min-width:0;font-size:16px;line-height:normal}
+body.settings-page-active::before{display:none}
+.settings-page .page-head .sub{margin-bottom:0}
+.settings-page .row{border-radius:0;transition:none;background:transparent}
+.settings-page .row:hover{background:transparent}
+.settings-page .glass.btn{transition:background .15s,transform .12s}
+.settings-page .glass.btn:hover{background:var(--glass-hover)}
+.settings-page .glass.btn:active{transform:scale(.98)}
+.settings-page .range:active::-webkit-slider-runnable-track{height:6px;border-radius:999px;background:linear-gradient(to left,var(--text) var(--fill),#2c2e31 var(--fill))}

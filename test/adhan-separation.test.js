@@ -122,16 +122,17 @@ describe('فصل الأذان عن إشعار التنبيه المسبق', () =
     expect(rust).not.toContain('--adhan-ring');
   });
 
-  it('نافذة الإعدادات والجزيرة تتبعان ألوان الهوية وحجم النافذة مدمج', () => {
+  it('صفحة الإعدادات والجزيرة تتبعان ألوان الهوية مع بقاء حجم نافذة التطبيق', () => {
     const settings = source('src/PrayerSettings.css');
     const styles = source('src/styles.css');
     const island = source('island.html');
     const config = JSON.parse(source('src-tauri/tauri.conf.json'));
     expect(styles).toContain('--bg:#0A0B0D');
     expect(styles).toContain('--accent:#5AA9FF');
-    expect(settings).toContain('--ps-surface-modal: var(--bg)');
-    expect(settings).toContain('--ps-text: var(--text)');
-    expect(settings).toContain('--ps-blue: var(--accent)');
+    expect(settings).toContain('--bg:#0a0b0d');
+    expect(settings).toContain('--card:#151617');
+    expect(settings).toContain('--rim:1');
+    expect(settings).not.toContain('--accent');
     expect(settings).not.toContain('ps-violet');
     expect(island).toContain('--accent:#5AA9FF');
     expect(config.app.windows[0].width).toBe(920);

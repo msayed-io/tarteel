@@ -17,7 +17,7 @@ const css = rootFile('src/styles.css');
 const main = rootFile('src/main.jsx');
 const engine = rootFile('src/lib/specular-rim.js');
 const table = rootFile('src/DailyPrayerTable.jsx');
-const settings = rootFile('src/PrayerSettings.jsx');
+const settings = rootFile('src/PrayerSettingsPage.jsx');
 const island = rootFile('island.html');
 const rimRule = css.match(/\.rim::after\{([^}]*content:""[^}]*)\}/)?.[1] || '';
 const sqrt2 = Math.SQRT2;
@@ -197,8 +197,8 @@ describe('الحافة اللامعة — البكسلات والهندسة', ()
     expect(main).toContain('className="fav rim"');
     expect(main).toContain('className="tbtn rim"');
     expect(main).toContain('className="tbtn play rim"');
-    expect(settings).toContain('className="ps-close rim"');
-    expect(settings).toContain('ps-button ps-button-blue rim');
+    expect(settings).toContain('className="glass circle"');
+    expect(settings).toContain('glass btn block');
     expect(island).toContain('installSpecularRim(document)');
     expect(island).toContain('class="idle-prayer rim"');
     expect(island).toContain('class="pill main rim"');
@@ -254,7 +254,7 @@ describe('الحافة اللامعة — البكسلات والهندسة', ()
     expect(events).toEqual(['tarteel-rim-change']);
     expect(settings).not.toContain('ps-rim-intensity');
     expect(settings).not.toContain('شدة الحافة اللامعة');
-    expect(settings).toContain('ps-placement-remote');
+    expect(settings).toContain('rim remote');
   });
 
   it('يرسم حلقة SDF واحدة بلا قناع متراكب ويحافظ على العناصر المؤهلة فقط', () => {

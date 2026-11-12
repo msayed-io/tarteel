@@ -51,7 +51,7 @@ describe('Tarteel production surface', () => {
   it('computes prayer times locally from a verified device location with no manual path', async () => {
     const astro = await read('src/engine/astro.js');
     const location = await read('src/engine/location.js');
-    const settings = await read('src/PrayerSettings.jsx');
+    const settings = await read('src/PrayerSettingsPage.jsx');
 
     /* لا مصدر خارجي للمواقيت: الحساب فلكي محلي. */
     expect(astro).not.toContain('aladhan');
@@ -72,7 +72,7 @@ describe('Tarteel production surface', () => {
     expect(settings).not.toContain('طريقة حساب المواقيت');
     expect(settings).not.toContain('حساب صلاة العصر');
     expect(settings).not.toContain('ضبط دقيق');
-    expect(settings).toContain('استخدام موقع الجهاز وطلب الإذن');
+    expect(settings).toContain('تحديث موقعي الآن');
 
     /* لا أثر لإضافة الموقع في الطبقة الأصلية. */
     const cargo = await read('src-tauri/Cargo.toml');
@@ -85,14 +85,22 @@ describe('Tarteel production surface', () => {
     expect(settings).toContain('تنبيه مسبق');
   });
 
-  it('keeps the settings modal scrollable without a visible scrollbar', async () => {
+  it('renders a full settings page with document scrolling and no modal backdrop', async () => {
     const css = await read('src/PrayerSettings.css');
-    const settings = await read('src/PrayerSettings.jsx');
-    expect(css).toContain('width: min(500px, 100%)');
-    expect(css).toContain('max-height: min(680px, calc(100vh - 32px))');
-    expect(css).toContain('overflow-y: auto;');
-    expect(css).toContain('scrollbar-width: none;');
-    expect(css).toContain('.ps-body::-webkit-scrollbar');
+    const settings = await read('src/PrayerSettingsPage.jsx');
+    const main = await read('src/main.jsx');
+    expect(css).toContain('max-width:1134px');
+    expect(css).toContain('padding-inline:42px');
+    expect(css).toContain('scrollbar-width:none');
+    expect(css).toContain('body.settings-page-active');
+    expect(css).not.toContain('prayer-settings-backdrop');
+    expect(settings).toContain('className="settings-page"');
+    expect(settings).toContain('id="pane-prayer"');
+    expect(settings).toContain('id="pane-audio"');
+    expect(settings).toContain('id="pane-island"');
+    expect(settings).not.toContain('role="dialog"');
+    expect(main).toContain('if (prayerSettingsOpen)');
+    expect(main).not.toContain('{prayerSettingsOpen && <PrayerSettings');
     expect(settings).toContain('تحديث موقعي الآن');
     expect(settings).toContain('تجربة صوت الأذان');
     expect(settings).toContain('البدء مع تشغيل ويندوز');
@@ -100,25 +108,26 @@ describe('Tarteel production surface', () => {
   });
 
   it('adds a persistent Auto/Manual remote for Dynamic position and removes the rim intensity control', async () => {
-    const settings = await read('src/PrayerSettings.jsx');
+    const settings = await read('src/PrayerSettingsPage.jsx');
+    const logic = await read('src/PrayerSettings.jsx');
     const css = await read('src/PrayerSettings.css');
     const placement = await read('src/engine/island-placement.js');
     const rust = await read('src-tauri/src/lib.rs');
     const diagnostics = await read('src-tauri/src/island_diagnostics.rs');
 
-    expect(settings).toContain('ps-placement-remote');
+    expect(settings).toContain('rim remote');
     expect(settings).toContain("chooseIslandPlacementMode('auto')");
     expect(settings).toContain("chooseIslandPlacementMode('manual')");
-    expect(settings).toContain("invoke('get_island_placement')");
-    expect(settings).toContain("invoke('set_island_placement'");
+    expect(logic).toContain("invoke('get_island_placement')");
+    expect(logic).toContain("invoke('set_island_placement'");
     for (const direction of ['up', 'right', 'down', 'left']) expect(settings).toContain(`nudgeIsland('${direction}')`);
-    const upButton = settings.split('\n').find(line => line.includes('ps-dpad-up')) ?? '';
+    const upButton = settings.split('\n').find(line => line.includes('className="dp dp-up"')) ?? '';
     expect(upButton).toContain("disabled={placementLoading || islandPlacement.mode !== 'manual'}");
     expect(upButton).not.toContain('islandPlacement.offsetY <= 0');
     expect(placement).toContain('ISLAND_PLACEMENT_STEP = 2');
     expect(placement).toContain("mode: 'auto', offsetX: 0, offsetY: 0");
-    expect(css).toContain('.ps-dpad-button:active:not(:disabled)');
-    expect(css).toContain('.ps-placement-mode[aria-pressed="true"]');
+    expect(css).toContain('.settings-page .dp:active');
+    expect(css).toContain('.settings-page .seg-item[aria-selected="true"]');
     expect(rust).toContain('const ISLAND_PLACEMENT_FILE: &str = "island-position.json"');
     expect(rust).toContain('fn get_island_placement(');
     expect(rust).toContain('fn set_island_placement(');
@@ -126,8 +135,8 @@ describe('Tarteel production surface', () => {
     expect(rust).toContain('island_position_motion_progress(progress)');
     expect(diagnostics).toContain('placement_offset_x_px');
     expect(diagnostics).toContain('placement_offset_y_px');
-    expect(settings).not.toContain('ps-rim-intensity');
-    expect(settings).not.toContain('شدة الحافة اللامعة');
+    expect(settings + logic).not.toContain('ps-rim-intensity');
+    expect(settings + logic).not.toContain('شدة الحافة اللامعة');
   });
 
   it('uses one permission-gated system notification for the pre-alert and keeps prayer-time adhan separate', async () => {
