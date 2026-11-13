@@ -278,4 +278,9 @@ describe('الحافة اللامعة — البكسلات والهندسة', ()
     expect(island).not.toContain('mask-composite');
     expect(island).not.toContain('.rim::after{display:none}');
   });
+
+  it('لا يستدعي unobserve على MutationObserver عند إلغاء تسجيل العناصر لمنع أخطاء جافاسكربت', () => {
+    expect(engine).not.toContain('intensityObserver.unobserve');
+    expect(engine).toContain('const unregisterElement = element => {');
+  });
 });

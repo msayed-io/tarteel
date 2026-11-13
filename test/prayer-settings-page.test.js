@@ -162,4 +162,32 @@ describe('صفحة إعدادات تَرتيل', () => {
     expect(css).not.toContain('--accent');
     expect(css).not.toContain('--ps-blue');
   });
+
+  it('يثبت الكبسولات العلوية ويمنع سحب وارتداد الصفحة (overscroll bounce)', () => {
+    expect(css).toContain('overscroll-behavior:none');
+    expect(source('src/styles.css')).toContain('overscroll-behavior:none');
+    expect(source('test/fixtures/settings-reference-static.html')).toContain('overscroll-behavior:none');
+  });
+
+  it('يضع زر الخروج في الجهة اليمنى ويبقي التبويبات بالوسط وشعار ترتيل باليسار', () => {
+    const navMatch = page.match(/<nav className="topbar"[\s\S]*?<\/nav>/)?.[0] || '';
+    const exitIndex = navMatch.indexOf('aria-label="رجوع إلى المكتبة"');
+    const tabsIndex = navMatch.indexOf('id="settings-nav"');
+    const brandIndex = navMatch.indexOf('className="glass brand"');
+    expect(exitIndex).toBeGreaterThan(-1);
+    expect(tabsIndex).toBeGreaterThan(exitIndex);
+    expect(brandIndex).toBeGreaterThan(tabsIndex);
+
+    const ref = source('test/fixtures/settings-reference-static.html');
+    const refNavMatch = ref.match(/<nav class="topbar"[\s\S]*?<\/nav>/)?.[0] || '';
+    const refExitIndex = refNavMatch.indexOf('aria-label="رجوع إلى المكتبة"');
+    const refTabsIndex = refNavMatch.indexOf('id="nav"');
+    const refBrandIndex = refNavMatch.indexOf('class="glass brand"');
+    expect(refExitIndex).toBeGreaterThan(-1);
+    expect(refTabsIndex).toBeGreaterThan(refExitIndex);
+    expect(refBrandIndex).toBeGreaterThan(refTabsIndex);
+
+    expect(css).toMatch(/\.settings-page \.circle\{[^}]*justify-self:start/);
+    expect(css).toMatch(/\.settings-page \.brand\{[^}]*justify-self:end/);
+  });
 });
