@@ -1,0 +1,654 @@
+<!-- Test-only static visual reference copied from the supplied HTML; all preview scripts removed. Never bundled into the application. -->
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ترتيل — الإعدادات</title>
+<style>
+/* ==========================================================================
+   ترتيل — صفحة الإعدادات (تصميم بصري فقط، بلا أي منطق للخدمات)
+   الهوية: ألوان الواجهة الرئيسية الفعلية (مقروءة من لقطة المكتبة) — رمادي داكن
+   محايد بلا أي لون مميز. الكبسولات عائمة زجاجية بحافة لامعة (Specular Rim).
+   ========================================================================== */
+
+:root{
+  /* الأسطح — قيم مسحوبة من لقطة الواجهة الرئيسية */
+  --bg:#0a0b0d;            /* خلفية الصفحة */
+  --card:#151617;          /* البطاقات (نفس بطاقة قائمة المكتبة) */
+  --card-line:#252628;     /* حد البطاقة */
+  --raised:#1d1f22;        /* أيقونات، شرائح، خيارات */
+  --raised-2:#242629;
+  --sep:#222325;           /* فواصل الصفوف */
+  --pill:#36383b;          /* الكبسولة النشطة داخل التبويبات */
+
+  /* النصوص */
+  --text:#f5f5f7;
+  --text-2:#b8b9bc;
+  --text-3:#8f9094;
+
+  /* الزجاج */
+  --glass-fill:rgba(52,56,60,.30);   /* يعطي ≈ #15181b فوق الخلفية = كبسولات الواجهة */
+  --glass-hover:rgba(74,78,84,.38);
+  --glass-blur:blur(22px) saturate(1.8);
+  --glass-shadow:0 8px 20px rgba(0,0,0,.4);
+
+  /* الحافة اللامعة */
+  --rim-rgb:255 255 255;   /* أبيض دائمًا */
+  --rim:1;                 /* شدة الحافة 0..1 (من الإعدادات) */
+  --rim-w:1px;             /* السماكة */
+
+  --font:var(--app-font,"Segoe UI Variable Text","Segoe UI",Tahoma,system-ui,sans-serif);
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--bg);scrollbar-width:none;-ms-overflow-style:none;overscroll-behavior:none;overscroll-behavior-y:none}
+html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;width:0;height:0}
+body{
+  font-family:var(--font);background:var(--bg);color:var(--text);
+  min-height:100vh;-webkit-font-smoothing:antialiased;
+  overflow-x:clip;overscroll-behavior:none;overscroll-behavior-y:none;
+}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0}
+:focus-visible{outline:2px solid rgba(245,245,247,.55);outline-offset:3px}
+
+/* ==========================================================================
+   الحافة اللامعة (Specular Rim) — حلقة 1px مقصوصة بالقناع، ضوء من أعلى اليسار
+   .rim  = حافة فقط   |   .glass = حافة + سطح زجاجي
+   --R  = نصف قطر العنصر (للكبسولة = الارتفاع ÷ 2)
+   --o  = إزاحة بداية التدرج حتى تقع القمة 0.60 على نقطة 45° الفعلية من القوس
+   --k  = معامل الشدة (1، و0.85 للعنصر الذي فوق عنصر زجاجي)
+   ========================================================================== */
+.rim,.glass{--R:22px;--o:calc(var(--R) * .4142);--k:1;position:relative;border-radius:var(--R)}
+.glass{
+  background:var(--glass-fill);
+  -webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);
+  box-shadow:var(--glass-shadow);
+}
+.on-glass{--k:.85}
+.rim::after,.glass::after{
+  content:"";position:absolute;inset:0;box-sizing:border-box;border-radius:inherit;
+  padding:var(--rim-w,1px);pointer-events:none;opacity:var(--rim,1);
+  background:linear-gradient(135deg,
+    rgb(var(--rim-rgb) / calc(.60  * var(--k))) 0,
+    rgb(var(--rim-rgb) / calc(.60  * var(--k))) var(--o),
+    rgb(var(--rim-rgb) / calc(.29  * var(--k))) calc(var(--o) + min(12px,8%)),
+    rgb(var(--rim-rgb) / calc(.13  * var(--k))) calc(var(--o) + min(24px,16%)),
+    rgb(var(--rim-rgb) / calc(.07  * var(--k))) calc(var(--o) + min(36px,24%)),
+    rgb(var(--rim-rgb) / calc(.06  * var(--k))) calc(var(--o) + min(48px,32%)),
+    rgb(var(--rim-rgb) / calc(.06  * var(--k))) calc(100% - var(--o) - min(36px,30%)),
+    rgb(var(--rim-rgb) / calc(.067 * var(--k))) calc(100% - var(--o) - min(27px,22.5%)),
+    rgb(var(--rim-rgb) / calc(.095 * var(--k))) calc(100% - var(--o) - min(18px,15%)),
+    rgb(var(--rim-rgb) / calc(.178 * var(--k))) calc(100% - var(--o) - min(9px,7.5%)),
+    rgb(var(--rim-rgb) / calc(.34  * var(--k))) calc(100% - var(--o)),
+    rgb(var(--rim-rgb) / calc(.34  * var(--k))) 100%);
+  /* الترتيب إلزامي: القناع ثم الدمج بعده، بالصيغتين */
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;
+  mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  mask-composite:exclude;
+}
+@supports not ((-webkit-mask-composite:xor) or (mask-composite:exclude)){
+  .rim::after,.glass::after{display:none}
+  .glass{box-shadow:inset 0 0 0 .5px rgba(255,255,255,.14),var(--glass-shadow)}
+}
+/* تقليل الشفافية: تعبئة معتمة بلا تمويه، والحافة بنصف الشدة */
+@media (prefers-reduced-transparency:reduce){
+  :root{--rim:.5;--glass-fill:#1d1f22;--glass-hover:#26282b}
+  .glass{-webkit-backdrop-filter:none;backdrop-filter:none}
+}
+
+/* ==========================================================================
+   الهيكل
+   ========================================================================== */
+.wrap{max-width:1134px;margin-inline:auto;padding-inline:42px}
+
+/* الشريط العلوي: كبسولات عائمة */
+.topbar{
+  position:sticky;top:0;z-index:30;
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;
+  padding-block:18px 12px;
+}
+.topbar::before{ /* ستار تدريجي خلف الكبسولات ليبقى المحتوى المار تحتها مقروءًا */
+  content:"";position:absolute;inset:0 -42px -22px;z-index:-1;pointer-events:none;
+  background:linear-gradient(to bottom,var(--bg) 0,var(--bg) 58%,rgba(10,11,13,0));
+}
+.circle{
+  --R:26px;justify-self:start;width:52px;height:52px;display:grid;place-items:center;
+  color:var(--text);transition:background .15s,transform .12s;
+}
+.circle:hover{background:var(--glass-hover)}
+.circle:active{transform:scale(.97)}
+
+.brand{--R:27px;justify-self:end;display:flex;align-items:center;gap:12px;height:54px;padding:0 8px 0 20px}
+.brand-mark{
+  width:38px;height:38px;border-radius:50%;background:var(--text);color:#0a0b0d;
+  display:grid;place-items:center;font-size:20px;font-weight:800;line-height:1;
+}
+.brand-name{font-size:18px;font-weight:700;letter-spacing:.2px}
+
+/* التبويب المقسّم (نفس نظام «المكتبة | المفضلة») */
+.seg{
+  --R:27px;--n:3;--i:0;
+  position:relative;display:grid;grid-template-columns:repeat(var(--n),1fr);
+  height:54px;padding:5px;
+}
+.seg-thumb{
+  --R:22px;position:absolute;inset-block:5px;inset-inline-start:5px;
+  width:calc((100% - 10px) / var(--n));background:var(--pill);
+  transform:translateX(calc(var(--i) * -100%));
+  transition:transform .38s cubic-bezier(.3,.9,.3,1);
+}
+.seg-item{
+  position:relative;z-index:1;height:44px;border-radius:22px;padding-inline:18px;
+  font-size:14.5px;font-weight:700;white-space:nowrap;color:var(--text-3);
+  transition:color .2s;
+}
+.seg-item:hover{color:var(--text-2)}
+.seg-item[aria-selected="true"]{color:var(--text)}
+.seg.nav{min-width:0}
+.seg.nav .seg-item{min-width:132px}
+.seg.card-seg{--R:26px;height:52px;margin-bottom:0}
+.seg.card-seg .seg-thumb{--R:21px;inset-block:5px}
+.seg.card-seg .seg-item{height:42px;border-radius:21px;font-size:14.5px}
+
+/* رأس الصفحة */
+.page-head{padding:18px 0 0;text-align:start}
+.page-head h1{font-size:48px;line-height:1.2;font-weight:800;letter-spacing:-.2px}
+.page-head .sub{display:flex;align-items:center;gap:7px;margin-top:6px;font-size:15px;color:var(--text-3)}
+.page-head .sub svg{color:var(--text-2)}
+
+/* اللوحات (التبويبات) */
+.panes{padding-block:26px 64px}
+.pane{display:none}
+.pane.is-active{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start;animation:paneIn .32s cubic-bezier(.3,.9,.3,1)}
+@keyframes paneIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.col{display:grid;gap:26px;align-content:start}
+.sec{display:grid;gap:11px}
+.sec-title{display:flex;align-items:center;gap:9px;padding-inline:6px;font-size:15px;font-weight:700}
+.sec-title::before{content:"";width:3px;height:15px;border-radius:2px;background:var(--text);opacity:.85}
+.card{background:var(--card);border:1px solid var(--card-line);border-radius:26px}
+.hint{padding-inline:8px;font-size:13px;line-height:1.75;color:var(--text-3)}
+.card > .hint{padding:0}
+.lead{font-size:15px;line-height:1.7;color:var(--text)}
+.pad{padding:20px}
+.stack{display:grid;gap:16px}
+
+/* الأزرار الزجاجية */
+.btn{
+  --R:20px;display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  height:40px;padding:0 18px;font-size:13.5px;font-weight:700;white-space:nowrap;color:var(--text);
+  --glass-shadow:0 4px 12px rgba(0,0,0,.3);
+  transition:background .15s,transform .12s;
+}
+.btn:hover{background:var(--glass-hover)}
+.btn:active{transform:scale(.98)}
+.btn.sm{--R:17px;height:34px;padding:0 15px;font-size:13px}
+.btn.block{--R:23px;width:100%;height:46px;font-size:14.5px}
+.btn.is-spinning svg{animation:spin .8s linear}
+@keyframes spin{to{transform:rotate(-360deg)}}
+.play-dot{width:26px;height:26px;border-radius:50%;background:var(--text);color:#0a0b0d;display:grid;place-items:center}
+.btn.granted{color:var(--text)}
+.btn.granted svg{color:var(--text-2)}
+
+/* القوائم المنسدلة (غلاف كبسولي لأن select لا يقبل ::after) */
+.sel{
+  --R:22px;display:block;width:100%;height:44px;
+  --glass-shadow:0 4px 12px rgba(0,0,0,.3);transition:background .15s;
+}
+.sel:hover{background:var(--glass-hover)}
+.sel select{
+  -webkit-appearance:none;appearance:none;color-scheme:dark;position:absolute;inset:0;
+  width:100%;height:100%;border:0;border-radius:inherit;background:transparent;cursor:pointer;
+  padding-inline:20px 44px;font-size:14px;font-weight:600;color:var(--text);outline:none;
+}
+.sel select option{background:#1d1f22;color:var(--text)}
+.sel .chev{position:absolute;inset-inline-end:16px;top:50%;translate:0 -50%;color:var(--text-3);pointer-events:none}
+.sel:focus-within{outline:2px solid rgba(245,245,247,.55);outline-offset:3px}
+.sel.sm{--R:20px;width:148px;height:40px}
+.sel.sm select{padding-inline:16px 38px;font-size:13.5px}
+
+/* الحقول */
+.fields{display:grid;gap:16px;padding:20px}
+.field{display:grid;gap:9px}
+.field-label{padding-inline:6px;font-size:13px;font-weight:700;color:var(--text-2)}
+
+/* الشرائح (Chips) */
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chip{
+  display:inline-flex;align-items:center;height:28px;padding:0 12px;border-radius:14px;
+  background:var(--raised);border:1px solid var(--card-line);font-size:12.5px;color:var(--text-2);
+}
+.applied{padding:14px 20px 18px;border-top:1px solid var(--sep);border-radius:0 0 25px 25px;background:rgba(255,255,255,.022)}
+.applied-label{display:flex;align-items:center;gap:7px;margin-bottom:10px;font-size:12.5px;font-weight:700;color:var(--text-2)}
+.applied .chip{background:rgba(255,255,255,.055);border-color:rgba(255,255,255,.13);color:#e6e7e9}
+
+/* الموقع */
+.loc{display:flex;align-items:center;gap:14px;padding:18px 20px}
+.loc-pin{flex:none;width:46px;height:46px;border-radius:50%;background:var(--raised);display:grid;place-items:center;color:var(--text)}
+.loc-main{flex:1;min-width:0;display:grid;gap:9px}
+.loc-name{font-size:15.5px;line-height:1.45;font-weight:700;text-wrap:balance}
+.loc-foot{padding:0 20px 18px}
+
+/* الصفوف */
+.row{display:flex;align-items:center;gap:14px;min-height:64px;padding:11px 20px}
+.row + .row{border-top:1px solid var(--sep)}
+.ico{flex:none;width:36px;height:36px;border-radius:50%;background:var(--raised);display:grid;place-items:center;color:var(--text-2)}
+.row-label{flex:1;font-size:14.5px;font-weight:600;min-width:0}
+.row-ctl{flex:none;margin-inline-start:auto}
+.row.note-row{align-items:flex-start;padding-block:16px}
+.row.note-row p{font-size:13.5px;line-height:1.8;color:var(--text-3)}
+.row.note-row strong{color:var(--text);font-weight:700}
+.card-foot{padding:14px 20px 20px;border-top:1px solid var(--sep)}
+
+/* مستوى الصوت */
+.row-vol{flex-direction:column;align-items:stretch;gap:12px;padding-block:14px 16px}
+.row-vol-top{display:flex;align-items:center;gap:14px}
+.pill{--R:15px;height:30px;min-width:56px;padding:0 13px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;--glass-shadow:0 3px 8px rgba(0,0,0,.28)}
+.slider-line{display:flex;align-items:center;gap:12px;padding-inline:3px;color:var(--text-3)}
+.range{
+  --p:1;--fill:calc(11px + (100% - 22px) * var(--p));
+  -webkit-appearance:none;appearance:none;flex:1;height:24px;background:transparent;cursor:pointer;
+}
+.range::-webkit-slider-runnable-track{
+  height:6px;border-radius:999px;
+  background:linear-gradient(to left,var(--text) var(--fill),#2c2e31 var(--fill));
+}
+.range::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:22px;height:22px;margin-top:-8px;border-radius:50%;
+  background:var(--text);border:3px solid var(--card);
+  box-shadow:0 0 0 1px rgba(255,255,255,.12),0 3px 10px rgba(0,0,0,.6);
+  transition:transform .15s,box-shadow .15s;
+}
+.range:hover::-webkit-slider-thumb{box-shadow:0 0 0 6px rgba(245,245,247,.1),0 3px 10px rgba(0,0,0,.6)}
+.range:active::-webkit-slider-thumb{transform:scale(1.08)}
+.range:focus-visible{outline:none}
+.range:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 6px rgba(245,245,247,.2),0 3px 10px rgba(0,0,0,.6)}
+
+/* المفتاح (Switch) */
+.switch{
+  --R:14px;position:relative;display:inline-block;flex:none;width:48px;height:28px;border-radius:14px;
+  --glass-shadow:none;
+}
+.switch input{position:absolute;inset:0;width:100%;height:100%;opacity:0;margin:0;cursor:pointer;z-index:2}
+.switch .track{position:absolute;inset:0;border-radius:inherit;background:rgba(58,62,66,.6);transition:background .22s}
+.switch .track::before{
+  content:"";position:absolute;top:4px;inset-inline-start:4px;width:20px;height:20px;border-radius:50%;
+  background:#9b9ca1;box-shadow:0 1px 3px rgba(0,0,0,.5);transition:transform .22s cubic-bezier(.3,.9,.3,1),background .22s;
+}
+.switch input:checked + .track{background:#f0f0f2}
+.switch input:checked + .track::before{transform:translateX(-20px);background:#0a0b0d}
+.switch input:focus-visible + .track{outline:2px solid rgba(245,245,247,.55);outline-offset:3px}
+
+/* خيارات صوت التلاوة */
+.opts{display:grid;gap:10px;padding:16px}
+.opt{
+  position:relative;display:flex;align-items:center;gap:14px;padding:15px 18px;cursor:pointer;
+  background:var(--raised);border:1px solid var(--card-line);border-radius:20px;
+  transition:background .18s,border-color .18s;
+}
+.opt:hover{background:var(--raised-2)}
+.opt input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+.opt-txt{flex:1;display:grid;gap:4px;min-width:0}
+.opt-txt b{font-size:15px;font-weight:700}
+.opt-txt small{font-size:13px;line-height:1.6;color:var(--text-3)}
+.opt-ind{
+  flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid #4a4c50;display:grid;place-items:center;
+  color:#0a0b0d;transition:background .18s,border-color .18s;
+}
+.opt-ind svg{opacity:0;transform:scale(.6);transition:opacity .18s,transform .18s}
+.opt:has(input:checked){background:#1f2124;border-color:rgba(245,245,247,.42)}
+.opt:has(input:checked) .opt-ind{background:var(--text);border-color:var(--text)}
+.opt:has(input:checked) .opt-ind svg{opacity:1;transform:none}
+.opt:has(input:focus-visible){outline:2px solid rgba(245,245,247,.55);outline-offset:3px}
+.opts + .hint{padding:0 22px 20px}
+
+/* الريموت الدائري (موضع Dynamic) */
+.remote-panel{
+  position:relative;display:grid;place-items:center;overflow:hidden;
+  padding:26px 16px;border:1px solid var(--card-line);border-radius:24px;
+  background:
+    radial-gradient(circle at 50% 50%,transparent 0 150px,rgba(255,255,255,.04) 150px 151px,transparent 151px 186px,rgba(255,255,255,.028) 186px 187px,transparent 187px),
+    #101113;
+  transition:opacity .25s;
+}
+.remote{
+  --R:124px;position:relative;width:248px;height:248px;border-radius:50%;
+  background:radial-gradient(circle at 50% 26%,#212326 0,#141517 74%);
+  box-shadow:0 22px 44px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.04);
+  transition:opacity .25s,filter .25s;
+}
+.remote.is-off{opacity:.38;filter:saturate(0);pointer-events:none}
+.dp{
+  position:absolute;inset:0;width:248px;height:248px;color:#d4d5d8;
+  background:rgba(255,255,255,.05);transition:background .15s,color .15s;
+}
+.dp:hover{background:rgba(255,255,255,.1)}
+.dp:active{background:rgba(255,255,255,.2)}
+.dp:focus-visible{outline:none;background:rgba(255,255,255,.16);color:#fff}
+.dp svg{position:absolute;width:24px;height:24px}
+.dp-up   {clip-path:path("M 44.15 39.86 A 116 116 0 0 1 203.85 39.86 L 162.55 83.38 A 56 56 0 0 0 85.45 83.38 Z")}
+.dp-right{clip-path:path("M 208.14 44.15 A 116 116 0 0 1 208.14 203.85 L 164.62 162.55 A 56 56 0 0 0 164.62 85.45 Z")}
+.dp-down {clip-path:path("M 203.85 208.14 A 116 116 0 0 1 44.15 208.14 L 85.45 164.62 A 56 56 0 0 0 162.55 164.62 Z")}
+.dp-left {clip-path:path("M 39.86 203.85 A 116 116 0 0 1 39.86 44.15 L 83.38 85.45 A 56 56 0 0 0 83.38 162.55 Z")}
+.dp-up svg{left:112px;top:26px}
+.dp-right svg{left:198px;top:112px}
+.dp-down svg{left:112px;top:198px}
+.dp-left svg{left:26px;top:112px}
+.remote-core{
+  --R:54px;position:absolute;left:50%;top:50%;translate:-50% -50%;width:108px;height:108px;
+  display:grid;align-content:center;justify-items:center;gap:3px;text-align:center;
+  --glass-shadow:0 6px 16px rgba(0,0,0,.45);pointer-events:none;
+}
+.remote-core .cap{font-size:10.5px;font-weight:600;color:var(--text-3);margin-bottom:2px}
+.remote-core .xy{font-size:13.5px;font-weight:700;display:flex;gap:5px;align-items:baseline;direction:ltr}
+.remote-core .xy i{font-style:normal;font-size:11px;color:var(--text-3);font-weight:600}
+.remote-core .xy em{font-style:normal;font-size:10.5px;color:var(--text-3);font-weight:600}
+
+/* ==========================================================================
+   استجابة
+   ========================================================================== */
+@media (max-width:860px){
+  .pane.is-active{grid-template-columns:1fr}
+  .wrap{padding-inline:18px}
+  .topbar::before{inset-inline:-18px}
+  .page-head h1{font-size:38px}
+  .seg.nav .seg-item{min-width:0;padding-inline:12px;font-size:13.5px}
+}
+@media (max-width:640px){
+  .topbar{grid-template-columns:auto 1fr auto}
+  .brand-name{display:none}
+  .brand{padding-inline:8px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<!-- الأيقونات -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V6M6 11.5L12 5.5l6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v13M6 12.5l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="M19 12H6M11.5 6L5.5 12l6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="M5 12h13M12.5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.2-7-11a7 7 0 0 1 14 0c0 5.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></g></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.9-3M4 5v4h4"/><path d="M4 13a8 8 0 0 0 14.9 3M20 19v-4h-4"/></g></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></g></symbol>
+    <symbol id="i-vol" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></g></symbol>
+    <symbol id="i-vol-low" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M15.5 9a4 4 0 0 1 0 6"/></g></symbol>
+    <symbol id="i-vol-x" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M22 9l-6 6M16 9l6 6"/></g></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></g></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8.5 5.5v13l10.5-6.5z" fill="currentColor"/></symbol>
+    <symbol id="i-tray" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></g></symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+  <!-- ===== الشريط العلوي: كبسولات عائمة ===== -->
+  <nav class="topbar" aria-label="الإعدادات">
+    <button class="glass circle" type="button" aria-label="رجوع إلى المكتبة" style="--R:26px">
+      <svg width="22" height="22"><use href="#i-back"/></svg>
+    </button>
+
+    <div class="glass seg nav" id="nav" role="tablist" style="--n:3;--i:0;--R:27px">
+      <span class="rim on-glass seg-thumb" aria-hidden="true"></span>
+      <button class="seg-item" role="tab" aria-selected="true" >الصلاة والتنبيهات</button>
+      <button class="seg-item" role="tab" aria-selected="false">الصوت والتطبيق</button>
+      <button class="seg-item" role="tab" aria-selected="false"><bdi>Dynamic</bdi></button>
+    </div>
+
+    <div class="glass brand" style="--R:27px">
+      <span class="brand-mark" aria-hidden="true">ت</span>
+      <span class="brand-name">ترتيل</span>
+    </div>
+  </nav>
+
+  <header class="page-head">
+    <h1>الإعدادات</h1>
+    <p class="sub"><svg width="16" height="16"><use href="#i-check"/></svg>يُحفظ كل تغيير تلقائيًا</p>
+  </header>
+
+  <main class="panes">
+
+    <!-- =====================================================================
+         اللوحة 1: الصلاة والتنبيهات
+         ===================================================================== -->
+    <div class="pane is-active" id="pane-prayer" role="tabpanel">
+
+      <div class="col">
+        <section class="sec">
+          <h2 class="sec-title">الموقع</h2>
+          <div class="card">
+            <div class="loc">
+              <div class="loc-pin"><svg width="22" height="22"><use href="#i-pin"/></svg></div>
+              <div class="loc-main">
+                <div class="loc-name">عزبة الحمامصة، مركز فاقوس، الشرقيه</div>
+                <div class="chips">
+                  <span class="chip"><bdi>Africa/Cairo</bdi></span>
+                  <span class="chip">دقة 85 م</span>
+                </div>
+              </div>
+            </div>
+            <div class="loc-foot">
+              <button class="glass btn block" type="button" id="btn-loc">
+                <svg width="17" height="17"><use href="#i-refresh"/></svg>تحديث موقعي الآن
+              </button>
+            </div>
+          </div>
+          <p class="hint">يُحدَّد موقعك من ويندوز.</p>
+        </section>
+
+        <section class="sec">
+          <h2 class="sec-title">طريقة الحساب</h2>
+          <div class="card">
+            <div class="fields">
+              <div class="field">
+                <span class="field-label" id="lb-method">الطريقة</span>
+                <div class="glass sel" style="--R:22px">
+                  <select id="sel-method" aria-labelledby="lb-method">
+                    <option>تلقائي حسب الدولة — الهيئة المصرية العامة للمساحة</option>
+                  </select>
+                  <svg class="chev" width="16" height="16"><use href="#i-chev"/></svg>
+                </div>
+              </div>
+              <div class="field">
+                <span class="field-label" id="lb-asr">حساب العصر</span>
+                <div class="glass sel" style="--R:22px">
+                  <select id="sel-asr" aria-labelledby="lb-asr">
+                    <option>تلقائي حسب الدولة</option>
+                  </select>
+                  <svg class="chev" width="16" height="16"><use href="#i-chev"/></svg>
+                </div>
+              </div>
+            </div>
+            <div class="applied">
+              <div class="applied-label"><svg width="15" height="15"><use href="#i-check"/></svg>المطبّق الآن</div>
+              <div class="chips">
+                <span class="chip">الهيئة المصرية العامة للمساحة <bdi>&nbsp;(١٩٫٥/١٧٫٥)</bdi></span>
+                <span class="chip">الجمهور (ظل ×١)</span>
+              </div>
+            </div>
+          </div>
+          <p class="hint">تُشتق طريقة الحساب من دولتك.</p>
+        </section>
+      </div>
+
+      <div class="col">
+        <section class="sec">
+          <h2 class="sec-title">التنبيهات</h2>
+          <div class="card">
+
+            <div class="row">
+              <span class="ico"><svg width="18" height="18"><use href="#i-bell"/></svg></span>
+              <span class="row-label">إذن إشعار التنبيه المسبق</span>
+              <button class="glass btn sm granted row-ctl" type="button">
+                ممنوحة<svg width="15" height="15"><use href="#i-check"/></svg>
+              </button>
+            </div>
+
+            <div class="row">
+              <span class="ico"><svg width="18" height="18"><use href="#i-vol"/></svg></span>
+              <span class="row-label" id="lb-sound">صوت الأذان عند الموعد</span>
+              <label class="rim switch row-ctl" style="--R:14px">
+                <input type="checkbox" role="switch" aria-labelledby="lb-sound" checked>
+                <span class="track"></span>
+              </label>
+            </div>
+
+            <div class="row row-vol">
+              <div class="row-vol-top">
+                <span class="ico"><svg width="18" height="18"><use href="#i-vol-low"/></svg></span>
+                <span class="row-label" id="lb-vol">مستوى صوت الأذان</span>
+                <span class="glass pill" dir="ltr" id="vol-out" style="--R:15px">100%</span>
+              </div>
+              <div class="slider-line">
+                <svg width="17" height="17"><use href="#i-vol-low"/></svg>
+                <input class="range" id="vol" type="range" min="0" max="100" value="100" aria-labelledby="lb-vol">
+                <svg width="17" height="17"><use href="#i-vol"/></svg>
+              </div>
+            </div>
+
+            <div class="row">
+              <span class="ico"><svg width="18" height="18"><use href="#i-vol-x"/></svg></span>
+              <span class="row-label" id="lb-mute">كتم الأذان مؤقتًا</span>
+              <label class="rim switch row-ctl" style="--R:14px">
+                <input type="checkbox" role="switch" aria-labelledby="lb-mute">
+                <span class="track"></span>
+              </label>
+            </div>
+
+            <div class="row">
+              <span class="ico"><svg width="18" height="18"><use href="#i-clock"/></svg></span>
+              <span class="row-label" id="lb-pre">تنبيه مسبق</span>
+              <div class="glass sel sm row-ctl" style="--R:20px">
+                <select aria-labelledby="lb-pre"><option>بدون</option></select>
+                <svg class="chev" width="15" height="15"><use href="#i-chev"/></svg>
+              </div>
+            </div>
+
+            <div class="card-foot">
+              <button class="glass btn block" type="button">
+                <span class="play-dot"><svg width="13" height="13"><use href="#i-play"/></svg></span>تجربة صوت الأذان
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         اللوحة 2: الصوت والتطبيق
+         ===================================================================== -->
+    <div class="pane" id="pane-audio" role="tabpanel">
+
+      <div class="col">
+        <section class="sec">
+          <h2 class="sec-title">صوت التلاوة</h2>
+          <div class="card">
+            <div class="opts" role="radiogroup" aria-label="صوت التلاوة">
+              <label class="opt">
+                <input type="radio" name="rec" checked>
+                <span class="opt-txt"><b>طبيعي</b><small>الصوت الأصلي بلا مؤثرات إضافية.</small></span>
+                <span class="opt-ind"><svg width="15" height="15"><use href="#i-check"/></svg></span>
+              </label>
+              <label class="opt">
+                <input type="radio" name="rec">
+                <span class="opt-txt"><b>العمق المكاني</b><small><bdi>HRIR</bdi> مقاسة من رأس <bdi>KU100</bdi> لتوسيع المجال بهدوء.</small></span>
+                <span class="opt-ind"><svg width="15" height="15"><use href="#i-check"/></svg></span>
+              </label>
+              <label class="opt">
+                <input type="radio" name="rec">
+                <span class="opt-txt"><b>محاكاة المسجد</b><small>صدى تلافيفي متزن يحافظ على وضوح التلاوة.</small></span>
+                <span class="opt-ind"><svg width="15" height="15"><use href="#i-check"/></svg></span>
+              </label>
+            </div>
+            <p class="hint">بيانات <bdi>HRTF</bdi> مقاسة عامة وليست مخصصة لأذن المستمع؛ المعالجة تعمل محليًا في <bdi>Rust</bdi>، ويبقى «طبيعي» المشغّل الحالي دون تغيير.</p>
+          </div>
+        </section>
+      </div>
+
+      <div class="col">
+        <section class="sec">
+          <h2 class="sec-title">التطبيق في الخلفية</h2>
+          <div class="card">
+            <div class="row note-row">
+              <span class="ico"><svg width="18" height="18"><use href="#i-tray"/></svg></span>
+              <p><strong>إغلاق النافذة لا يُنهي التطبيق:</strong> يبقى في صينية النظام بجانب الساعة ليُطلق الأذان في موعده. الخروج النهائي من قائمة الصينية.</p>
+            </div>
+            <div class="row">
+              <span class="ico"><svg width="18" height="18"><use href="#i-tray"/></svg></span>
+              <span class="row-label" id="lb-startup">البدء مع تشغيل ويندوز (مصغّرًا في الصينية)</span>
+              <label class="rim switch row-ctl" style="--R:14px">
+                <input type="checkbox" role="switch" aria-labelledby="lb-startup">
+                <span class="track"></span>
+              </label>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         اللوحة 3: Dynamic
+         ===================================================================== -->
+    <div class="pane" id="pane-island" role="tabpanel">
+
+      <div class="col">
+        <section class="sec">
+          <h2 class="sec-title">موضع <bdi>Dynamic</bdi></h2>
+          <div class="card pad stack">
+            <p class="lead">اختر موضع العرض التلقائي أو اضبطه يدويًا بدقة.</p>
+
+            <div class="glass seg card-seg" id="pos-seg" role="radiogroup" aria-label="وضع الموضع" style="--n:2;--i:1;--R:26px">
+              <span class="rim on-glass seg-thumb" aria-hidden="true"></span>
+              <button class="seg-item" role="radio" aria-checked="false"><bdi>Auto</bdi></button>
+              <button class="seg-item" role="radio" aria-checked="true"  aria-selected="true">يدوي</button>
+            </div>
+
+            <div class="remote-panel">
+              <div class="rim remote" id="remote" style="--R:124px">
+                <button class="dp dp-up"    type="button"  aria-label="تحريك لأعلى"><svg><use href="#i-up"/></svg></button>
+                <button class="dp dp-right" type="button"   aria-label="تحريك لليمين"><svg><use href="#i-right"/></svg></button>
+                <button class="dp dp-down"  type="button"   aria-label="تحريك لأسفل"><svg><use href="#i-down"/></svg></button>
+                <button class="dp dp-left"  type="button"  aria-label="تحريك لليسار"><svg><use href="#i-left"/></svg></button>
+                <div class="glass remote-core on-glass" style="--R:54px" aria-live="polite">
+                  <span class="cap">الموضع اليدوي</span>
+                  <span class="xy" dir="ltr"><i>X</i><b id="px">٠</b><em>px</em></span>
+                  <span class="xy" dir="ltr"><i>Y</i><b id="py">−٢</b><em>px</em></span>
+                </div>
+              </div>
+            </div>
+
+            <p class="hint">كل ضغطة تحرّك الجزيرة ٢ بكسل منطقيًا بحركة سلسة. وضع <bdi>Auto</bdi> يعيد الحساب الافتراضي دون حذف إزاحتك اليدوية.</p>
+          </div>
+        </section>
+      </div>
+
+      <div class="col">
+        <section class="sec">
+          <h2 class="sec-title">مظهر <bdi>Dynamic</bdi></h2>
+          <div class="card pad stack">
+            <p class="lead">اختر مادة الجزيرة؛ يتغير السطح فقط وتبقى بقية تفاصيل التصميم كما هي.</p>
+            <div class="glass seg card-seg" id="mat-seg" role="radiogroup" aria-label="مادة الجزيرة" style="--n:2;--i:1;--R:26px">
+              <span class="rim on-glass seg-thumb" aria-hidden="true"></span>
+              <button class="seg-item" role="radio" aria-checked="false">زجاج</button>
+              <button class="seg-item" role="radio" aria-checked="true"  aria-selected="true">أسود صلب</button>
+            </div>
+            <p class="hint">وضع الزجاج يستخدم طبقة <bdi>CSS</bdi> الحالية دون تغيير. تمويه سطح المكتب خلف الجزيرة غير مضمون مع إبقاء النافذة غير مقفلة وتمرير النقرات كما هو.</p>
+          </div>
+        </section>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+
+</body>
+</html>

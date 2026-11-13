@@ -80,6 +80,67 @@ describe('صفحة إعدادات تَرتيل', () => {
     expect(logic).toContain("invoke('set_adhan_preferences'");
   });
 
+  it('يعزل عرض لوحات الإعدادات عن قاعدة main العامة في المكتبة', () => {
+    expect(source('src/styles.css')).toContain('main{max-width:1040px;margin:0 auto;padding:112px 32px 168px}');
+    expect(css).toMatch(/\.settings-page \.panes\{[^}]*max-width:none[^}]*margin:0[^}]*padding-inline:0/);
+  });
+
+  it('يبقي مرجع المقارنة البصري HTML ثابتًا بلا سكربتات أو معالجات inline', () => {
+    const reference = source('test/fixtures/settings-reference-static.html');
+    expect(reference).not.toMatch(/<script\b/i);
+    expect(reference).not.toMatch(/\son(?:click|input|change)\s*=/i);
+    expect(reference).not.toMatch(/\sdata-[\w-]+\s*=/i);
+    for (const id of ['pane-prayer', 'pane-audio', 'pane-island']) expect(reference).toContain(`id="${id}"`);
+  });
+
+  it('يحصر تنظيف Windows في مهام الاختبار ويحمي بيانات التطبيق عند فشل backup', () => {
+    const windowsTest = source('test/windows-settings-smoke.mjs');
+    const windowsRunner = source('scripts/windows-settings-smoke.ps1');
+    expect(windowsTest).not.toContain("invoke(page, 'clear_windows_tasks'");
+    expect(windowsTest).not.toContain("'clearTasks', 'clear_windows_tasks'");
+    expect(windowsTest).toContain('assert.equal(errors.length, 0,');
+    expect(windowsRunner).toContain('Record-TestCreatedTarteelTasks');
+    expect(windowsRunner).toContain('Unregister-ScheduledTask -TaskPath');
+    expect(windowsRunner).toContain('APPDATA is unavailable; refusing to move application data.');
+    expect(windowsRunner).toContain('every task action must target this test executable.');
+    expect(windowsRunner).toContain("No backup exists for '$Path'; the original path is still present and will be left untouched.");
+    expect(windowsRunner).toContain('Preserving $testRoot because a runner data backup could not be restored.');
+  });
+
+  it('يمرر CDP إلى نافذة main قبل الإنشاء ويستخدم endpoint مشتركًا مع الجزيرة', () => {
+    const windowsTest = source('test/windows-settings-smoke.mjs');
+    const windowsRunner = source('scripts/windows-settings-smoke.ps1');
+    const native = source('src-tauri/src/lib.rs');
+    expect(native).toContain('TARTEEL_WINDOWS_SMOKE_CDP');
+    expect(native).toContain('TARTEEL_WINDOWS_SETTINGS_SMOKE_CDP');
+    expect(native).toContain('context.config_mut().app.windows.iter_mut()');
+    expect(native).toContain('main_window.additional_browser_args = Some(browser_args);');
+    expect(native).toContain('WebviewWindowBuilder::new(app, "island"');
+    expect(native).toContain('TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR');
+    expect(windowsRunner).toContain('$script:mainPort = Get-FreeLoopbackPort');
+    expect(windowsRunner).toContain('shared WebView2 CDP=$script:mainPort');
+    expect(windowsRunner).toContain("$env:TARTEEL_WINDOWS_SETTINGS_SMOKE_CDP = '1'");
+    expect(windowsRunner).toContain('Remove-Item Env:TARTEEL_WINDOWS_SMOKE_WEBVIEW_DATA_DIR');
+    expect(windowsRunner).not.toContain('Set-WebViewDebugPolicy');
+    expect(windowsTest).toContain('shared CDP endpoint');
+    expect(windowsTest).toContain("url !== 'about:blank'");
+    expect(windowsTest).toContain("document.querySelector('#root')");
+    expect(windowsTest).toContain('Attached to the rendered main WebView');
+    expect(windowsTest).toContain('scriptSources');
+    expect(windowsTest).toContain('failure-${phase}-main-webview.png');
+    expect(windowsTest).toContain('await autostartControl.click();');
+    expect(windowsTest).toContain("invoke(page, 'is_autostart_enabled')");
+    expect(windowsTest).toContain('the autostart switch to reflect the Windows registration');
+    expect(windowsTest).toContain('the autostart switch to reflect removal of the Windows registration');
+    expect(windowsTest).toContain('Windows autostart interaction did not persist');
+    expect(windowsTest).not.toContain('autostart.uncheck()');
+    expect(windowsTest).toContain('const arrowClickPoints = {');
+    expect(windowsTest).toContain('arrowClickPoints[direction]');
+    expect(windowsTest).toContain('button.click({ position: { x: box.width * point.x, y: box.height * point.y } });');
+    expect(windowsTest).not.toContain('islandPort');
+    expect(windowsTest).not.toContain('islandBrowser');
+  });
+
   it('يقرأ حالة إذن الإشعارات الحقيقية قبل حفظ الإعدادات تلقائيًا', () => {
     expect(logic).toContain('isPermissionGranted()');
     expect(logic).toContain('setNotificationsAllowed(Boolean(granted))');
@@ -97,7 +158,36 @@ describe('صفحة إعدادات تَرتيل', () => {
       'clip-path:path(', 'width:248px;height:248px', 'prefers-reduced-transparency:reduce',
       'prefers-reduced-motion:reduce',
     ]) expect(css).toContain(value);
+    expect(css).not.toMatch(/\[data-reduce-transparency\]/i);
     expect(css).not.toContain('--accent');
     expect(css).not.toContain('--ps-blue');
+  });
+
+  it('يثبت الكبسولات العلوية ويمنع سحب وارتداد الصفحة (overscroll bounce)', () => {
+    expect(css).toContain('overscroll-behavior:none');
+    expect(source('src/styles.css')).toContain('overscroll-behavior:none');
+    expect(source('test/fixtures/settings-reference-static.html')).toContain('overscroll-behavior:none');
+  });
+
+  it('يضع زر الخروج في الجهة اليمنى ويبقي التبويبات بالوسط وشعار ترتيل باليسار', () => {
+    const navMatch = page.match(/<nav className="topbar"[\s\S]*?<\/nav>/)?.[0] || '';
+    const exitIndex = navMatch.indexOf('aria-label="رجوع إلى المكتبة"');
+    const tabsIndex = navMatch.indexOf('id="settings-nav"');
+    const brandIndex = navMatch.indexOf('className="glass brand"');
+    expect(exitIndex).toBeGreaterThan(-1);
+    expect(tabsIndex).toBeGreaterThan(exitIndex);
+    expect(brandIndex).toBeGreaterThan(tabsIndex);
+
+    const ref = source('test/fixtures/settings-reference-static.html');
+    const refNavMatch = ref.match(/<nav class="topbar"[\s\S]*?<\/nav>/)?.[0] || '';
+    const refExitIndex = refNavMatch.indexOf('aria-label="رجوع إلى المكتبة"');
+    const refTabsIndex = refNavMatch.indexOf('id="nav"');
+    const refBrandIndex = refNavMatch.indexOf('class="glass brand"');
+    expect(refExitIndex).toBeGreaterThan(-1);
+    expect(refTabsIndex).toBeGreaterThan(refExitIndex);
+    expect(refBrandIndex).toBeGreaterThan(refTabsIndex);
+
+    expect(css).toMatch(/\.settings-page \.circle\{[^}]*justify-self:start/);
+    expect(css).toMatch(/\.settings-page \.brand\{[^}]*justify-self:end/);
   });
 });

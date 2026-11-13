@@ -36,12 +36,14 @@
 }
 
 .settings-page, .settings-page *{box-sizing:border-box;margin:0;padding:0}
-html.settings-page-active{background:var(--bg);scrollbar-width:none;-ms-overflow-style:none}
+html.settings-page-active{background:var(--bg);scrollbar-width:none;-ms-overflow-style:none;overscroll-behavior:none;overscroll-behavior-y:none}
 html.settings-page-active::-webkit-scrollbar,body.settings-page-active::-webkit-scrollbar{display:none;width:0;height:0}
 body.settings-page-active{
   font-family:var(--font);background:var(--bg);color:var(--text);
   min-height:100vh;-webkit-font-smoothing:antialiased;
+  overflow-x:clip;overscroll-behavior:none;overscroll-behavior-y:none;
 }
+.settings-page{overscroll-behavior:none;overscroll-behavior-y:none}
 .settings-page button,.settings-page select,.settings-page input{font:inherit;color:inherit}
 .settings-page button{cursor:pointer;background:none;border:0}
 .settings-page :focus-visible{outline:2px solid rgba(245,245,247,.55);outline-offset:3px}
@@ -91,8 +93,6 @@ body.settings-page-active{
   .settings-page{--rim:.5;--glass-fill:#1d1f22;--glass-hover:#26282b}
   .settings-page .glass{-webkit-backdrop-filter:none;backdrop-filter:none}
 }
-.settings-page[data-reduce-transparency]{--rim:.5;--glass-fill:#1d1f22;--glass-hover:#26282b}
-.settings-page[data-reduce-transparency] .glass{-webkit-backdrop-filter:none;backdrop-filter:none}
 
 /* ==========================================================================
    الهيكل
@@ -109,19 +109,19 @@ body.settings-page-active{
   content:"";position:absolute;inset:0 -42px -22px;z-index:-1;pointer-events:none;
   background:linear-gradient(to bottom,var(--bg) 0,var(--bg) 58%,rgba(10,11,13,0));
 }
-.settings-page .brand{--R:27px;justify-self:start;display:flex;align-items:center;gap:12px;height:54px;padding:0 8px 0 20px}
+.settings-page .circle{
+  --R:26px;justify-self:start;width:52px;height:52px;display:grid;place-items:center;
+  color:var(--text);transition:background .15s,transform .12s;
+}
+.settings-page .circle:hover{background:var(--glass-hover)}
+.settings-page .circle:active{transform:scale(.97)}
+
+.settings-page .brand{--R:27px;justify-self:end;display:flex;align-items:center;gap:12px;height:54px;padding:0 8px 0 20px}
 .settings-page .brand-mark{
   width:38px;height:38px;border-radius:50%;background:var(--text);color:#0a0b0d;
   display:grid;place-items:center;font-size:20px;font-weight:800;line-height:1;
 }
 .settings-page .brand-name{font-size:18px;font-weight:700;letter-spacing:.2px}
-
-.settings-page .circle{
-  --R:26px;justify-self:end;width:52px;height:52px;display:grid;place-items:center;
-  color:var(--text);transition:background .15s,transform .12s;
-}
-.settings-page .circle:hover{background:var(--glass-hover)}
-.settings-page .circle:active{transform:scale(.97)}
 
 /* التبويب المقسّم (نفس نظام «المكتبة | المفضلة») */
 .settings-page .seg{
@@ -155,7 +155,7 @@ body.settings-page-active{
 .settings-page .page-head .sub svg{color:var(--text-2)}
 
 /* اللوحات (التبويبات) */
-.settings-page .panes{padding-block:26px 64px}
+.settings-page .panes{max-width:none;margin:0;padding-inline:0;padding-block:26px 64px}
 .settings-page .pane{display:none}
 .settings-page .pane.is-active{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start;animation:paneIn .32s cubic-bezier(.3,.9,.3,1)}
 @keyframes paneIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}

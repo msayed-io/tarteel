@@ -557,7 +557,6 @@ export function installSpecularRim(root = document) {
   const unregisterElement = element => {
     if (!elements.delete(element)) return;
     observer.unobserve(element);
-    intensityObserver.unobserve(element);
     animated.delete(element);
     renderCache.delete(element);
   };

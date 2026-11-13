@@ -89,10 +89,9 @@ export default function PrayerSettingsPage({
 
       <div className="wrap">
         <nav className="topbar" aria-label="الإعدادات">
-          <div className="glass brand" style={{ '--R': '27px' }}>
-            <span className="brand-mark" aria-hidden="true">ت</span>
-            <span className="brand-name">ترتيل</span>
-          </div>
+          <button className="glass circle" type="button" aria-label="رجوع إلى المكتبة" onClick={onClose} style={{ '--R': '26px' }}>
+            <Icon name="back" size={22} />
+          </button>
 
           <div className="glass seg nav" id="settings-nav" role="tablist" aria-label="أقسام الإعدادات" style={{ '--n': 3, '--i': paneIndex, '--R': '27px' }}>
             <span className="rim on-glass seg-thumb" aria-hidden="true" />
@@ -113,9 +112,10 @@ export default function PrayerSettingsPage({
             ))}
           </div>
 
-          <button className="glass circle" type="button" aria-label="رجوع إلى المكتبة" onClick={onClose} style={{ '--R': '26px' }}>
-            <Icon name="back" size={22} />
-          </button>
+          <div className="glass brand" style={{ '--R': '27px' }}>
+            <span className="brand-mark" aria-hidden="true">ت</span>
+            <span className="brand-name">ترتيل</span>
+          </div>
         </nav>
 
         <header className="page-head">
@@ -179,7 +179,7 @@ export default function PrayerSettingsPage({
                   <div className="applied">
                     <div className="applied-label"><Icon name="check" size={15} />المطبّق الآن</div>
                     <div className="chips">
-                      <span className="chip">{effectiveMethod}{methodAngles && <bdi>&nbsp;({methodAngles})</bdi>}</span>
+                      <span className="chip">{effectiveMethod}{methodAngles && <bdi>{` (${methodAngles})`}</bdi>}</span>
                       <span className="chip">{effectiveSchool}</span>
                     </div>
                   </div>
@@ -213,7 +213,7 @@ export default function PrayerSettingsPage({
                     <div className="row-vol-top">
                       <span className="ico"><Icon name="vol-low" /></span>
                       <label className="row-label" id="ps-volume-label" htmlFor="ps-volume">مستوى صوت الأذان</label>
-                      <span className="glass pill" dir="ltr" style={{ '--R': '15px' }}>{adhanVolume}%</span>
+                      <span className="glass pill" dir="ltr" style={{ '--R': '15px' }}>{`${adhanVolume}%`}</span>
                     </div>
                     <div className="slider-line">
                       <Icon name="vol-low" size={17} />
