@@ -179,7 +179,7 @@ export default function PrayerSettingsPage({
                   <div className="applied">
                     <div className="applied-label"><Icon name="check" size={15} />المطبّق الآن</div>
                     <div className="chips">
-                      <span className="chip">{effectiveMethod}{methodAngles && <bdi>&nbsp;({methodAngles})</bdi>}</span>
+                      <span className="chip">{effectiveMethod}{methodAngles && <bdi>{` (${methodAngles})`}</bdi>}</span>
                       <span className="chip">{effectiveSchool}</span>
                     </div>
                   </div>
@@ -213,7 +213,7 @@ export default function PrayerSettingsPage({
                     <div className="row-vol-top">
                       <span className="ico"><Icon name="vol-low" /></span>
                       <label className="row-label" id="ps-volume-label" htmlFor="ps-volume">مستوى صوت الأذان</label>
-                      <span className="glass pill" dir="ltr" style={{ '--R': '15px' }}>{adhanVolume}%</span>
+                      <span className="glass pill" dir="ltr" style={{ '--R': '15px' }}>{`${adhanVolume}%`}</span>
                     </div>
                     <div className="slider-line">
                       <Icon name="vol-low" size={17} />
